@@ -270,19 +270,34 @@ export default function App() {
     db.ref('spy_rooms').on('value', snap => {
       const all = snap.val() || {};
       const validRooms: Record<string, RoomData> = {};
+      const now = Date.now();
+
       Object.keys(all).forEach(code => {
         const r = all[code];
         if (!r) return;
         const players = r.players || {};
         const pList = Object.values(players) as PlayerData[];
         const humanList = pList.filter(p => !p.isBot && !p.uid.startsWith('bot_'));
-        const hostPlayer = r.hostUid ? players[r.hostUid] : null;
-        const isBotHost = !r.hostUid || r.hostUid.startsWith('bot_') || hostPlayer?.isBot === true;
+        const hostUid = r.hostUid || '';
+        const hostPlayer = hostUid ? players[hostUid] : null;
+        const isBotHost = hostUid.startsWith('bot_') || hostPlayer?.isBot === true;
 
-        if (isBotHost || humanList.length === 0) {
-          // Permanently purge any room where bot is host or no human players remain
+        const createdAt = typeof r.createdAt === 'number' ? r.createdAt : now;
+        const ageMs = now - createdAt;
+
+        // If a bot is the host, purge it permanently
+        if (isBotHost) {
           db.ref(`spy_rooms/${code}`).remove().catch(() => {});
-        } else {
+          return;
+        }
+
+        // If no humans exist in the room and it's older than 25 seconds, clean it up
+        if (humanList.length === 0 && ageMs > 25000) {
+          db.ref(`spy_rooms/${code}`).remove().catch(() => {});
+          return;
+        }
+
+        if (humanList.length > 0 || ageMs <= 25000) {
           validRooms[code] = r;
         }
       });
@@ -1128,6 +1143,15 @@ export default function App() {
       let code = '';
       for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
 
+      const initialHostPlayer: PlayerData = {
+        uid: currentUser.uid,
+        name: profileName || currentUser.displayName || 'Agent',
+        avatar: profileAvatar || currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
+        joinedAt: Date.now(),
+        isSpectator: false,
+        isBot: false
+      };
+
       await db.ref(`spy_rooms/${code}`).set({
         status: 'waiting',
         originalHostUid: currentUser.uid,
@@ -1138,7 +1162,10 @@ export default function App() {
         turnSeconds: config.turnSeconds,
         visibility: config.visibility,
         gameMode: config.gameMode,
-        createdAt: firebase.database.ServerValue.TIMESTAMP
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        players: {
+          [currentUser.uid]: initialHostPlayer
+        }
       });
 
       joinRoom(code);
