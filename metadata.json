@@ -1,0 +1,6 @@
+{
+  "name": "Spy Station - لعبة برا السالفة في الفضاء",
+  "description": "لعبة الجاسوس التكتيكية متعددة اللاعبين في الفضاء مع غرف عامة وخاصة ونظام الأصدقاء والتصويت ورسم التلميحات وتطبيق قابل للتثبيت (PWA)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

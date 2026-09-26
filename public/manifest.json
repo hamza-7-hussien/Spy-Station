@@ -1,0 +1,43 @@
+{
+  "name": "Spy Station - Deep Space Tactics",
+  "short_name": "Spy Station",
+  "description": "A social deduction party game - find the spy hiding among your crew before time runs out.",
+  "id": ".",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#030712",
+  "theme_color": "#38bdf8",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "pwa-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "pwa-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "pwa-maskable-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "shortcuts": [
+    {
+      "name": "Create a Station",
+      "short_name": "Create",
+      "description": "Jump straight to creating a new game room",
+      "url": "./?action=create",
+      "icons": [
+        { "src": "pwa-192x192.png", "sizes": "192x192" }
+      ]
+    },
+    {
+      "name": "Friends",
+      "short_name": "Friends",
+      "description": "Open your friends, requests and invites",
+      "url": "./?action=friends",
+      "icons": [
+        { "src": "pwa-192x192.png", "sizes": "192x192" }
+      ]
+    }
+  ]
+}
