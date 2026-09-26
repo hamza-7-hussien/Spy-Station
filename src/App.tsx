@@ -266,9 +266,27 @@ export default function App() {
       setRoomInvites(snap.val() || {});
     });
 
-    // Public rooms
+    // Public rooms & Bot Host Auto-Purge
     db.ref('spy_rooms').on('value', snap => {
-      setPublicRooms(snap.val() || {});
+      const all = snap.val() || {};
+      const validRooms: Record<string, RoomData> = {};
+      Object.keys(all).forEach(code => {
+        const r = all[code];
+        if (!r) return;
+        const players = r.players || {};
+        const pList = Object.values(players) as PlayerData[];
+        const humanList = pList.filter(p => !p.isBot && !p.uid.startsWith('bot_'));
+        const hostPlayer = r.hostUid ? players[r.hostUid] : null;
+        const isBotHost = !r.hostUid || r.hostUid.startsWith('bot_') || hostPlayer?.isBot === true;
+
+        if (isBotHost || humanList.length === 0) {
+          // Permanently purge any room where bot is host or no human players remain
+          db.ref(`spy_rooms/${code}`).remove().catch(() => {});
+        } else {
+          validRooms[code] = r;
+        }
+      });
+      setPublicRooms(validRooms);
     });
 
     // Check saved room code
@@ -481,6 +499,14 @@ export default function App() {
             const reaction = botReactions[Math.floor(Math.random() * botReactions.length)];
             await db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).set({
               text: reaction,
+              timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+            await db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
+              uid: currentSpeakerUid,
+              sender: speaker?.name || 'Bot Agent',
+              avatar: speaker?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentSpeakerUid}`,
+              text: reaction,
+              round: latest?.round || 1,
               timestamp: firebase.database.ServerValue.TIMESTAMP
             });
             setTimeout(() => {
@@ -1410,8 +1436,12 @@ export default function App() {
             }}
             onSendGameClue={word => {
               db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
+                uid: currentUser.uid,
                 sender: currentUser.displayName || 'Agent',
-                text: word
+                avatar: currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
+                text: word,
+                round: roomData.round || 1,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
               });
               advanceTurn();
             }}

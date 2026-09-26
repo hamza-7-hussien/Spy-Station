@@ -71,7 +71,7 @@ export interface RoomData {
   finalPlayers?: Record<string, PlayerData>;
   players?: Record<string, PlayerData>;
   lobbyChat?: Record<string, { sender: string; text: string }>;
-  gameChat?: Record<string, { sender: string; text: string }>;
+  gameChat?: Record<string, { uid?: string; sender: string; avatar?: string; text: string; round?: number; timestamp?: number }>;
   spyChat?: Record<string, { sender: string; text: string }>;
   speechBubbles?: Record<string, { text: string; timestamp: number }>;
   currentDrawing?: Array<Array<{ x: number; y: number }>> | null;

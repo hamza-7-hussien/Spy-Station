@@ -7,6 +7,7 @@ import firebase from 'firebase/compat/app';
 import { WordVisualCard } from '../components/WordVisualCard';
 import { CATEGORY_STYLES } from '../wordVisuals';
 import { SabotageActionModal } from '../components/SabotageActionModal';
+import { CluesHistoryModal } from '../components/CluesHistoryModal';
 import {
   Clock,
   Mic,
@@ -27,8 +28,7 @@ import {
   HelpCircle,
   RotateCw,
   Flame,
-  ChevronDown,
-  ChevronUp
+  MessageSquare
 } from 'lucide-react';
 
 interface Props {
@@ -62,6 +62,7 @@ export const GameScreen: React.FC<Props> = ({
   const [spyInput, setSpyInput] = useState('');
   const [isCardFlipped, setIsCardFlipped] = useState(false);
   const [isMuted, setIsMuted] = useState(sound.isMuted());
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [activeSabotageModal, setActiveSabotageModal] = useState<SabotageAbility | null>(null);
   const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -100,6 +101,10 @@ export const GameScreen: React.FC<Props> = ({
 
   // Spectator count
   const spectatorCount = Object.values(playersObj).filter(p => p.isSpectator).length;
+
+  // Clues list & Latest Clue
+  const cluesList = Object.values(room.gameChat || {});
+  const latestClue = cluesList.length > 0 ? cluesList[cluesList.length - 1] : null;
 
   // Listen to live Speech Bubbles in RTDB
   useEffect(() => {
@@ -358,7 +363,7 @@ export const GameScreen: React.FC<Props> = ({
     }, 9000);
   };
 
-  // Quick reactions list (comic & expressive, exactly like famous Arabic party games)
+  // Quick reactions list (comic & expressive)
   const QUICK_REACTIONS = [
     'والله بريء! 😇',
     'شاكك فيك جداً! 🧐',
@@ -375,7 +380,7 @@ export const GameScreen: React.FC<Props> = ({
     uid => playersObj[uid] && !playersObj[uid].isSpectator
   );
 
-  // Group players around the Oval table into Top Arc (North), Side Flanks (West & East), and Bottom Arc (South)
+  // Group players around the Oval table: Top row & Bottom row
   const totalCount = activeUids.length;
   const topCount = Math.max(1, Math.ceil(totalCount / 2));
   const topUids = activeUids.slice(0, topCount);
@@ -391,18 +396,36 @@ export const GameScreen: React.FC<Props> = ({
   return (
     <div className="w-full max-w-4xl mx-auto space-y-3 pb-20 pt-1 text-start select-none relative z-10">
       {/* Top Station HUD Header */}
-      <div className="flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-900/90 border border-sky-500/30 backdrop-blur-xl shadow-lg text-xs font-bold">
-        <div className="flex items-center gap-2 text-sky-400">
-          <Radar className="w-4 h-4 animate-spin text-sky-400" style={{ animationDuration: '6s' }} />
-          <span className="font-heading uppercase tracking-widest text-[11px] sm:text-xs text-white">
-            {lang === 'ar' ? 'طاولة الاجتماع الفضائية' : 'Space Council Table'}
+      <div className="flex items-center justify-between px-3 sm:px-4 py-2 rounded-2xl bg-slate-900/90 border border-sky-500/30 backdrop-blur-xl shadow-lg text-xs font-bold gap-2">
+        <div className="flex items-center gap-2 text-sky-400 min-w-0">
+          <Radar className="w-4 h-4 animate-spin text-sky-400 shrink-0" style={{ animationDuration: '6s' }} />
+          <span className="font-heading uppercase tracking-widest text-[11px] sm:text-xs text-white truncate">
+            {lang === 'ar' ? 'طاولة الاجتماع الفضائية 🛸' : 'Space Council Table 🛸'}
           </span>
-          <span className="px-2 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/40 text-sky-300 font-mono text-[10px]">
+          <span className="px-2 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/40 text-sky-300 font-mono text-[10px] shrink-0">
             {t.lblRound} {currentRound}
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Dedicated Chat History Button */}
+          <button
+            onClick={() => {
+              sound.playClick();
+              setIsHistoryOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500/20 to-indigo-500/20 hover:from-sky-500/30 hover:to-indigo-500/30 border border-sky-400/40 text-sky-300 text-xs font-black transition cursor-pointer shadow-md active:scale-95"
+            title={t.btnChatHistory}
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
+            <span className="hidden sm:inline">{t.btnChatHistory}</span>
+            {cluesList.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-sky-400 text-slate-950 text-[10px] font-mono font-black">
+                {cluesList.length}
+              </span>
+            )}
+          </button>
+
           {/* Sound Toggle */}
           <button
             onClick={() => {
@@ -457,16 +480,16 @@ export const GameScreen: React.FC<Props> = ({
       )}
 
       {/* ============================================================== */}
-      {/* 🛸 THE GRAND SPACE COUNCIL OVAL MEETING TABLE (Authentic Design) */}
+      {/* 🛸 THE GRAND 3D SPACE COUNCIL OVAL MEETING TABLE */}
       {/* ============================================================== */}
-      <div className="relative w-full rounded-[40px] sm:rounded-[50px] bg-gradient-to-b from-slate-950 via-[#060c1d] to-[#02050e] border-2 border-sky-500/30 p-4 sm:p-8 shadow-[0_0_60px_rgba(14,165,233,0.18)] overflow-hidden">
-        {/* Deep space starlight nebula backdrop */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-900/15 via-transparent to-transparent pointer-events-none" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] h-[75%] rounded-[100px] border border-sky-400/10 pointer-events-none" />
+      <div className="relative w-full rounded-[45px] sm:rounded-[60px] bg-gradient-to-b from-[#030919] via-[#050e24] to-[#02050e] border-2 border-sky-500/40 p-4 sm:p-7 shadow-[0_0_60px_rgba(14,165,233,0.22)]">
+        {/* Ambient starfield glow */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-900/20 via-transparent to-transparent pointer-events-none rounded-[45px] sm:rounded-[60px]" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[92%] h-[78%] rounded-[110px] border border-sky-400/15 pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col items-center justify-between min-h-[460px] sm:min-h-[500px]">
+        <div className="relative z-10 flex flex-col items-center justify-between min-h-[470px] sm:min-h-[510px]">
           {/* ================= TOP ARC ASTRONAUT SEATS ================= */}
-          <div className="w-full flex items-center justify-around gap-2 pb-2">
+          <div className="w-full flex items-center justify-around gap-2 pb-2 pt-1">
             {topUids.map(uid => {
               const p = playersObj[uid];
               const isTurn = uid === currentTurnUid;
@@ -476,13 +499,13 @@ export const GameScreen: React.FC<Props> = ({
                 <div key={uid} className="relative flex flex-col items-center group">
                   {/* Dramatic Overhead Spotlight Beam When It's Player's Turn */}
                   {isTurn && (
-                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-28 h-40 bg-gradient-to-b from-sky-400/40 via-sky-400/10 to-transparent pointer-events-none blur-sm animate-pulse z-0" />
+                    <div className="absolute -top-14 left-1/2 -translate-x-1/2 w-28 h-44 bg-gradient-to-b from-sky-400/45 via-sky-400/10 to-transparent pointer-events-none blur-sm animate-pulse z-0" />
                   )}
 
                   {/* Floating Speech Bubble Above Astronaut */}
                   {bubble && (
-                    <div className="absolute -top-14 z-30 animate-in zoom-in-75 duration-200">
-                      <div className="relative px-3 py-1.5 rounded-2xl bg-white text-slate-950 text-xs font-black shadow-[0_4px_25px_rgba(255,255,255,0.6)] border-2 border-sky-400 text-center max-w-[150px] break-words">
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 z-50 animate-in zoom-in-75 duration-200 pointer-events-none">
+                      <div className="relative px-3.5 py-1.5 rounded-2xl bg-white text-slate-950 text-xs font-black shadow-[0_4px_25px_rgba(255,255,255,0.7)] border-2 border-sky-400 text-center min-w-[80px] max-w-[160px] break-words">
                         {bubble.text}
                         <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rotate-45 border-r-2 border-b-2 border-sky-400" />
                       </div>
@@ -493,8 +516,8 @@ export const GameScreen: React.FC<Props> = ({
                   <div
                     className={`relative p-2 rounded-3xl border-2 transition-all flex flex-col items-center z-10 ${
                       isTurn
-                        ? 'bg-sky-500/25 border-sky-300 shadow-[0_0_30px_rgba(56,189,248,0.7)] scale-110'
-                        : 'bg-slate-900/80 border-slate-800'
+                        ? 'bg-sky-500/30 border-sky-300 shadow-[0_0_35px_rgba(56,189,248,0.75)] scale-110'
+                        : 'bg-slate-900/85 border-slate-800'
                     }`}
                   >
                     {/* Pulsing thruster light on back of seat */}
@@ -538,12 +561,14 @@ export const GameScreen: React.FC<Props> = ({
           </div>
 
           {/* ================= THE OVAL 3D CENTER TABLE ================= */}
-          <div className="relative w-full max-w-xl my-auto py-5 px-4 sm:px-8 rounded-[60px] sm:rounded-[80px] bg-gradient-to-b from-[#0e1d3a] via-[#091326] to-[#040813] border-4 border-sky-400/50 shadow-[0_0_50px_rgba(56,189,248,0.25),inset_0_0_40px_rgba(56,189,248,0.15)] flex flex-col items-center justify-center text-center space-y-3.5">
+          <div
+            className="relative w-full max-w-xl my-auto py-5 px-4 sm:px-8 rounded-[60px] sm:rounded-[80px] bg-gradient-to-b from-[#0c1935] via-[#081226] to-[#030713] border-4 border-sky-400/60 shadow-[0_15px_40px_rgba(0,0,0,0.8),0_0_50px_rgba(56,189,248,0.3),inset_0_0_40px_rgba(56,189,248,0.2)] flex flex-col items-center justify-center text-center space-y-3.5"
+          >
             {/* Table Surface Holographic Radar Lines */}
-            <div className="absolute inset-0 rounded-[60px] sm:rounded-[80px] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-500/10 via-transparent to-transparent pointer-events-none" />
+            <div className="absolute inset-0 rounded-[60px] sm:rounded-[80px] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-500/12 via-transparent to-transparent pointer-events-none" />
 
             {/* Current Turn & Speaker Announcement */}
-            <div className="flex items-center gap-3 px-4 py-1.5 rounded-full bg-slate-950/80 border border-sky-400/40 shadow-inner">
+            <div className="flex items-center gap-3 px-4 py-1.5 rounded-full bg-slate-950/85 border border-sky-400/40 shadow-inner">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-ping" />
                 <span className="text-xs font-bold text-slate-300">
@@ -579,7 +604,7 @@ export const GameScreen: React.FC<Props> = ({
                     <Shield className="w-3.5 h-3.5 text-sky-400" />
                     <span>{lang === 'ar' ? 'بطاقة الهوية السرية' : 'Secret Clearance Card'}</span>
                   </span>
-                  <span className="text-sky-400 flex items-center gap-1">
+                  <span className="text-sky-400 flex items-center gap-1 font-bold">
                     <RotateCw className="w-3 h-3" />
                     <span>{isCardFlipped ? (lang === 'ar' ? 'إخفاء' : 'Hide') : (lang === 'ar' ? 'كشف' : 'Flip')}</span>
                   </span>
@@ -678,7 +703,7 @@ export const GameScreen: React.FC<Props> = ({
             {!amSpectator && (
               <button
                 onClick={onTriggerEmergencyVote}
-                className="py-2 px-5 rounded-full bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:brightness-110 active:scale-95 text-white font-heading font-black text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(225,29,72,0.5)] transition cursor-pointer"
+                className="py-2.5 px-5 rounded-full bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:brightness-110 active:scale-95 text-white font-heading font-black text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(225,29,72,0.6)] transition cursor-pointer"
               >
                 <AlertTriangle className="w-4 h-4 text-white animate-pulse" />
                 <span>{lang === 'ar' ? '🚨 كشف الجاسوس / تصويت طارئ' : '🚨 Emergency Accusation Vote'}</span>
@@ -697,13 +722,13 @@ export const GameScreen: React.FC<Props> = ({
                 <div key={uid} className="relative flex flex-col items-center group">
                   {/* Spotlight Beam */}
                   {isTurn && (
-                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-28 h-40 bg-gradient-to-b from-sky-400/40 via-sky-400/10 to-transparent pointer-events-none blur-sm animate-pulse z-0" />
+                    <div className="absolute -top-14 left-1/2 -translate-x-1/2 w-28 h-44 bg-gradient-to-b from-sky-400/45 via-sky-400/10 to-transparent pointer-events-none blur-sm animate-pulse z-0" />
                   )}
 
                   {/* Speech Bubble */}
                   {bubble && (
-                    <div className="absolute -top-14 z-30 animate-in zoom-in-75 duration-200">
-                      <div className="relative px-3 py-1.5 rounded-2xl bg-white text-slate-950 text-xs font-black shadow-[0_4px_25px_rgba(255,255,255,0.6)] border-2 border-sky-400 text-center max-w-[150px] break-words">
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 z-50 animate-in zoom-in-75 duration-200 pointer-events-none">
+                      <div className="relative px-3.5 py-1.5 rounded-2xl bg-white text-slate-950 text-xs font-black shadow-[0_4px_25px_rgba(255,255,255,0.7)] border-2 border-sky-400 text-center min-w-[80px] max-w-[160px] break-words">
                         {bubble.text}
                         <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rotate-45 border-r-2 border-b-2 border-sky-400" />
                       </div>
@@ -714,8 +739,8 @@ export const GameScreen: React.FC<Props> = ({
                   <div
                     className={`relative p-2 rounded-3xl border-2 transition-all flex flex-col items-center z-10 ${
                       isTurn
-                        ? 'bg-sky-500/25 border-sky-300 shadow-[0_0_30px_rgba(56,189,248,0.7)] scale-110'
-                        : 'bg-slate-900/80 border-slate-800'
+                        ? 'bg-sky-500/30 border-sky-300 shadow-[0_0_35px_rgba(56,189,248,0.75)] scale-110'
+                        : 'bg-slate-900/85 border-slate-800'
                     }`}
                   >
                     <div
@@ -758,6 +783,31 @@ export const GameScreen: React.FC<Props> = ({
       </div>
 
       {/* ============================================================== */}
+      {/* 🎙️ LIVE LATEST CLUE TICKER (Visible to Everyone, Never Hidden) */}
+      {/* ============================================================== */}
+      {latestClue && (
+        <div className="flex items-center justify-between px-3.5 py-2 rounded-2xl bg-gradient-to-r from-sky-950/90 via-slate-900 to-indigo-950/90 border border-sky-400/50 shadow-md text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping shrink-0" />
+            <span className="font-bold text-sky-400 shrink-0">{t.lblLatestClue}</span>
+            <span className="font-bold text-white truncate">{latestClue.sender}:</span>
+            <span className="font-black text-sky-200 bg-sky-500/20 px-2.5 py-0.5 rounded-lg border border-sky-400/30 truncate">
+              "{latestClue.text}"
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              sound.playClick();
+              setIsHistoryOpen(true);
+            }}
+            className="text-[11px] text-sky-400 hover:text-white font-bold underline shrink-0 ms-2 cursor-pointer"
+          >
+            {t.btnChatHistory} ({cluesList.length})
+          </button>
+        </div>
+      )}
+
+      {/* ============================================================== */}
       {/* 💬 BOTTOM INTERACTIVE DOCK (Reactions, Clues & Sabotage) */}
       {/* ============================================================== */}
       <div className="space-y-2 p-3 sm:p-4 rounded-3xl bg-slate-900/95 border border-sky-500/30 backdrop-blur-xl shadow-xl">
@@ -765,7 +815,7 @@ export const GameScreen: React.FC<Props> = ({
         <div className="flex items-center justify-between text-xs font-bold text-slate-400">
           <span>{lang === 'ar' ? 'ردود سريعة وفقاعات تفاعلية 💬:' : 'Interactive Reaction Bubbles 💬:'}</span>
           <span className="text-[10px] text-sky-400">
-            {lang === 'ar' ? 'تطفو فوراً فوق رأسك' : 'Pops above your avatar'}
+            {lang === 'ar' ? 'تطفو فوراً فوق رأسك وتُسجل بالتاريخ' : 'Pops above avatar & logged in history'}
           </span>
         </div>
 
@@ -930,6 +980,15 @@ export const GameScreen: React.FC<Props> = ({
           onExecuteScramble={handleExecuteScramble}
         />
       )}
+
+      {/* Chat & Clues History Modal */}
+      <CluesHistoryModal
+        lang={lang}
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        gameChat={room.gameChat}
+        currentUserUid={currentUserUid}
+      />
     </div>
   );
 };
