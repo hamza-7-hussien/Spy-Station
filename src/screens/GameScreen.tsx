@@ -24,8 +24,8 @@ import {
   Sparkles,
   Zap,
   VolumeX as MuteIcon,
-  Crosshair,
-  Radio,
+  HelpCircle,
+  RotateCw,
   Flame,
   ChevronDown,
   ChevronUp
@@ -60,7 +60,7 @@ export const GameScreen: React.FC<Props> = ({
 }) => {
   const [clueInput, setClueInput] = useState('');
   const [spyInput, setSpyInput] = useState('');
-  const [isWordRevealed, setIsWordRevealed] = useState(true);
+  const [isCardFlipped, setIsCardFlipped] = useState(false);
   const [isMuted, setIsMuted] = useState(sound.isMuted());
   const [activeSabotageModal, setActiveSabotageModal] = useState<SabotageAbility | null>(null);
   const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
@@ -98,12 +98,6 @@ export const GameScreen: React.FC<Props> = ({
   const firstSpyUid = (room.spies || [])[0];
   const spyNameForUndercover = firstSpyUid ? playersObj[firstSpyUid]?.name || 'Unknown' : 'Unknown';
 
-  // Fellow spies in Mole mode
-  const fellowSpies = (room.spies || [])
-    .filter(uid => uid !== currentUserUid)
-    .map(uid => playersObj[uid]?.name)
-    .filter(Boolean);
-
   // Spectator count
   const spectatorCount = Object.values(playersObj).filter(p => p.isSpectator).length;
 
@@ -120,7 +114,7 @@ export const GameScreen: React.FC<Props> = ({
     };
   }, [roomCode]);
 
-  // Audio timer heartbeat pulse (gentle, only fast in last 5 seconds)
+  // Audio timer heartbeat pulse
   useEffect(() => {
     if (timeLeft !== lastPulseSecondRef.current) {
       lastPulseSecondRef.current = timeLeft;
@@ -217,7 +211,6 @@ export const GameScreen: React.FC<Props> = ({
         text,
         timestamp: firebase.database.ServerValue.TIMESTAMP
       });
-      // Auto-clear after 7 seconds
       setTimeout(() => {
         db.ref(`spy_rooms/${roomCode}/speechBubbles/${currentUserUid}`).remove().catch(() => {});
       }, 7000);
@@ -259,7 +252,6 @@ export const GameScreen: React.FC<Props> = ({
   const handleEmojiClue = (emoji: string) => {
     sendSpeechBubble(emoji);
     onSendGameClue(emoji);
-    // Remove silence after fulfilling turn
     if (myPlayer.isSilenced) {
       db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}/isSilenced`).set(false);
     }
@@ -279,13 +271,11 @@ export const GameScreen: React.FC<Props> = ({
     const ability = activeSabotageModal;
     setActiveSabotageModal(null);
 
-    // Mark ability used
     await db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}`).update({
       sabotageUsed: true
     });
 
     if (ability === 'thermal_scan') {
-      // Find index in turnOrder to check immediate neighbors
       const order = room.turnOrder || [];
       const idx = order.indexOf(targetUid);
       if (idx !== -1) {
@@ -327,7 +317,6 @@ export const GameScreen: React.FC<Props> = ({
       const targetName = playersObj[targetUid]?.name || 'Agent';
       if (isTargetSpy) {
         sound.playSpyChord();
-        // Spies revealed! Crew victory
         await db.ref(`spy_rooms/${roomCode}`).update({
           status: 'gameover',
           winnerTeam: 'crew',
@@ -369,37 +358,52 @@ export const GameScreen: React.FC<Props> = ({
     }, 9000);
   };
 
-  // Quick reactions list matching the user's uploaded reference image
+  // Quick reactions list (comic & expressive, exactly like famous Arabic party games)
   const QUICK_REACTIONS = [
-    t.quickReaction1,
-    t.quickReaction2,
-    t.quickReaction3,
-    t.quickReaction4,
-    t.quickReaction5,
-    t.quickReaction6
+    'والله بريء! 😇',
+    'شاكك فيك جداً! 🧐',
+    'منين جبت الكلام ده؟ 🤔',
+    'أنا مش الجاسوس! ✋',
+    'ركزوا في التلميحات! 🔍',
+    'مين الجاسوس؟! 🚨',
+    'واثق من كلامي! 😎',
+    'كلامك مريب! 🤨'
   ];
 
-  // Active players sorted according to turnOrder
+  // Active players list
   const activeUids = (turnOrder.length > 0 ? turnOrder : Object.keys(playersObj)).filter(
     uid => playersObj[uid] && !playersObj[uid].isSpectator
   );
 
+  // Group players around the Oval table into Top Arc (North), Side Flanks (West & East), and Bottom Arc (South)
+  const totalCount = activeUids.length;
+  const topCount = Math.max(1, Math.ceil(totalCount / 2));
+  const topUids = activeUids.slice(0, topCount);
+  const bottomUids = activeUids.slice(topCount);
+
+  // Flip card handler
+  const handleFlipCard = () => {
+    sound.playClick();
+    sound.triggerHaptic('medium');
+    setIsCardFlipped(prev => !prev);
+  };
+
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-4 pb-20 pt-1 text-start select-none relative z-10">
-      {/* Top Station Flight HUD Bar */}
-      <div className="flex items-center justify-between px-4 py-2.5 rounded-2xl bg-slate-900/90 border border-sky-500/30 backdrop-blur-xl shadow-lg text-xs font-bold">
+    <div className="w-full max-w-4xl mx-auto space-y-3 pb-20 pt-1 text-start select-none relative z-10">
+      {/* Top Station HUD Header */}
+      <div className="flex items-center justify-between px-4 py-2 rounded-2xl bg-slate-900/90 border border-sky-500/30 backdrop-blur-xl shadow-lg text-xs font-bold">
         <div className="flex items-center gap-2 text-sky-400">
-          <Radar className="w-4 h-4 animate-spin" style={{ animationDuration: '6s' }} />
-          <span className="font-heading uppercase tracking-widest text-[11px] sm:text-xs">
-            {lang === 'ar' ? 'طاولة الاجتماع الفضائية' : 'Space Council Hub'}
+          <Radar className="w-4 h-4 animate-spin text-sky-400" style={{ animationDuration: '6s' }} />
+          <span className="font-heading uppercase tracking-widest text-[11px] sm:text-xs text-white">
+            {lang === 'ar' ? 'طاولة الاجتماع الفضائية' : 'Space Council Table'}
           </span>
-          <span className="px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/30 text-sky-300 text-[10px]">
+          <span className="px-2 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/40 text-sky-300 font-mono text-[10px]">
             {t.lblRound} {currentRound}
           </span>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Sound Mute Toggle */}
+          {/* Sound Toggle */}
           <button
             onClick={() => {
               const muted = sound.toggleMute();
@@ -436,91 +440,82 @@ export const GameScreen: React.FC<Props> = ({
 
       {/* Undercover & Chameleon Alerts */}
       {isUndercover && (
-        <div className="p-3 rounded-2xl bg-cyan-950/60 border border-cyan-400/50 shadow-[0_0_20px_rgba(6,182,212,0.3)] text-xs text-cyan-200 flex items-center gap-2.5">
-          <Radar className="w-5 h-5 text-cyan-400 shrink-0 animate-pulse" />
+        <div className="p-2.5 rounded-2xl bg-cyan-950/60 border border-cyan-400/50 shadow-[0_0_20px_rgba(6,182,212,0.3)] text-xs text-cyan-200 flex items-center gap-2">
+          <Radar className="w-4 h-4 text-cyan-400 shrink-0 animate-pulse" />
           <div>
-            <div className="font-black text-cyan-300 font-heading">
-              {lang === 'ar' ? 'أنت العميل السري (الملاك الحارس) 🕶️' : 'You are the Undercover Agent 🕶️'}
-            </div>
-            <div className="text-[11px] text-cyan-200/90">
-              {t.undercoverAlert.replace('{spyName}', spyNameForUndercover)}
-            </div>
+            <span className="font-bold text-cyan-300">{lang === 'ar' ? 'العميل السري: ' : 'Undercover: '}</span>
+            <span>{t.undercoverAlert.replace('{spyName}', spyNameForUndercover)}</span>
           </div>
         </div>
       )}
 
       {isChameleonSpy && (
-        <div className="p-2.5 rounded-2xl bg-emerald-950/50 border border-emerald-400/50 text-[11px] text-emerald-200 flex items-center gap-2 shadow-md">
+        <div className="p-2 rounded-2xl bg-emerald-950/50 border border-emerald-400/50 text-[11px] text-emerald-200 flex items-center gap-2 shadow-md">
           <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{t.chameleonDecoyHint}</span>
         </div>
       )}
 
-      {/* MAIN SPACE COUNCIL MEETING TABLE (Matching uploaded visual directly) */}
-      <div className="relative w-full rounded-3xl bg-gradient-to-b from-slate-950 via-[#070e20] to-slate-950 border border-sky-500/40 p-3 sm:p-6 shadow-[0_0_50px_rgba(14,165,233,0.15)] overflow-hidden">
-        {/* Animated Cosmic Background Grid & Nebulas */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-sky-900/20 via-transparent to-transparent pointer-events-none" />
-        <div className="absolute -top-24 -left-24 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+      {/* ============================================================== */}
+      {/* 🛸 THE GRAND SPACE COUNCIL OVAL MEETING TABLE (Authentic Design) */}
+      {/* ============================================================== */}
+      <div className="relative w-full rounded-[40px] sm:rounded-[50px] bg-gradient-to-b from-slate-950 via-[#060c1d] to-[#02050e] border-2 border-sky-500/30 p-4 sm:p-8 shadow-[0_0_60px_rgba(14,165,233,0.18)] overflow-hidden">
+        {/* Deep space starlight nebula backdrop */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-900/15 via-transparent to-transparent pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] h-[75%] rounded-[100px] border border-sky-400/10 pointer-events-none" />
 
-        {/* Circular Table Stage */}
-        <div className="relative z-10 space-y-6">
-          {/* Top Half Astronaut Seats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 justify-items-center">
-            {activeUids.slice(0, Math.ceil(activeUids.length / 2)).map(uid => {
+        <div className="relative z-10 flex flex-col items-center justify-between min-h-[460px] sm:min-h-[500px]">
+          {/* ================= TOP ARC ASTRONAUT SEATS ================= */}
+          <div className="w-full flex items-center justify-around gap-2 pb-2">
+            {topUids.map(uid => {
               const p = playersObj[uid];
               const isTurn = uid === currentTurnUid;
               const bubble = speechBubbles[uid];
               const isSilenced = !!p?.isSilenced;
               return (
-                <div key={uid} className="relative flex flex-col items-center group w-full max-w-[170px]">
-                  {/* Speech Bubble Floating Over Astronaut Seat */}
+                <div key={uid} className="relative flex flex-col items-center group">
+                  {/* Dramatic Overhead Spotlight Beam When It's Player's Turn */}
+                  {isTurn && (
+                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-28 h-40 bg-gradient-to-b from-sky-400/40 via-sky-400/10 to-transparent pointer-events-none blur-sm animate-pulse z-0" />
+                  )}
+
+                  {/* Floating Speech Bubble Above Astronaut */}
                   {bubble && (
-                    <div className="absolute -top-12 z-30 animate-in zoom-in-75 slide-in-from-bottom-2 duration-200 max-w-[160px]">
-                      <div className="relative px-3 py-1.5 rounded-2xl bg-white text-slate-950 text-[11px] sm:text-xs font-black shadow-[0_4px_20px_rgba(255,255,255,0.4)] border border-sky-400 text-center break-words">
+                    <div className="absolute -top-14 z-30 animate-in zoom-in-75 duration-200">
+                      <div className="relative px-3 py-1.5 rounded-2xl bg-white text-slate-950 text-xs font-black shadow-[0_4px_25px_rgba(255,255,255,0.6)] border-2 border-sky-400 text-center max-w-[150px] break-words">
                         {bubble.text}
-                        {/* Speech Pointer Tail */}
-                        <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45 border-r border-b border-sky-400" />
+                        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rotate-45 border-r-2 border-b-2 border-sky-400" />
                       </div>
                     </div>
                   )}
 
-                  {/* Astronaut Space Pod / Hover Seat */}
+                  {/* Astronaut Seat Pod */}
                   <div
-                    className={`relative w-full p-2.5 rounded-2xl border transition-all flex flex-col items-center text-center ${
+                    className={`relative p-2 rounded-3xl border-2 transition-all flex flex-col items-center z-10 ${
                       isTurn
-                        ? 'bg-sky-500/25 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.5)] scale-105'
-                        : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                        ? 'bg-sky-500/25 border-sky-300 shadow-[0_0_30px_rgba(56,189,248,0.7)] scale-110'
+                        : 'bg-slate-900/80 border-slate-800'
                     }`}
                   >
-                    {/* Glowing Thrusters at the Back of the Seat */}
-                    <div className="absolute -top-1.5 flex gap-3">
-                      <div
-                        className={`w-2 h-2 rounded-full blur-[2px] transition ${
-                          isTurn ? 'bg-amber-400 animate-ping' : 'bg-cyan-500/50'
-                        }`}
-                      />
-                      <div
-                        className={`w-2 h-2 rounded-full blur-[2px] transition ${
-                          isTurn ? 'bg-amber-400 animate-ping' : 'bg-cyan-500/50'
-                        }`}
-                      />
-                    </div>
+                    {/* Pulsing thruster light on back of seat */}
+                    <div
+                      className={`absolute -top-1 w-3 h-1.5 rounded-full blur-[2px] transition ${
+                        isTurn ? 'bg-amber-400 animate-ping' : 'bg-cyan-500/40'
+                      }`}
+                    />
 
-                    {/* Astronaut Avatar & Visor */}
-                    <div className="relative my-1">
+                    {/* Avatar Portrait */}
+                    <div className="relative my-0.5">
                       <img
                         src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
                         alt={p?.name}
                         className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 transition-all ${
-                          isTurn
-                            ? 'border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.8)] ring-2 ring-sky-300'
-                            : 'border-slate-700'
+                          isTurn ? 'border-sky-300 ring-4 ring-sky-400/50' : 'border-slate-700'
                         }`}
                       />
                       {isTurn && (
-                        <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-sky-500 text-slate-950 shadow-md animate-bounce">
-                          <Mic className="w-3 h-3" />
+                        <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-sky-400 text-slate-950 shadow-md animate-bounce">
+                          <Mic className="w-3.5 h-3.5" />
                         </div>
                       )}
                       {isSilenced && (
@@ -530,9 +525,9 @@ export const GameScreen: React.FC<Props> = ({
                       )}
                     </div>
 
-                    {/* Holographic Cockpit Screen in Front of Player */}
-                    <div className="w-full px-1.5 py-0.5 mt-1 rounded-lg bg-sky-950/60 border border-sky-500/30 flex items-center justify-center gap-1 shadow-inner">
-                      <span className="text-[11px] font-black text-sky-200 truncate max-w-[100px]">
+                    {/* Player Name Pill */}
+                    <div className="px-2 py-0.5 mt-1 rounded-full bg-slate-950/90 border border-sky-500/30 flex items-center justify-center gap-1 max-w-[95px] truncate">
+                      <span className="text-[10px] sm:text-xs font-black text-sky-200 truncate">
                         {p?.name || 'Agent'}
                       </span>
                     </div>
@@ -542,78 +537,68 @@ export const GameScreen: React.FC<Props> = ({
             })}
           </div>
 
-          {/* CENTER TABLE HUB & HOLOGRAPHIC CONSOLE */}
-          <div className="relative mx-auto max-w-lg p-5 sm:p-6 rounded-3xl bg-slate-900/90 border-2 border-sky-400/50 shadow-[0_0_40px_rgba(56,189,248,0.25)] text-center space-y-4 backdrop-blur-2xl">
-            {/* Table Name Badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-400/30 text-[11px] font-bold text-sky-300 tracking-wider uppercase">
-              <Sparkles className="w-3.5 h-3.5 text-sky-400 animate-spin" style={{ animationDuration: '8s' }} />
-              <span>{lang === 'ar' ? 'محطة الجواسيس - غرفة العمليات' : 'Spy Station Operations Hub'}</span>
-            </div>
+          {/* ================= THE OVAL 3D CENTER TABLE ================= */}
+          <div className="relative w-full max-w-xl my-auto py-5 px-4 sm:px-8 rounded-[60px] sm:rounded-[80px] bg-gradient-to-b from-[#0e1d3a] via-[#091326] to-[#040813] border-4 border-sky-400/50 shadow-[0_0_50px_rgba(56,189,248,0.25),inset_0_0_40px_rgba(56,189,248,0.15)] flex flex-col items-center justify-center text-center space-y-3.5">
+            {/* Table Surface Holographic Radar Lines */}
+            <div className="absolute inset-0 rounded-[60px] sm:rounded-[80px] bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-sky-500/10 via-transparent to-transparent pointer-events-none" />
 
-            {/* Current Turn Banner */}
-            <div className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-950/70 border border-slate-800">
+            {/* Current Turn & Speaker Announcement */}
+            <div className="flex items-center gap-3 px-4 py-1.5 rounded-full bg-slate-950/80 border border-sky-400/40 shadow-inner">
               <div className="flex items-center gap-2">
-                <div className={`p-1.5 rounded-full ${isMyTurn ? 'bg-sky-500 text-slate-950 animate-pulse' : 'bg-slate-800 text-slate-400'}`}>
-                  <Mic className="w-4 h-4" />
-                </div>
-                <div className="text-start">
-                  <div className="text-[10px] uppercase tracking-wider text-slate-400">
-                    {lang === 'ar' ? 'دور اللاعب:' : 'Current Speaker:'}
-                  </div>
-                  <div className="text-xs sm:text-sm font-black text-white">
-                    {isMyTurn ? t.lblYourTurn : currentSpeaker}
-                  </div>
-                </div>
+                <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-ping" />
+                <span className="text-xs font-bold text-slate-300">
+                  {lang === 'ar' ? 'الدور الآن عند:' : 'Speaking Turn:'}
+                </span>
+                <span className="text-xs font-black text-sky-300 font-heading">
+                  {isMyTurn ? (lang === 'ar' ? 'أنت! (دورك الآن)' : 'YOU! (Your Turn)') : currentSpeaker}
+                </span>
               </div>
 
-              {/* Digital Countdown Timer */}
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-900 border border-sky-500/30 font-mono text-sm sm:text-base font-black text-sky-400 shadow-inner">
-                <Clock className={`w-4 h-4 ${timeLeft <= 5 ? 'text-rose-400 animate-ping' : 'text-sky-400'}`} />
+              {/* Countdown Radar Timer */}
+              <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-xl bg-slate-900 border border-sky-500/40 text-sky-400 font-mono text-xs sm:text-sm font-black shadow-inner">
+                <Clock className={`w-3.5 h-3.5 ${timeLeft <= 5 ? 'text-rose-400 animate-ping' : 'text-sky-400'}`} />
                 <span>00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</span>
               </div>
             </div>
 
-            {/* Secret Word & Card Reveal Console */}
-            <div className="relative">
+            {/* ================= THE BIG FLIP CLEARANCE CARD ================= */}
+            <div className="relative w-full max-w-sm">
               <div
-                className={`p-4 rounded-2xl border transition-all ${
-                  amSpectator
-                    ? 'bg-slate-950/70 border-slate-700 text-slate-400'
-                    : isSpy && !isChameleonSpy
-                    ? 'bg-rose-950/40 border-rose-500/50 shadow-[0_0_25px_rgba(244,63,94,0.35)]'
-                    : 'bg-sky-950/40 border-sky-400/50 shadow-[0_0_25px_rgba(56,189,248,0.35)]'
+                onClick={handleFlipCard}
+                className={`relative w-full p-4 rounded-3xl border-2 transition-all duration-300 cursor-pointer select-none ${
+                  isCardFlipped
+                    ? isSpy && !isChameleonSpy
+                      ? 'bg-rose-950/70 border-rose-500 shadow-[0_0_35px_rgba(244,63,94,0.45)]'
+                      : 'bg-gradient-to-r from-sky-950/80 via-slate-900 to-indigo-950/80 border-sky-400 shadow-[0_0_35px_rgba(56,189,248,0.45)]'
+                    : 'bg-slate-950/90 border-slate-700 hover:border-sky-400/70 shadow-lg'
                 }`}
               >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] uppercase font-bold tracking-widest text-slate-400">
-                    {amSpectator ? t.lblSpectatorTag : isSpy && !isChameleonSpy ? t.youAreSpy : t.theWordIs}
+                {/* Confidential Stamp / Secret Badge */}
+                <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                  <span className="flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-sky-400" />
+                    <span>{lang === 'ar' ? 'بطاقة الهوية السرية' : 'Secret Clearance Card'}</span>
                   </span>
-                  <button
-                    onClick={() => {
-                      sound.playClick();
-                      setIsWordRevealed(r => !r);
-                    }}
-                    className="p-1 rounded-lg text-slate-400 hover:text-white transition"
-                    title={isWordRevealed ? 'Hide' : 'Reveal'}
-                  >
-                    {isWordRevealed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  </button>
+                  <span className="text-sky-400 flex items-center gap-1">
+                    <RotateCw className="w-3 h-3" />
+                    <span>{isCardFlipped ? (lang === 'ar' ? 'إخفاء' : 'Hide') : (lang === 'ar' ? 'كشف' : 'Flip')}</span>
+                  </span>
                 </div>
 
-                {isWordRevealed ? (
+                {isCardFlipped ? (
                   amSpectator ? (
                     <div className="py-2 text-xs font-bold text-slate-400">{t.lblSpectatorTag}</div>
                   ) : isSpy && !isChameleonSpy ? (
-                    <div className="space-y-1 py-1">
-                      <div className="text-xl sm:text-2xl font-black text-rose-400 font-heading">
+                    <div className="space-y-1.5 py-1 text-center animate-in zoom-in-90 duration-200">
+                      <div className="text-2xl font-black text-rose-400 font-heading tracking-wide">
                         {t.youAreSpy} 🕵️
                       </div>
-                      <p className="text-xs text-rose-300/80">
+                      <p className="text-xs font-bold text-rose-300/90">
                         {lang === 'ar' ? 'اسمع التلميحات وخمن الكلمة دون أن تُكشف!' : 'Blend in and guess the word!'}
                       </p>
                     </div>
                   ) : (
-                    <div className="flex items-center justify-center gap-3 py-1">
+                    <div className="flex items-center justify-center gap-3 py-1 animate-in zoom-in-90 duration-200">
                       <WordVisualCard
                         wordEn={room.word}
                         wordAr={room.wordAr}
@@ -632,24 +617,25 @@ export const GameScreen: React.FC<Props> = ({
                             </span>
                           </div>
                         )}
-                        <div className="text-xl sm:text-2xl font-black text-white drop-shadow-[0_0_15px_rgba(56,189,248,0.5)] font-heading">
+                        <div className="text-2xl sm:text-3xl font-black text-white drop-shadow-[0_0_20px_rgba(56,189,248,0.7)] font-heading">
                           {displayWord}
                         </div>
                       </div>
                     </div>
                   )
                 ) : (
-                  <div className="py-2 text-xs font-bold text-slate-500 italic">
-                    {lang === 'ar' ? 'تم حجب البطاقة (اضغط للإظهار)' : 'Word hidden (tap to reveal)'}
+                  <div className="py-2.5 flex items-center justify-center gap-2 text-xs sm:text-sm font-black text-sky-300">
+                    <HelpCircle className="w-5 h-5 text-sky-400 animate-pulse" />
+                    <span>{lang === 'ar' ? 'اضغط هنا لكشف الكلمة السرية 👆' : 'Tap here to reveal secret word 👆'}</span>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Silent Mode Canvas */}
+            {/* Silent Drawing Canvas (If in silent mode) */}
             {room.gameMode === 'silent' && (
-              <div className="space-y-2 pt-2 border-t border-slate-800">
-                <div className="text-xs font-bold text-slate-400 flex items-center gap-1.5 justify-center">
+              <div className="w-full space-y-2 pt-1">
+                <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5 justify-center">
                   <Brush className="w-3.5 h-3.5 text-sky-400" />
                   <span>{t.lblSilentDrawHint}</span>
                 </div>
@@ -657,7 +643,7 @@ export const GameScreen: React.FC<Props> = ({
                 <canvas
                   ref={canvasRef}
                   width={320}
-                  height={160}
+                  height={150}
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
                   onPointerUp={handlePointerUp}
@@ -688,107 +674,67 @@ export const GameScreen: React.FC<Props> = ({
               </div>
             )}
 
-            {/* Tactical Sabotage Trigger Buttons */}
-            {room.gameMode === 'sabotage' && !amSpectator && (
-              <div className="p-3 rounded-2xl bg-purple-950/30 border border-purple-500/40 flex items-center justify-between">
-                <div className="text-start space-y-0.5">
-                  <div className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">
-                    {t.lblYourSabotageAbility}
-                  </div>
-                  <div className="text-xs font-black text-white">
-                    {myPlayer.sabotageAbility === 'thermal_scan'
-                      ? t.sabotageThermalScan
-                      : myPlayer.sabotageAbility === 'silence_hack'
-                      ? t.sabotageSilenceHack
-                      : myPlayer.sabotageAbility === 'silver_bullet'
-                      ? t.sabotageSilverBullet
-                      : t.sabotageSignalScramble}
-                    {myPlayer.sabotageUsed ? ` (${t.lblSabotageUsed})` : ''}
-                  </div>
-                </div>
-
-                <button
-                  disabled={!!myPlayer.sabotageUsed}
-                  onClick={() => {
-                    const ab = myPlayer.sabotageAbility || 'thermal_scan';
-                    setActiveSabotageModal(ab);
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shadow-md ${
-                    myPlayer.sabotageUsed
-                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                      : 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white hover:brightness-110 active:scale-95'
-                  }`}
-                >
-                  {t.btnUseSabotage}
-                </button>
-              </div>
-            )}
-
-            {/* Emergency Vote Button on Center Table (Visible on turn) */}
-            {!amSpectator && isMyTurn && (
+            {/* Emergency Vote Button right in the Center Table */}
+            {!amSpectator && (
               <button
                 onClick={onTriggerEmergencyVote}
-                className="w-full py-2.5 rounded-2xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/50 text-rose-300 text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer shadow-lg animate-pulse"
+                className="py-2 px-5 rounded-full bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:brightness-110 active:scale-95 text-white font-heading font-black text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(225,29,72,0.5)] transition cursor-pointer"
               >
-                <AlertTriangle className="w-4 h-4 text-rose-400" />
-                <span>{t.btnEmergencyVote}</span>
+                <AlertTriangle className="w-4 h-4 text-white animate-pulse" />
+                <span>{lang === 'ar' ? '🚨 كشف الجاسوس / تصويت طارئ' : '🚨 Emergency Accusation Vote'}</span>
               </button>
             )}
           </div>
 
-          {/* Bottom Half Astronaut Seats */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 justify-items-center">
-            {activeUids.slice(Math.ceil(activeUids.length / 2)).map(uid => {
+          {/* ================= BOTTOM ARC ASTRONAUT SEATS ================= */}
+          <div className="w-full flex items-center justify-around gap-2 pt-2">
+            {bottomUids.map(uid => {
               const p = playersObj[uid];
               const isTurn = uid === currentTurnUid;
               const bubble = speechBubbles[uid];
               const isSilenced = !!p?.isSilenced;
               return (
-                <div key={uid} className="relative flex flex-col items-center group w-full max-w-[170px]">
+                <div key={uid} className="relative flex flex-col items-center group">
+                  {/* Spotlight Beam */}
+                  {isTurn && (
+                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-28 h-40 bg-gradient-to-b from-sky-400/40 via-sky-400/10 to-transparent pointer-events-none blur-sm animate-pulse z-0" />
+                  )}
+
                   {/* Speech Bubble */}
                   {bubble && (
-                    <div className="absolute -top-12 z-30 animate-in zoom-in-75 slide-in-from-bottom-2 duration-200 max-w-[160px]">
-                      <div className="relative px-3 py-1.5 rounded-2xl bg-white text-slate-950 text-[11px] sm:text-xs font-black shadow-[0_4px_20px_rgba(255,255,255,0.4)] border border-sky-400 text-center break-words">
+                    <div className="absolute -top-14 z-30 animate-in zoom-in-75 duration-200">
+                      <div className="relative px-3 py-1.5 rounded-2xl bg-white text-slate-950 text-xs font-black shadow-[0_4px_25px_rgba(255,255,255,0.6)] border-2 border-sky-400 text-center max-w-[150px] break-words">
                         {bubble.text}
-                        <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45 border-r border-b border-sky-400" />
+                        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 bg-white rotate-45 border-r-2 border-b-2 border-sky-400" />
                       </div>
                     </div>
                   )}
 
-                  {/* Astronaut Space Pod / Hover Seat */}
+                  {/* Astronaut Seat */}
                   <div
-                    className={`relative w-full p-2.5 rounded-2xl border transition-all flex flex-col items-center text-center ${
+                    className={`relative p-2 rounded-3xl border-2 transition-all flex flex-col items-center z-10 ${
                       isTurn
-                        ? 'bg-sky-500/25 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.5)] scale-105'
-                        : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
+                        ? 'bg-sky-500/25 border-sky-300 shadow-[0_0_30px_rgba(56,189,248,0.7)] scale-110'
+                        : 'bg-slate-900/80 border-slate-800'
                     }`}
                   >
-                    <div className="absolute -top-1.5 flex gap-3">
-                      <div
-                        className={`w-2 h-2 rounded-full blur-[2px] transition ${
-                          isTurn ? 'bg-amber-400 animate-ping' : 'bg-cyan-500/50'
-                        }`}
-                      />
-                      <div
-                        className={`w-2 h-2 rounded-full blur-[2px] transition ${
-                          isTurn ? 'bg-amber-400 animate-ping' : 'bg-cyan-500/50'
-                        }`}
-                      />
-                    </div>
+                    <div
+                      className={`absolute -top-1 w-3 h-1.5 rounded-full blur-[2px] transition ${
+                        isTurn ? 'bg-amber-400 animate-ping' : 'bg-cyan-500/40'
+                      }`}
+                    />
 
-                    <div className="relative my-1">
+                    <div className="relative my-0.5">
                       <img
                         src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
                         alt={p?.name}
                         className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover border-2 transition-all ${
-                          isTurn
-                            ? 'border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.8)] ring-2 ring-sky-300'
-                            : 'border-slate-700'
+                          isTurn ? 'border-sky-300 ring-4 ring-sky-400/50' : 'border-slate-700'
                         }`}
                       />
                       {isTurn && (
-                        <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-sky-500 text-slate-950 shadow-md animate-bounce">
-                          <Mic className="w-3 h-3" />
+                        <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-sky-400 text-slate-950 shadow-md animate-bounce">
+                          <Mic className="w-3.5 h-3.5" />
                         </div>
                       )}
                       {isSilenced && (
@@ -798,8 +744,8 @@ export const GameScreen: React.FC<Props> = ({
                       )}
                     </div>
 
-                    <div className="w-full px-1.5 py-0.5 mt-1 rounded-lg bg-sky-950/60 border border-sky-500/30 flex items-center justify-center gap-1 shadow-inner">
-                      <span className="text-[11px] font-black text-sky-200 truncate max-w-[100px]">
+                    <div className="px-2 py-0.5 mt-1 rounded-full bg-slate-950/90 border border-sky-500/30 flex items-center justify-center gap-1 max-w-[95px] truncate">
+                      <span className="text-[10px] sm:text-xs font-black text-sky-200 truncate">
                         {p?.name || 'Agent'}
                       </span>
                     </div>
@@ -811,22 +757,25 @@ export const GameScreen: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* QUICK SPEECH REACTION CHIPS (Directly inspired by speech bubbles in the photo) */}
-      <div className="space-y-2 p-3 sm:p-4 rounded-3xl bg-slate-900/90 border border-sky-500/30 backdrop-blur-xl shadow-xl">
-        <div className="flex items-center justify-between text-[11px] font-bold text-slate-400">
-          <span>{lang === 'ar' ? 'فقاعات تفاعلية سريعة 💬:' : 'Quick Reaction Bubbles 💬:'}</span>
+      {/* ============================================================== */}
+      {/* 💬 BOTTOM INTERACTIVE DOCK (Reactions, Clues & Sabotage) */}
+      {/* ============================================================== */}
+      <div className="space-y-2 p-3 sm:p-4 rounded-3xl bg-slate-900/95 border border-sky-500/30 backdrop-blur-xl shadow-xl">
+        {/* Quick Comic Reaction Chips */}
+        <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+          <span>{lang === 'ar' ? 'ردود سريعة وفقاعات تفاعلية 💬:' : 'Interactive Reaction Bubbles 💬:'}</span>
           <span className="text-[10px] text-sky-400">
-            {lang === 'ar' ? 'تظهر مباشرة فوق مقعدك الفضائي' : 'Pops up above your space pod'}
+            {lang === 'ar' ? 'تطفو فوراً فوق رأسك' : 'Pops above your avatar'}
           </span>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-none">
           {QUICK_REACTIONS.map((reaction, i) => (
             <button
               key={i}
               type="button"
               onClick={() => sendSpeechBubble(reaction)}
-              className="px-3 py-1.5 rounded-full bg-slate-950/80 hover:bg-sky-500/20 border border-slate-700 hover:border-sky-400 text-slate-200 hover:text-white text-xs font-bold transition active:scale-95 cursor-pointer shadow-sm"
+              className="px-3 py-1.5 rounded-full bg-slate-950 border border-slate-700 hover:border-sky-400 hover:bg-sky-500/20 text-slate-200 hover:text-white text-xs font-black whitespace-nowrap transition active:scale-95 cursor-pointer shadow-sm"
             >
               {reaction}
             </button>
@@ -835,7 +784,7 @@ export const GameScreen: React.FC<Props> = ({
 
         {/* Clue Input Form */}
         {room.gameMode !== 'silent' && (
-          <form onSubmit={handleClueSubmit} className="flex gap-2 pt-2 border-t border-slate-800">
+          <form onSubmit={handleClueSubmit} className="flex gap-2 pt-1 border-t border-slate-800">
             <input
               type="text"
               disabled={!isMyTurn || !!myPlayer.isSilenced}
@@ -852,7 +801,7 @@ export const GameScreen: React.FC<Props> = ({
               }
               className={`flex-1 py-2 px-3.5 rounded-xl border text-xs outline-none transition ${
                 isMyTurn && !myPlayer.isSilenced
-                  ? 'bg-slate-950/90 border-sky-400/50 text-white focus:border-sky-400'
+                  ? 'bg-slate-950/90 border-sky-400 text-white focus:ring-1 focus:ring-sky-400'
                   : 'bg-slate-950/40 border-slate-800 text-slate-500 cursor-not-allowed'
               }`}
             />
@@ -861,7 +810,7 @@ export const GameScreen: React.FC<Props> = ({
               disabled={!isMyTurn || !!myPlayer.isSilenced}
               className={`px-4 py-2 rounded-xl text-xs font-black transition flex items-center justify-center cursor-pointer ${
                 isMyTurn && !myPlayer.isSilenced
-                  ? 'bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 shadow-md'
+                  ? 'bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 shadow-md hover:brightness-110 active:scale-95'
                   : 'bg-slate-800 text-slate-500 cursor-not-allowed'
               }`}
             >
@@ -886,6 +835,42 @@ export const GameScreen: React.FC<Props> = ({
                 {emoji}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* Tactical Sabotage Trigger (if Sabotage mode) */}
+        {room.gameMode === 'sabotage' && !amSpectator && (
+          <div className="p-2.5 rounded-2xl bg-purple-950/40 border border-purple-500/40 flex items-center justify-between">
+            <div className="text-start space-y-0.5">
+              <div className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">
+                {t.lblYourSabotageAbility}
+              </div>
+              <div className="text-xs font-black text-white">
+                {myPlayer.sabotageAbility === 'thermal_scan'
+                  ? t.sabotageThermalScan
+                  : myPlayer.sabotageAbility === 'silence_hack'
+                  ? t.sabotageSilenceHack
+                  : myPlayer.sabotageAbility === 'silver_bullet'
+                  ? t.sabotageSilverBullet
+                  : t.sabotageSignalScramble}
+                {myPlayer.sabotageUsed ? ` (${t.lblSabotageUsed})` : ''}
+              </div>
+            </div>
+
+            <button
+              disabled={!!myPlayer.sabotageUsed}
+              onClick={() => {
+                const ab = myPlayer.sabotageAbility || 'thermal_scan';
+                setActiveSabotageModal(ab);
+              }}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shadow-md ${
+                myPlayer.sabotageUsed
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white hover:brightness-110 active:scale-95'
+              }`}
+            >
+              {t.btnUseSabotage}
+            </button>
           </div>
         )}
       </div>

@@ -439,6 +439,20 @@ export default function App() {
 
   // Bot Automation Effect (Handled by Host)
   useEffect(() => {
+    // Auto-heal: If host is a bot or missing, auto-reassign to first human
+    if (currentRoomCode && roomData) {
+      const players = roomData.players || {};
+      const hostUid = roomData.hostUid;
+      const hostPlayer = hostUid ? players[hostUid] : null;
+      const isHostBot = !hostPlayer || hostPlayer.isBot || hostUid?.startsWith('bot_');
+      if (isHostBot) {
+        const firstHuman = Object.values(players).find(p => !p.isBot && !p.uid.startsWith('bot_'));
+        if (firstHuman) {
+          db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(firstHuman.uid);
+        }
+      }
+    }
+
     if (!isHost || !currentRoomCode || !roomData) return;
 
     // 1. Bot Turns during Gameplay
@@ -1008,28 +1022,34 @@ export default function App() {
       try {
         const wasHost = !!(currentRoomSnapshot && currentRoomSnapshot.hostUid === uid);
         const playersObj = currentRoomSnapshot?.players || {};
-        const remaining = Object.values(playersObj)
-          .filter((p: unknown) => (p as PlayerData).uid !== uid && !(p as PlayerData).isSpectator)
+        const remainingHumans = Object.values(playersObj)
+          .filter((p: unknown) => {
+            const pl = p as PlayerData;
+            return pl.uid !== uid && !pl.isSpectator && !pl.isBot && !pl.uid.startsWith('bot_');
+          })
           .sort((a: unknown, b: unknown) => ((a as PlayerData).joinedAt || 0) - ((b as PlayerData).joinedAt || 0));
 
-        if (remaining.length === 0) {
-          // If only 1 person was in the room (or no active players left), remove the entire room!
+        if (remainingHumans.length === 0) {
+          // If NO real human players left in the room (e.g. only bots or empty), delete room completely!
           await db.ref(`spy_rooms/${code}`).remove();
         } else {
           // Remove departing player's record
           await db.ref(`spy_rooms/${code}/players/${uid}`).remove();
 
-          // Migrate host if departing player was host
-          if (wasHost && remaining[0]) {
-            await db.ref(`spy_rooms/${code}/hostUid`).set((remaining[0] as PlayerData).uid);
+          // Migrate host if departing player was host, ONLY to a real human player!
+          if (wasHost && remainingHumans[0]) {
+            await db.ref(`spy_rooms/${code}/hostUid`).set((remainingHumans[0] as PlayerData).uid);
           }
 
           // If game was active and remaining players drop below minimum 3
+          const remainingAll = Object.values(playersObj).filter(
+            (p: unknown) => (p as PlayerData).uid !== uid && !(p as PlayerData).isSpectator
+          );
           const isGameActive = currentRoomSnapshot?.status === 'playing' ||
                                currentRoomSnapshot?.status === 'voting' ||
                                currentRoomSnapshot?.status === 'resolving';
 
-          if (isGameActive && remaining.length < 3) {
+          if (isGameActive && remainingAll.length < 3) {
             await db.ref(`spy_rooms/${code}`).update({
               status: 'waiting',
               round: 1,
@@ -1473,7 +1493,14 @@ export default function App() {
             onAddBot={handleAddBot}
             onRemoveBots={handleRemoveBots}
             onLeaveRoom={leaveRoom}
-            onMakeHost={uid => db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(uid)}
+            onMakeHost={uid => {
+              const targetPlayer = roomData?.players?.[uid];
+              if (targetPlayer?.isBot || uid.startsWith('bot_')) {
+                showToast(lang === 'ar' ? 'لا يمكن تعيين رائد فضاء تجريبي (Bot) كمضيف للروم!' : 'Cannot assign a bot as host!', 'danger');
+                return;
+              }
+              db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(uid);
+            }}
             onKickPlayer={uid => db.ref(`spy_rooms/${currentRoomCode}/players/${uid}`).remove()}
             onSendFriendRequest={async targetUid => {
               await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set({

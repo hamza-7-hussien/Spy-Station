@@ -323,16 +323,18 @@ export const LobbyScreen: React.FC<Props> = ({
 
                   {isHost && p.uid !== currentUserUid && (
                     <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        onClick={() => onMakeHost(p.uid)}
-                        className="p-1 rounded-lg text-amber-400 hover:bg-amber-400/10 transition"
-                        title={lang === 'ar' ? 'ترقية لمضيف' : 'Promote to Host'}
-                      >
-                        <Crown className="w-3.5 h-3.5" />
-                      </button>
+                      {!p.isBot && !p.uid.startsWith('bot_') && (
+                        <button
+                          onClick={() => onMakeHost(p.uid)}
+                          className="p-1 rounded-lg text-amber-400 hover:bg-amber-400/10 transition cursor-pointer"
+                          title={lang === 'ar' ? 'ترقية لمضيف' : 'Promote to Host'}
+                        >
+                          <Crown className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button
                         onClick={() => onKickPlayer(p.uid)}
-                        className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/10 transition"
+                        className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
                         title={lang === 'ar' ? 'طرد من الروم' : 'Kick from Station'}
                       >
                         <LogOut className="w-3.5 h-3.5" />
