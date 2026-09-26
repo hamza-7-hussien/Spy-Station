@@ -16,7 +16,8 @@ import {
   FriendEntry,
   FriendRequest,
   RoomInvite,
-  JoinRequest
+  JoinRequest,
+  SabotageAbility
 } from './types';
 import { getCombinedWordList, wordsDB } from './words';
 import { getWordImage } from './wordVisuals';
@@ -35,7 +36,6 @@ import { BottomNav } from './components/BottomNav';
 import { TopNotification } from './components/TopNotification';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { InviteFriendsModal } from './components/InviteFriendsModal';
-import { SabotageSwapModal } from './components/SabotageSwapModal';
 import { RankModal } from './components/RankModal';
 import { UfoLoader } from './components/UfoLoader';
 import { HostJoinApprovalModal } from './components/HostJoinApprovalModal';
@@ -85,7 +85,6 @@ export default function App() {
   // Modals
   const [rankModalOpen, setRankModalOpen] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
-  const [sabotageSwapOpen, setSabotageSwapOpen] = useState(false);
 
   // Toast
   const [toast, setToast] = useState<{
@@ -521,24 +520,16 @@ export default function App() {
       const playersObj = { ...(room.players || {}) };
       const nextRound = (room.round || 1) + 1;
 
-      const rawEjectedPlayer = rawEjectedUid ? playersObj[rawEjectedUid] : null;
-      const hasImmunity =
-        rawEjectedPlayer && rawEjectedPlayer.immunityActiveRound === (room.round || 1);
-      const ejectedUid = hasImmunity ? null : rawEjectedUid;
+      // Reset disqualified votes and silences for the next round
+      Object.keys(playersObj).forEach(uid => {
+        playersObj[uid] = {
+          ...playersObj[uid],
+          disqualifiedVote: false,
+          isSilenced: false
+        };
+      });
 
-      if (hasImmunity) {
-        await db.ref(`spy_rooms/${currentRoomCode}`).update({
-          status: 'playing',
-          round: nextRound,
-          turnOrder: Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid),
-          turnIndex: 0,
-          turnTimeLeft: room.turnSeconds || 20,
-          votes: null,
-          currentDrawing: null
-        });
-        broadcastAnnouncement(t.annImmunitySaved.replace('{name}', rawEjectedPlayer?.name || '?'), 'success');
-        return;
-      }
+      const ejectedUid = rawEjectedUid;
 
       if (!ejectedUid) {
         await db.ref(`spy_rooms/${currentRoomCode}`).update({
@@ -546,9 +537,10 @@ export default function App() {
           round: nextRound,
           turnOrder: Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid),
           turnIndex: 0,
-          turnTimeLeft: room.turnSeconds || 20,
+          turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
           votes: null,
-          currentDrawing: null
+          currentDrawing: null,
+          players: playersObj
         });
         broadcastAnnouncement(t.annNobodyEjected, 'normal');
         return;
@@ -585,7 +577,7 @@ export default function App() {
           round: nextRound,
           turnOrder: Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid),
           turnIndex: 0,
-          turnTimeLeft: room.turnSeconds || 20,
+          turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
           votes: null,
           currentDrawing: null
         });
@@ -616,7 +608,7 @@ export default function App() {
         round: nextRound,
         turnOrder: remainingActiveUids,
         turnIndex: 0,
-        turnTimeLeft: room.turnSeconds || 20,
+        turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
         votes: null,
         currentDrawing: null
       });
@@ -1069,24 +1061,47 @@ export default function App() {
     }
 
     const resetPlayers: Record<string, PlayerData> = {};
-    const sabotageCards = ['revote', 'immunity', 'swap'] as const;
+    const tacticalAbilities: SabotageAbility[] = [
+      'thermal_scan',
+      'silence_hack',
+      'silver_bullet',
+      'signal_scramble'
+    ];
+
+    // Chameleon mode: pick a twin word
+    const otherPairs = wordList.filter(pair => pair[0] !== selectedPair[0]);
+    const chameleonPair =
+      otherPairs.length > 0 ? otherPairs[Math.floor(Math.random() * otherPairs.length)] : selectedPair;
+
+    // Undercover mode: pick an undercover protector who knows the spy
+    const nonSpies = playersArr.filter(p => !spies.includes(p.uid));
+    const undercoverUid =
+      roomData.gameMode === 'undercover' && nonSpies.length > 0
+        ? nonSpies[Math.floor(Math.random() * nonSpies.length)].uid
+        : null;
 
     playersArr.forEach(p => {
+      const isThisSpy = spies.includes(p.uid);
       resetPlayers[p.uid] = {
         ...p,
         isSpectator: false,
         postGame: null,
-        sabotageCard:
+        role: isThisSpy ? 'spy' : p.uid === undercoverUid ? 'undercover' : 'crew',
+        sabotageAbility:
           roomData.gameMode === 'sabotage'
-            ? sabotageCards[Math.floor(Math.random() * sabotageCards.length)]
+            ? tacticalAbilities[Math.floor(Math.random() * tacticalAbilities.length)]
             : null,
         sabotageUsed: false,
-        immunityActiveRound: null
+        isSilenced: false,
+        disqualifiedVote: false,
+        chameleonWord: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[0] : undefined,
+        chameleonWordAr: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[1] : undefined
       };
     });
 
     const shuffled = playersArr.map(p => p.uid).sort(() => Math.random() - 0.5);
     lastAnnouncedRoundRef.current = 0;
+    const initialTurnSeconds = roomData.gameMode === 'rapid' ? 7 : (roomData.turnSeconds || 20);
 
     await db.ref(`spy_rooms/${currentRoomCode}`).update({
       status: 'playing',
@@ -1095,56 +1110,23 @@ export default function App() {
       wordCategory: chosenCat,
       wordImage: wordImg,
       spies: spies,
+      undercoverUid: undercoverUid,
       round: 1,
       turnOrder: shuffled,
       turnIndex: 0,
-      turnTimeLeft: roomData.turnSeconds || 20,
+      turnTimeLeft: initialTurnSeconds,
+      turnSeconds: initialTurnSeconds,
       votes: null,
       winnerTeam: null,
       gameChat: null,
       spyChat: null,
+      speechBubbles: null,
+      scrambleActive: false,
       currentDrawing: null,
       players: resetPlayers
     });
 
     broadcastAnnouncement(t.annMissionStarted, 'normal');
-  };
-
-  // Sabotage card actions
-  const handleUseSabotageCard = async () => {
-    if (!currentRoomCode || !currentUser || !roomData) return;
-    const myPlayer = (roomData.players || {})[currentUser.uid];
-    if (!myPlayer || myPlayer.isSpectator || !myPlayer.sabotageCard || myPlayer.sabotageUsed) return;
-
-    if (myPlayer.sabotageCard === 'immunity') {
-      await db.ref(`spy_rooms/${currentRoomCode}/players/${currentUser.uid}`).update({
-        sabotageUsed: true,
-        immunityActiveRound: roomData.round || 1
-      });
-      showToast(t.msgImmunityActivated, 'success');
-    } else if (myPlayer.sabotageCard === 'revote') {
-      await db.ref(`spy_rooms/${currentRoomCode}/players/${currentUser.uid}/sabotageUsed`).set(true);
-      await db.ref(`spy_rooms/${currentRoomCode}`).update({
-        status: 'voting',
-        voteTimeLeft: 80,
-        votes: null
-      });
-      broadcastAnnouncement(t.annForcedRevote, 'danger');
-    }
-  };
-
-  const handleConfirmSabotageSwap = async (targetUid: string) => {
-    setSabotageSwapOpen(false);
-    if (!currentRoomCode || !currentUser || !roomData) return;
-    const order = [...(roomData.turnOrder || [])];
-    const myIdx = order.indexOf(currentUser.uid);
-    const targetIdx = order.indexOf(targetUid);
-    if (myIdx === -1 || targetIdx === -1) return;
-
-    [order[myIdx], order[targetIdx]] = [order[targetIdx], order[myIdx]];
-    await db.ref(`spy_rooms/${currentRoomCode}`).update({ turnOrder: order });
-    await db.ref(`spy_rooms/${currentRoomCode}/players/${currentUser.uid}/sabotageUsed`).set(true);
-    showToast(t.msgSwapDone, 'success');
   };
 
   // Loading state
@@ -1237,16 +1219,6 @@ export default function App() {
           onToast={showToast}
         />
 
-        <SabotageSwapModal
-          lang={lang}
-          currentUserUid={currentUser.uid}
-          turnOrder={roomData.turnOrder || []}
-          players={roomData.players || {}}
-          isOpen={sabotageSwapOpen}
-          onClose={() => setSabotageSwapOpen(false)}
-          onConfirmSwap={handleConfirmSabotageSwap}
-        />
-
         {announcedRound !== null && (
           <RoundAnnounceModal lang={lang} round={announcedRound} />
         )}
@@ -1267,8 +1239,6 @@ export default function App() {
               });
               broadcastAnnouncement(t.annEmergencyVote, 'danger');
             }}
-            onUseSabotageCard={handleUseSabotageCard}
-            onOpenSabotageSwap={() => setSabotageSwapOpen(true)}
             onSendGameClue={word => {
               db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
                 sender: currentUser.displayName || 'Agent',

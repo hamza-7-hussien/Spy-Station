@@ -1,8 +1,15 @@
 export type Language = 'ar' | 'en';
 
-export type GameMode = 'normal' | 'mole' | 'silent' | 'sabotage';
+export type GameMode =
+  | 'normal'
+  | 'chameleon'
+  | 'rapid'
+  | 'mole'
+  | 'undercover'
+  | 'silent'
+  | 'sabotage';
 
-export type CategoryKey = 
+export type CategoryKey =
   | 'players'
   | 'food'
   | 'places'
@@ -12,7 +19,11 @@ export type CategoryKey =
   | 'jobs'
   | 'singers';
 
-export type SabotageCardType = 'revote' | 'immunity' | 'swap';
+export type SabotageAbility =
+  | 'thermal_scan'
+  | 'silence_hack'
+  | 'silver_bullet'
+  | 'signal_scramble';
 
 export interface PlayerData {
   uid: string;
@@ -21,9 +32,14 @@ export interface PlayerData {
   joinedAt?: number;
   isSpectator?: boolean;
   postGame?: 'inLobby' | null;
-  sabotageCard?: SabotageCardType | null;
+  sabotageAbility?: SabotageAbility | null;
   sabotageUsed?: boolean;
-  immunityActiveRound?: number | null;
+  isSilenced?: boolean; // silenced by silence_hack in current turn
+  disqualifiedVote?: boolean; // silver bullet backfire
+  role?: 'spy' | 'undercover' | 'crew';
+  chameleonWord?: string; // in chameleon mode
+  chameleonWordAr?: string;
+  currentEmojiClue?: string | null;
 }
 
 export interface RoomData {
@@ -42,6 +58,7 @@ export interface RoomData {
   wordCategory?: CategoryKey;
   wordImage?: string | null;
   spies?: string[];
+  undercoverUid?: string | null; // Undercover agent who knows the spy
   round?: number;
   turnOrder?: string[];
   turnIndex?: number;
@@ -55,7 +72,9 @@ export interface RoomData {
   lobbyChat?: Record<string, { sender: string; text: string }>;
   gameChat?: Record<string, { sender: string; text: string }>;
   spyChat?: Record<string, { sender: string; text: string }>;
+  speechBubbles?: Record<string, { text: string; timestamp: number }>;
   currentDrawing?: Array<Array<{ x: number; y: number }>> | null;
+  scrambleActive?: boolean;
   joinRequests?: Record<string, JoinRequest>;
   announcement?: {
     msg: string;

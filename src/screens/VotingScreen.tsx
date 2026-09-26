@@ -21,7 +21,8 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
 
   const votes = room.votes || {};
   const hasVoted = !!votes[currentUserUid];
-  const canVote = !amSpectator && !hasVoted;
+  const isDisqualified = !!myPlayer?.disqualifiedVote;
+  const canVote = !amSpectator && !hasVoted && !isDisqualified;
 
   const spectatorCount = allPlayers.filter(p => p.isSpectator).length;
 
@@ -104,6 +105,15 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
             );
           })}
         </div>
+
+        {/* Disqualified notice if applicable */}
+        {isDisqualified && (
+          <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-300 font-bold">
+            {lang === 'ar'
+              ? '⚠️ تم سحب حق التصويت منك في هذه الجولة بسبب اتهام خاطئ بالرصاصة الفضية!'
+              : '⚠️ Your vote is disabled this round due to an incorrect Silver Bullet accusation!'}
+          </div>
+        )}
 
         {/* Skip Vote Button */}
         <div className="pt-2 flex flex-col items-center gap-2">

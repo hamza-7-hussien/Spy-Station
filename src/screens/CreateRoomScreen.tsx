@@ -17,7 +17,10 @@ import {
   Minus,
   Zap,
   Brush,
-  Radio
+  Radio,
+  Radar,
+  Flame,
+  Eye
 } from 'lucide-react';
 import { sound } from '../audio';
 
@@ -114,25 +117,61 @@ export const CreateRoomScreen: React.FC<Props> = ({
     {
       id: 'normal' as GameMode,
       title: lang === 'ar' ? 'الطور الكلاسيكي' : 'Classic Mode',
-      desc: lang === 'ar' ? 'تلميحات ذكية وتصويت لكشف الجاسوس' : 'Clever clues & emergency vote',
+      desc: lang === 'ar' ? 'تلميحات ذكية وتصويت طارئ لكشف الجاسوس' : 'Clever clues & emergency vote',
       icon: Radio,
       color: 'from-sky-500/20 to-indigo-500/20',
       border: 'border-sky-400',
       text: 'text-sky-300'
     },
     {
+      id: 'chameleon' as GameMode,
+      title: lang === 'ar' ? 'الحرباء المتخفية (كلمة توأم)' : 'Twin Chameleon',
+      desc:
+        lang === 'ar'
+          ? 'الجاسوس تصله كلمة مضللة قريبة جداً فيتكلم بثقة دون أن يدري!'
+          : 'Spy gets a twin decoy word and blends in unknowingly!',
+      icon: Eye,
+      color: 'from-emerald-500/20 to-teal-500/20',
+      border: 'border-emerald-400',
+      text: 'text-emerald-300'
+    },
+    {
+      id: 'rapid' as GameMode,
+      title: lang === 'ar' ? 'الاستجواب السريع' : 'Rapid Interrogation',
+      desc:
+        lang === 'ar'
+          ? 'وقت الدور 7 ثوانٍ فقط وسؤال سريع؛ التوتر يفضح الجاسوس فوراً!'
+          : '7 seconds turn time; high speed interrogation under pressure!',
+      icon: Flame,
+      color: 'from-orange-500/20 to-amber-500/20',
+      border: 'border-orange-400',
+      text: 'text-orange-300'
+    },
+    {
       id: 'mole' as GameMode,
       title: lang === 'ar' ? 'شبكة العملاء' : 'Mole Network',
-      desc: lang === 'ar' ? 'الجواسيس يعرفون بعضهم وينسقون سراً' : 'Spies know each other and coordinate',
+      desc: lang === 'ar' ? 'الجواسيس يعرفون بعضهم وينسقون سراً بشات خاص' : 'Spies know each other and coordinate secretly',
       icon: Shield,
       color: 'from-purple-500/20 to-pink-500/20',
       border: 'border-purple-400',
       text: 'text-purple-300'
     },
     {
+      id: 'undercover' as GameMode,
+      title: lang === 'ar' ? 'العميل السري (الملاك الحارس)' : 'Undercover Protector',
+      desc:
+        lang === 'ar'
+          ? 'لاعب بريء يعرف من هو الجاسوس ويحاول حمايته دون أن يُكشف!'
+          : 'One innocent knows the spy and secretly protects them!',
+      icon: Radar,
+      color: 'from-cyan-500/20 to-blue-500/20',
+      border: 'border-cyan-400',
+      text: 'text-cyan-300'
+    },
+    {
       id: 'silent' as GameMode,
       title: lang === 'ar' ? 'المحطة الصامتة' : 'Silent Drawing',
-      desc: lang === 'ar' ? 'رسم تلميحات حية على شاشة الرادار دون كلام' : 'Live radar drawing instead of voice',
+      desc: lang === 'ar' ? 'رسم تلميحات حية على شاشة الرادار الفضائي دون كلام' : 'Live radar drawing hints instead of words',
       icon: Brush,
       color: 'from-teal-500/20 to-cyan-500/20',
       border: 'border-teal-400',
@@ -140,8 +179,11 @@ export const CreateRoomScreen: React.FC<Props> = ({
     },
     {
       id: 'sabotage' as GameMode,
-      title: lang === 'ar' ? 'بطاقات التخريب' : 'Sabotage Cards',
-      desc: lang === 'ar' ? 'بطاقات حصانة وتبديل دور وإعادة تصويت' : 'Immunity, turn swap & revote cards',
+      title: lang === 'ar' ? 'عمليات التخريب التكتيكية' : 'Tactical Sabotage',
+      desc:
+        lang === 'ar'
+          ? 'رادار حراري، كتم الصوت، رصاصة فضية، وتشويش الإشارة اللاسلكية!'
+          : 'Thermal scans, silence hacks, silver bullets & signal scramblers!',
       icon: Zap,
       color: 'from-amber-500/20 to-rose-500/20',
       border: 'border-amber-400',
