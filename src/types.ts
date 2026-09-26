@@ -31,6 +31,7 @@ export interface PlayerData {
   avatar: string;
   joinedAt?: number;
   isSpectator?: boolean;
+  isBot?: boolean;
   postGame?: 'inLobby' | null;
   sabotageAbility?: SabotageAbility | null;
   sabotageUsed?: boolean;

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { dictionary } from '../translations';
 import { Language, RoomData, PlayerData, FriendEntry, JoinRequest } from '../types';
 import { CATEGORY_META } from '../words';
-import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert } from 'lucide-react';
+import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert, Bot, Trash2 } from 'lucide-react';
 import { sound } from '../audio';
 
 interface Props {
@@ -18,6 +18,8 @@ interface Props {
   onOpenEditRoom: () => void;
   onOpenInviteFriends: () => void;
   onStartGame: () => void;
+  onAddBot?: () => void;
+  onRemoveBots?: () => void;
   onLeaveRoom: () => void;
   onMakeHost: (uid: string) => void;
   onKickPlayer: (uid: string) => void;
@@ -41,6 +43,8 @@ export const LobbyScreen: React.FC<Props> = ({
   onOpenEditRoom,
   onOpenInviteFriends,
   onStartGame,
+  onAddBot,
+  onRemoveBots,
   onLeaveRoom,
   onMakeHost,
   onKickPlayer,
@@ -162,6 +166,28 @@ export const LobbyScreen: React.FC<Props> = ({
                 <UserPlus className="w-4 h-4 text-purple-400" />
                 <span>{t.btnInviteFriends}</span>
               </button>
+            </div>
+
+            {/* Test Bots Quick Add Row */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onAddBot}
+                className="flex-1 py-2 px-3 rounded-2xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-400/30 text-sky-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <Bot className="w-4 h-4 text-sky-400" />
+                <span>{t.btnAddBot}</span>
+              </button>
+              {playersArr.some(p => p.isBot) && (
+                <button
+                  type="button"
+                  onClick={onRemoveBots}
+                  className="py-2 px-3 rounded-2xl bg-rose-950/40 hover:bg-rose-900/50 border border-rose-500/40 text-rose-300 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer"
+                  title={t.btnRemoveBots}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
             <button

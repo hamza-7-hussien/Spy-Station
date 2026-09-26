@@ -437,6 +437,71 @@ export default function App() {
     }
   };
 
+  // Bot Automation Effect (Handled by Host)
+  useEffect(() => {
+    if (!isHost || !currentRoomCode || !roomData) return;
+
+    // 1. Bot Turns during Gameplay
+    if (roomData.status === 'playing') {
+      const turnOrder = roomData.turnOrder || [];
+      const turnIndex = roomData.turnIndex || 0;
+      const currentSpeakerUid = turnOrder[turnIndex];
+      const speaker = currentSpeakerUid ? roomData.players?.[currentSpeakerUid] : null;
+
+      if (currentSpeakerUid && (currentSpeakerUid.startsWith('bot_') || speaker?.isBot)) {
+        const botTimer = setTimeout(async () => {
+          const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
+          const latest = snap.val();
+          if (
+            latest?.status === 'playing' &&
+            latest?.turnOrder?.[latest?.turnIndex || 0] === currentSpeakerUid
+          ) {
+            const botReactions = [
+              'أنا مش الجاسوس! ✋',
+              'شاكك فيك جداً! 🧐',
+              'التلميح ده عاجبني 👍',
+              'والله بريء! 😇',
+              'مين الجاسوس؟! 🚨',
+              'ركزوا في التلميحات! 🔍'
+            ];
+            const reaction = botReactions[Math.floor(Math.random() * botReactions.length)];
+            await db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).set({
+              text: reaction,
+              timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+            setTimeout(() => {
+              db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).remove().catch(() => {});
+            }, 6000);
+
+            setTimeout(() => {
+              advanceTurn();
+            }, 1500);
+          }
+        }, 2200);
+
+        return () => clearTimeout(botTimer);
+      }
+    }
+
+    // 2. Bot Votes during Voting
+    if (roomData.status === 'voting') {
+      const botsWithoutVotes = Object.values(roomData.players || {}).filter(
+        p => (p.isBot || p.uid.startsWith('bot_')) && !p.isSpectator && !roomData.votes?.[p.uid]
+      );
+      if (botsWithoutVotes.length > 0) {
+        const botVoteTimer = setTimeout(() => {
+          const activePlayers = Object.values(roomData.players || {}).filter(p => !p.isSpectator);
+          botsWithoutVotes.forEach(bot => {
+            const targets = activePlayers.filter(p => p.uid !== bot.uid).map(p => p.uid);
+            const chosen = targets.length > 0 ? targets[Math.floor(Math.random() * targets.length)] : 'SKIP';
+            db.ref(`spy_rooms/${currentRoomCode}/votes/${bot.uid}`).set(chosen);
+          });
+        }, 2500);
+        return () => clearTimeout(botVoteTimer);
+      }
+    }
+  }, [isHost, currentRoomCode, roomData?.status, roomData?.turnIndex, roomData?.votes]);
+
   // Advance Turn logic
   const advanceTurn = async () => {
     if (!currentRoomCode) return;
@@ -1034,99 +1099,172 @@ export default function App() {
     }
   };
 
+  // Add simulated bot astronaut for easy testing & solo play
+  const handleAddBot = async () => {
+    if (!currentRoomCode || !roomData) return;
+    const playersObj = roomData.players || {};
+    const count = Object.keys(playersObj).length;
+    const botNames = lang === 'ar'
+      ? ['خالد', 'أحمد', 'ليلى', 'سارة', 'عمر', 'محمد', 'ياسمين']
+      : ['Khaled', 'Ahmed', 'Layla', 'Sara', 'Omar', 'Mohamed', 'Yasmine'];
+    const botId = `bot_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const name = botNames[count % botNames.length];
+
+    sound.playClick();
+    await db.ref(`spy_rooms/${currentRoomCode}/players/${botId}`).set({
+      uid: botId,
+      name: `${name} 🤖`,
+      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
+      joinedAt: Date.now(),
+      isSpectator: false,
+      isBot: true
+    });
+    showToast(lang === 'ar' ? `تمت إضافة رائد الفضاء ${name}! 🚀` : `Astronaut ${name} added! 🚀`, 'success');
+  };
+
+  const handleRemoveBots = async () => {
+    if (!currentRoomCode || !roomData) return;
+    const playersObj = roomData.players || {};
+    const updates: Record<string, null> = {};
+    Object.keys(playersObj).forEach(uid => {
+      if (playersObj[uid].isBot || uid.startsWith('bot_')) {
+        updates[`spy_rooms/${currentRoomCode}/players/${uid}`] = null;
+      }
+    });
+    sound.playClick();
+    await db.ref().update(updates);
+    showToast(lang === 'ar' ? 'تمت إزالة رواد الفضاء التجريبيين 🧹' : 'Test bots removed 🧹', 'normal');
+  };
+
   // Start game flow
   const handleStartGame = async () => {
     if (!currentRoomCode || !roomData) return;
-    const playersObj = roomData.players || {};
-    const playersArr = Object.values(playersObj);
+    sound.playClick();
 
-    if (playersArr.length < 3) {
-      return showToast(t.errMinPlayers, 'danger');
+    try {
+      const playersObj = { ...(roomData.players || {}) };
+      let playersArr = Object.values(playersObj).filter(p => !p.isSpectator);
+
+      // If fewer than 3 players, auto-fill with astronaut bots so mission starts without any blockage!
+      if (playersArr.length < 3) {
+        showToast(t.lblStartingWithBots, 'normal');
+        const needed = 3 - playersArr.length;
+        const botNames = lang === 'ar'
+          ? ['خالد', 'أحمد', 'ليلى', 'سارة', 'عمر', 'ياسمين']
+          : ['Khaled', 'Ahmed', 'Layla', 'Sara', 'Omar', 'Yasmine'];
+
+        const botUpdates: Record<string, PlayerData> = {};
+        for (let i = 0; i < needed; i++) {
+          const botId = `bot_${Date.now()}_${i}`;
+          const name = botNames[i % botNames.length];
+          const newBot: PlayerData = {
+            uid: botId,
+            name: `${name} 🤖`,
+            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
+            joinedAt: Date.now(),
+            isSpectator: false,
+            isBot: true
+          };
+          botUpdates[botId] = newBot;
+          playersObj[botId] = newBot;
+        }
+        await db.ref(`spy_rooms/${currentRoomCode}/players`).update(botUpdates);
+        playersArr = Object.values(playersObj).filter(p => !p.isSpectator);
+      }
+
+      const cats =
+        roomData.categories && roomData.categories.length > 0
+          ? roomData.categories
+          : (['players'] as CategoryKey[]);
+      const chosenCat = cats[Math.floor(Math.random() * cats.length)];
+      const wordList = wordsDB[chosenCat] || wordsDB.players;
+      const selectedPair = wordList[Math.floor(Math.random() * wordList.length)];
+      const wordImg = getWordImage(selectedPair[0], selectedPair[1], chosenCat);
+
+      const effectiveSpyCount = Math.max(
+        1,
+        Math.min(roomData.spyCount || 1, Math.max(1, Math.floor(playersArr.length / 2)))
+      );
+      const spies: string[] = [];
+      while (spies.length < Math.min(effectiveSpyCount, playersArr.length - 1)) {
+        const randUid = playersArr[Math.floor(Math.random() * playersArr.length)].uid;
+        if (!spies.includes(randUid)) spies.push(randUid);
+      }
+      if (spies.length === 0 && playersArr.length > 0) {
+        spies.push(playersArr[0].uid);
+      }
+
+      const resetPlayers: Record<string, PlayerData> = {};
+      const tacticalAbilities: SabotageAbility[] = [
+        'thermal_scan',
+        'silence_hack',
+        'silver_bullet',
+        'signal_scramble'
+      ];
+
+      // Chameleon mode: pick a twin word
+      const otherPairs = wordList.filter(pair => pair[0] !== selectedPair[0]);
+      const chameleonPair =
+        otherPairs.length > 0 ? otherPairs[Math.floor(Math.random() * otherPairs.length)] : selectedPair;
+
+      // Undercover mode: pick an undercover protector who knows the spy
+      const nonSpies = playersArr.filter(p => !spies.includes(p.uid));
+      const undercoverUid =
+        roomData.gameMode === 'undercover' && nonSpies.length > 0
+          ? nonSpies[Math.floor(Math.random() * nonSpies.length)].uid
+          : null;
+
+      playersArr.forEach(p => {
+        const isThisSpy = spies.includes(p.uid);
+        resetPlayers[p.uid] = {
+          ...p,
+          isSpectator: false,
+          postGame: null,
+          role: isThisSpy ? 'spy' : p.uid === undercoverUid ? 'undercover' : 'crew',
+          sabotageAbility:
+            roomData.gameMode === 'sabotage'
+              ? tacticalAbilities[Math.floor(Math.random() * tacticalAbilities.length)]
+              : null,
+          sabotageUsed: false,
+          isSilenced: false,
+          disqualifiedVote: false,
+          chameleonWord: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[0] : undefined,
+          chameleonWordAr: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[1] : undefined
+        };
+      });
+
+      const shuffled = playersArr.map(p => p.uid).sort(() => Math.random() - 0.5);
+      lastAnnouncedRoundRef.current = 0;
+      const initialTurnSeconds = roomData.gameMode === 'rapid' ? 7 : (roomData.turnSeconds || 20);
+
+      await db.ref(`spy_rooms/${currentRoomCode}`).update({
+        status: 'playing',
+        word: selectedPair[0],
+        wordAr: selectedPair[1],
+        wordCategory: chosenCat,
+        wordImage: wordImg,
+        spies: spies,
+        undercoverUid: undercoverUid,
+        round: 1,
+        turnOrder: shuffled,
+        turnIndex: 0,
+        turnTimeLeft: initialTurnSeconds,
+        turnSeconds: initialTurnSeconds,
+        votes: null,
+        winnerTeam: null,
+        gameChat: null,
+        spyChat: null,
+        speechBubbles: null,
+        scrambleActive: false,
+        currentDrawing: null,
+        players: resetPlayers
+      });
+
+      broadcastAnnouncement(t.annMissionStarted, 'normal');
+    } catch (err) {
+      console.error('Failed to start mission:', err);
+      showToast(lang === 'ar' ? 'حدث خطأ أثناء بدء اللعبة، حاول مرة أخرى' : 'Failed to start game, try again', 'danger');
     }
-
-    if (roomData.spyCount >= Math.ceil(playersArr.length / 2)) {
-      return showToast(t.errTooManySpies, 'danger');
-    }
-
-    const cats = roomData.categories && roomData.categories.length > 0 ? roomData.categories : (['players'] as CategoryKey[]);
-    const chosenCat = cats[Math.floor(Math.random() * cats.length)];
-    const wordList = wordsDB[chosenCat] || wordsDB.players;
-    const selectedPair = wordList[Math.floor(Math.random() * wordList.length)];
-    const wordImg = getWordImage(selectedPair[0], selectedPair[1], chosenCat);
-
-    const spies: string[] = [];
-    while (spies.length < Math.min(roomData.spyCount, playersArr.length - 1)) {
-      const randUid = playersArr[Math.floor(Math.random() * playersArr.length)].uid;
-      if (!spies.includes(randUid)) spies.push(randUid);
-    }
-
-    const resetPlayers: Record<string, PlayerData> = {};
-    const tacticalAbilities: SabotageAbility[] = [
-      'thermal_scan',
-      'silence_hack',
-      'silver_bullet',
-      'signal_scramble'
-    ];
-
-    // Chameleon mode: pick a twin word
-    const otherPairs = wordList.filter(pair => pair[0] !== selectedPair[0]);
-    const chameleonPair =
-      otherPairs.length > 0 ? otherPairs[Math.floor(Math.random() * otherPairs.length)] : selectedPair;
-
-    // Undercover mode: pick an undercover protector who knows the spy
-    const nonSpies = playersArr.filter(p => !spies.includes(p.uid));
-    const undercoverUid =
-      roomData.gameMode === 'undercover' && nonSpies.length > 0
-        ? nonSpies[Math.floor(Math.random() * nonSpies.length)].uid
-        : null;
-
-    playersArr.forEach(p => {
-      const isThisSpy = spies.includes(p.uid);
-      resetPlayers[p.uid] = {
-        ...p,
-        isSpectator: false,
-        postGame: null,
-        role: isThisSpy ? 'spy' : p.uid === undercoverUid ? 'undercover' : 'crew',
-        sabotageAbility:
-          roomData.gameMode === 'sabotage'
-            ? tacticalAbilities[Math.floor(Math.random() * tacticalAbilities.length)]
-            : null,
-        sabotageUsed: false,
-        isSilenced: false,
-        disqualifiedVote: false,
-        chameleonWord: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[0] : undefined,
-        chameleonWordAr: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[1] : undefined
-      };
-    });
-
-    const shuffled = playersArr.map(p => p.uid).sort(() => Math.random() - 0.5);
-    lastAnnouncedRoundRef.current = 0;
-    const initialTurnSeconds = roomData.gameMode === 'rapid' ? 7 : (roomData.turnSeconds || 20);
-
-    await db.ref(`spy_rooms/${currentRoomCode}`).update({
-      status: 'playing',
-      word: selectedPair[0],
-      wordAr: selectedPair[1],
-      wordCategory: chosenCat,
-      wordImage: wordImg,
-      spies: spies,
-      undercoverUid: undercoverUid,
-      round: 1,
-      turnOrder: shuffled,
-      turnIndex: 0,
-      turnTimeLeft: initialTurnSeconds,
-      turnSeconds: initialTurnSeconds,
-      votes: null,
-      winnerTeam: null,
-      gameChat: null,
-      spyChat: null,
-      speechBubbles: null,
-      scrambleActive: false,
-      currentDrawing: null,
-      players: resetPlayers
-    });
-
-    broadcastAnnouncement(t.annMissionStarted, 'normal');
   };
 
   // Loading state
@@ -1321,6 +1459,8 @@ export default function App() {
             }}
             onOpenInviteFriends={() => setInviteModalOpen(true)}
             onStartGame={handleStartGame}
+            onAddBot={handleAddBot}
+            onRemoveBots={handleRemoveBots}
             onLeaveRoom={leaveRoom}
             onMakeHost={uid => db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(uid)}
             onKickPlayer={uid => db.ref(`spy_rooms/${currentRoomCode}/players/${uid}`).remove()}
