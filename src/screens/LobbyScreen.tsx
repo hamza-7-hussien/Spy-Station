@@ -55,6 +55,7 @@ export const LobbyScreen: React.FC<Props> = ({
   onDeclineJoinRequest
 }) => {
   const [chatMsg, setChatMsg] = useState('');
+  const [isStartingGame, setIsStartingGame] = useState(false);
   const t = dictionary[lang];
 
   const playersObj = room.players || {};
@@ -191,11 +192,31 @@ export const LobbyScreen: React.FC<Props> = ({
             </div>
 
             <button
-              onClick={onStartGame}
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-sky-400 via-indigo-500 to-purple-500 text-slate-950 font-black text-sm tracking-wider uppercase shadow-lg shadow-sky-500/25 hover:brightness-110 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isStartingGame}
+              onClick={async () => {
+                sound.playClick();
+                sound.triggerHaptic('medium');
+                setIsStartingGame(true);
+                try {
+                  await onStartGame();
+                } finally {
+                  setTimeout(() => setIsStartingGame(false), 2500);
+                }
+              }}
+              className={`w-full py-3.5 rounded-2xl font-black text-sm tracking-wider uppercase shadow-lg shadow-sky-500/25 transition flex items-center justify-center gap-2 cursor-pointer ${
+                isStartingGame
+                  ? 'bg-slate-700 text-slate-300 opacity-80 cursor-wait'
+                  : 'bg-gradient-to-r from-sky-400 via-indigo-500 to-purple-500 text-slate-950 hover:brightness-110 active:scale-95'
+              }`}
             >
-              <Play className="w-4 h-4 fill-current" />
-              <span>{t.btnStartGame}</span>
+              <Play className={`w-4 h-4 fill-current ${isStartingGame ? 'animate-spin' : ''}`} />
+              <span>
+                {isStartingGame
+                  ? lang === 'ar'
+                    ? 'جاري إطلاق المهمة...'
+                    : 'Launching Mission...'
+                  : t.btnStartGame}
+              </span>
             </button>
           </div>
         )}

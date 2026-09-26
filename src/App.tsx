@@ -1216,8 +1216,10 @@ export default function App() {
 
       playersArr.forEach(p => {
         const isThisSpy = spies.includes(p.uid);
-        resetPlayers[p.uid] = {
-          ...p,
+        const playerObj: PlayerData = {
+          uid: p.uid,
+          name: p.name || 'Agent',
+          avatar: p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`,
           isSpectator: false,
           postGame: null,
           role: isThisSpy ? 'spy' : p.uid === undercoverUid ? 'undercover' : 'crew',
@@ -1227,10 +1229,19 @@ export default function App() {
               : null,
           sabotageUsed: false,
           isSilenced: false,
-          disqualifiedVote: false,
-          chameleonWord: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[0] : undefined,
-          chameleonWordAr: isThisSpy && roomData.gameMode === 'chameleon' ? chameleonPair[1] : undefined
+          disqualifiedVote: false
         };
+
+        if (p.isBot) {
+          playerObj.isBot = true;
+        }
+
+        if (isThisSpy && roomData.gameMode === 'chameleon') {
+          playerObj.chameleonWord = chameleonPair[0];
+          playerObj.chameleonWordAr = chameleonPair[1];
+        }
+
+        resetPlayers[p.uid] = playerObj;
       });
 
       const shuffled = playersArr.map(p => p.uid).sort(() => Math.random() - 0.5);
@@ -1239,12 +1250,12 @@ export default function App() {
 
       await db.ref(`spy_rooms/${currentRoomCode}`).update({
         status: 'playing',
-        word: selectedPair[0],
-        wordAr: selectedPair[1],
-        wordCategory: chosenCat,
-        wordImage: wordImg,
+        word: selectedPair[0] || 'Space Station',
+        wordAr: selectedPair[1] || 'محطة الفضاء',
+        wordCategory: chosenCat || 'players',
+        wordImage: wordImg || null,
         spies: spies,
-        undercoverUid: undercoverUid,
+        undercoverUid: undercoverUid || null,
         round: 1,
         turnOrder: shuffled,
         turnIndex: 0,
