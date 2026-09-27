@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { dictionary } from '../translations';
-import { Language, RoomData, PlayerData, FriendEntry, JoinRequest } from '../types';
+import { Language, RoomData, PlayerData, FriendEntry, JoinRequest, VoiceUserState } from '../types';
 import { CATEGORY_META } from '../words';
-import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert, Bot, Trash2 } from 'lucide-react';
+import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert, Bot, Trash2, Mic, MicOff } from 'lucide-react';
 import { sound } from '../audio';
+import { VoiceChatBar } from '../components/VoiceChatBar';
 
 interface Props {
   lang: Language;
@@ -14,6 +15,13 @@ interface Props {
   friends: Record<string, FriendEntry>;
   sentRequests: Record<string, boolean>;
   friendRequests: Record<string, unknown>;
+  isVoiceJoined?: boolean;
+  isVoiceMuted?: boolean;
+  isVoiceSpeaking?: boolean;
+  voiceUsers?: Record<string, VoiceUserState>;
+  onJoinVoice?: () => void;
+  onLeaveVoice?: () => void;
+  onToggleVoiceMute?: () => void;
   onCopyRoomCode: () => void;
   onOpenEditRoom: () => void;
   onOpenInviteFriends: () => void;
@@ -39,6 +47,13 @@ export const LobbyScreen: React.FC<Props> = ({
   friends,
   sentRequests,
   friendRequests,
+  isVoiceJoined = false,
+  isVoiceMuted = false,
+  isVoiceSpeaking = false,
+  voiceUsers = {},
+  onJoinVoice = () => {},
+  onLeaveVoice = () => {},
+  onToggleVoiceMute = () => {},
   onCopyRoomCode,
   onOpenEditRoom,
   onOpenInviteFriends,
@@ -148,6 +163,19 @@ export const LobbyScreen: React.FC<Props> = ({
             {t.modePrefix} {t[`mode${room.gameMode === 'mole' ? 'MoleNetwork' : room.gameMode === 'silent' ? 'SilentStation' : room.gameMode === 'sabotage' ? 'Sabotage' : 'Normal'}` as keyof typeof t]}
           </div>
         </div>
+
+        {/* Real-time Voice Chat Bar */}
+        <VoiceChatBar
+          lang={lang}
+          isJoined={isVoiceJoined}
+          isMuted={isVoiceMuted}
+          isSpeaking={isVoiceSpeaking}
+          voiceUsers={voiceUsers}
+          currentUserUid={currentUserUid}
+          onJoinVoice={onJoinVoice}
+          onLeaveVoice={onLeaveVoice}
+          onToggleMute={onToggleVoiceMute}
+        />
 
         {/* Host controls */}
         {isHost && (
@@ -288,17 +316,40 @@ export const LobbyScreen: React.FC<Props> = ({
           <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
             {playersArr.map(p => {
               const isInLobby = p.postGame === 'inLobby' || (!p.postGame && room.status === 'waiting');
+              const isSpeaking = !!voiceUsers?.[p.uid]?.speaking;
+              const isVoiceActive = !!voiceUsers?.[p.uid]?.active;
+              const isUserMuted = !!voiceUsers?.[p.uid]?.muted;
+
               return (
                 <div
                   key={p.uid}
-                  className="flex items-center justify-between p-2.5 rounded-2xl bg-slate-950/70 border border-slate-800"
+                  className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all ${
+                    isSpeaking
+                      ? 'bg-emerald-950/40 border-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.3)]'
+                      : 'bg-slate-950/70 border-slate-800'
+                  }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <img
-                      src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`}
-                      alt="avatar"
-                      className="w-8 h-8 rounded-full object-cover border border-sky-400/40 shrink-0"
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`}
+                        alt="avatar"
+                        className={`w-8 h-8 rounded-full object-cover transition-all ${
+                          isSpeaking
+                            ? 'border-2 border-emerald-400 ring-4 ring-emerald-400/40 animate-pulse'
+                            : 'border border-sky-400/40'
+                        }`}
+                      />
+                      {isVoiceActive && (
+                        <div
+                          className={`absolute -bottom-1 -right-1 p-0.5 rounded-full ${
+                            isUserMuted ? 'bg-rose-600 text-white' : 'bg-emerald-500 text-slate-950'
+                          }`}
+                        >
+                          {isUserMuted ? <MicOff className="w-2.5 h-2.5" /> : <Mic className="w-2.5 h-2.5" />}
+                        </div>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                       <span className="font-bold text-xs text-slate-200 truncate">{p.name || 'Player'}</span>
                       {p.uid === room.hostUid && (

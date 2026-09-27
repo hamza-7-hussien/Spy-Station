@@ -82,6 +82,16 @@ export interface RoomData {
     type: 'normal' | 'danger' | 'success';
     timestamp: number;
   };
+  voiceStates?: Record<string, VoiceUserState>;
+}
+
+export interface VoiceUserState {
+  uid: string;
+  name: string;
+  muted: boolean;
+  speaking: boolean;
+  active: boolean;
+  updatedAt: number;
 }
 
 export interface FriendRequest {

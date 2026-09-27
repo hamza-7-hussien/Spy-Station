@@ -8,6 +8,8 @@ import { WordVisualCard } from '../components/WordVisualCard';
 import { CATEGORY_STYLES } from '../wordVisuals';
 import { SabotageActionModal } from '../components/SabotageActionModal';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
+import { VoiceChatBar } from '../components/VoiceChatBar';
+import { VoiceUserState } from '../types';
 import {
   Clock,
   Mic,
@@ -34,11 +36,18 @@ interface Props {
   currentUserUid: string;
   roomCode: string;
   room: RoomData;
+  isVoiceJoined?: boolean;
+  isVoiceMuted?: boolean;
+  isVoiceSpeaking?: boolean;
+  voiceUsers?: Record<string, VoiceUserState>;
+  onJoinVoice?: () => void;
+  onLeaveVoice?: () => void;
+  onToggleVoiceMute?: () => void;
   onAdvanceTurn: () => void;
   onTriggerEmergencyVote: () => void;
   onUseSabotageCard?: () => void;
   onOpenSabotageSwap?: () => void;
-  onSendGameClue: (word: string) => void;
+  onSendGameClue: (word: string, targetRound: number, targetTurnIndex: number) => void;
   onSendSpyChat: (msg: string) => void;
   onToast: (msg: string, type?: 'normal' | 'danger' | 'success') => void;
   onLeaveRoom?: () => void;
@@ -49,6 +58,13 @@ export const GameScreen: React.FC<Props> = ({
   currentUserUid,
   roomCode,
   room,
+  isVoiceJoined = false,
+  isVoiceMuted = false,
+  isVoiceSpeaking = false,
+  voiceUsers = {},
+  onJoinVoice = () => {},
+  onLeaveVoice = () => {},
+  onToggleVoiceMute = () => {},
   onAdvanceTurn,
   onTriggerEmergencyVote,
   onSendGameClue,
@@ -220,6 +236,13 @@ export const GameScreen: React.FC<Props> = ({
     }
   };
 
+  // Reset clue input when turn passes or round changes
+  useEffect(() => {
+    if (!isMyTurn) {
+      setClueInput('');
+    }
+  }, [isMyTurn, turnIndex, currentRound]);
+
   const handleClueSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isMyTurn) return;
@@ -248,14 +271,14 @@ export const GameScreen: React.FC<Props> = ({
     }
 
     sendSpeechBubble(clean);
-    onSendGameClue(clean);
+    onSendGameClue(clean, currentRound, turnIndex);
     setClueInput('');
   };
 
   const handleEmojiClue = (emoji: string) => {
     if (!isMyTurn) return;
     sendSpeechBubble(emoji);
-    onSendGameClue(emoji);
+    onSendGameClue(emoji, currentRound, turnIndex);
     if (myPlayer.isSilenced) {
       db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}/isSilenced`).set(false);
     }
@@ -362,16 +385,6 @@ export const GameScreen: React.FC<Props> = ({
     }, 9000);
   };
 
-  // Quick reactions list
-  const QUICK_REACTIONS = [
-    'والله بريء! 😇',
-    'شاكك فيك! 🧐',
-    'كلامك مريب! 🤔',
-    'أنا مش الجاسوس! ✋',
-    'ركزوا بالكلمات! 🔍',
-    'واثق من كلامي! 😎'
-  ];
-
   // Active players list
   const activeUids = (turnOrder.length > 0 ? turnOrder : Object.keys(playersObj)).filter(
     uid => playersObj[uid] && !playersObj[uid].isSpectator
@@ -448,6 +461,19 @@ export const GameScreen: React.FC<Props> = ({
           )}
         </div>
       </div>
+
+      {/* Real-time Voice Chat Bar */}
+      <VoiceChatBar
+        lang={lang}
+        isJoined={isVoiceJoined}
+        isMuted={isVoiceMuted}
+        isSpeaking={isVoiceSpeaking}
+        voiceUsers={voiceUsers}
+        currentUserUid={currentUserUid}
+        onJoinVoice={onJoinVoice}
+        onLeaveVoice={onLeaveVoice}
+        onToggleMute={onToggleVoiceMute}
+      />
 
       {/* Role Warnings (Undercover / Chameleon) */}
       {isUndercover && (
@@ -609,12 +635,17 @@ export const GameScreen: React.FC<Props> = ({
             const bubble = speechBubbles[uid];
             const isSilenced = !!p?.isSilenced;
             const isMe = uid === currentUserUid;
+            const isVoiceSpeaking = !!voiceUsers?.[uid]?.speaking;
+            const isVoiceActive = !!voiceUsers?.[uid]?.active;
+            const isUserMuted = !!voiceUsers?.[uid]?.muted;
 
             return (
               <div
                 key={uid}
                 className={`relative p-3 rounded-2xl border transition-all flex flex-col items-center justify-center text-center ${
-                  isTurn
+                  isVoiceSpeaking
+                    ? 'bg-emerald-950/40 border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.4)] scale-105 z-20'
+                    : isTurn
                     ? 'bg-sky-500/25 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.5)] scale-105 z-20'
                     : isMe
                     ? 'bg-slate-950/80 border-sky-500/40'
@@ -637,18 +668,28 @@ export const GameScreen: React.FC<Props> = ({
                     src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
                     alt={p?.name}
                     className={`w-12 h-12 rounded-full object-cover border-2 transition-all ${
-                      isTurn
+                      isVoiceSpeaking
+                        ? 'border-emerald-300 ring-4 ring-emerald-400 animate-pulse'
+                        : isTurn
                         ? 'border-sky-300 ring-4 ring-sky-400/40'
                         : isMe
                         ? 'border-sky-400'
                         : 'border-slate-700'
                     }`}
                   />
-                  {isTurn && (
+                  {isVoiceActive ? (
+                    <div
+                      className={`absolute -bottom-1 -right-1 p-1 rounded-full shadow-md ${
+                        isUserMuted ? 'bg-rose-600 text-white' : 'bg-emerald-400 text-slate-950'
+                      }`}
+                    >
+                      {isUserMuted ? <MuteIcon className="w-2.5 h-2.5" /> : <Mic className="w-2.5 h-2.5" />}
+                    </div>
+                  ) : isTurn ? (
                     <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-sky-400 text-slate-950 shadow-md">
                       <Mic className="w-3 h-3" />
                     </div>
-                  )}
+                  ) : null}
                   {isSilenced && (
                     <div className="absolute -top-1 -right-1 p-1 rounded-full bg-rose-600 text-white shadow-md">
                       <MuteIcon className="w-2.5 h-2.5" />
@@ -742,7 +783,6 @@ export const GameScreen: React.FC<Props> = ({
                         : t.lblChatPlaceholder
                     }
                     className="flex-1 py-3 px-4 rounded-2xl bg-slate-950/90 border-2 border-sky-400 text-white font-bold text-sm outline-none focus:ring-2 focus:ring-sky-400/50 transition placeholder:text-slate-500"
-                    autoFocus
                   />
                   <button
                     type="submit"
@@ -810,25 +850,6 @@ export const GameScreen: React.FC<Props> = ({
             )}
           </div>
         )}
-
-        {/* Quick Comic Reactions while waiting */}
-        <div className="space-y-1.5 pt-2 border-t border-slate-800/60">
-          <div className="text-[10px] font-bold text-slate-400">
-            {lang === 'ar' ? 'ردود تفاعلية سريعة تظهر فوق رأسك 💬:' : 'Quick Reaction Bubbles 💬:'}
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-            {QUICK_REACTIONS.map((reaction, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => sendSpeechBubble(reaction)}
-                className="px-3 py-1.5 rounded-full bg-slate-950 border border-slate-800 hover:border-sky-400 hover:bg-sky-500/15 text-slate-300 hover:text-white text-xs font-bold whitespace-nowrap transition active:scale-95 cursor-pointer shadow-sm"
-              >
-                {reaction}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Tactical Sabotage Trigger (Sabotage Mode) */}
         {room.gameMode === 'sabotage' && !amSpectator && (

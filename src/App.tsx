@@ -40,6 +40,8 @@ import { RankModal } from './components/RankModal';
 import { UfoLoader } from './components/UfoLoader';
 import { HostJoinApprovalModal } from './components/HostJoinApprovalModal';
 import { ApplicantWaitingApprovalModal } from './components/ApplicantWaitingApprovalModal';
+import { generateSmartBotClue, generateSmartBotVote, generateUniqueBotName } from './aiBot';
+import { useVoiceChat } from './hooks/useVoiceChat';
 
 const ROUND_ANNOUNCE_MS = 2800;
 
@@ -114,6 +116,14 @@ export default function App() {
       setToast(null);
     }, 3500);
   };
+
+  const voice = useVoiceChat({
+    roomCode: currentRoomCode || '',
+    currentUserUid: currentUser?.uid || '',
+    currentUserName: profileName || currentUser?.displayName || 'Agent',
+    onToast: showToast,
+    permissionErrorMsg: t.voicePermissionError
+  });
 
   // Sync document direction & language
   useEffect(() => {
@@ -503,24 +513,26 @@ export default function App() {
             latest?.status === 'playing' &&
             latest?.turnOrder?.[latest?.turnIndex || 0] === currentSpeakerUid
           ) {
-            const botReactions = [
-              'أنا مش الجاسوس! ✋',
-              'شاكك فيك جداً! 🧐',
-              'التلميح ده عاجبني 👍',
-              'والله بريء! 😇',
-              'مين الجاسوس؟! 🚨',
-              'ركزوا في التلميحات! 🔍'
-            ];
-            const reaction = botReactions[Math.floor(Math.random() * botReactions.length)];
+            const isBotSpy = (latest?.spies || []).includes(currentSpeakerUid);
+            const prevClues = Object.values(latest?.gameChat || {}).map((c: unknown) => ((c as { text?: string }).text || ''));
+            const smartClue = generateSmartBotClue({
+              isSpy: isBotSpy,
+              word: latest?.word || '',
+              wordAr: latest?.wordAr || '',
+              category: latest?.wordCategory || 'places',
+              language: lang,
+              previousClues: prevClues
+            });
+
             await db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).set({
-              text: reaction,
+              text: smartClue,
               timestamp: firebase.database.ServerValue.TIMESTAMP
             });
             await db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
               uid: currentSpeakerUid,
               sender: speaker?.name || 'Bot Agent',
               avatar: speaker?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentSpeakerUid}`,
-              text: reaction,
+              text: smartClue,
               round: latest?.round || 1,
               timestamp: firebase.database.ServerValue.TIMESTAMP
             });
@@ -530,7 +542,7 @@ export default function App() {
 
             setTimeout(() => {
               advanceTurn();
-            }, 1500);
+            }, 1200);
           }
         }, 2200);
 
@@ -546,10 +558,17 @@ export default function App() {
       if (botsWithoutVotes.length > 0) {
         const botVoteTimer = setTimeout(() => {
           const activePlayers = Object.values(roomData.players || {}).filter(p => !p.isSpectator);
+          const spies = roomData.spies || [];
           botsWithoutVotes.forEach(bot => {
-            const targets = activePlayers.filter(p => p.uid !== bot.uid).map(p => p.uid);
-            const chosen = targets.length > 0 ? targets[Math.floor(Math.random() * targets.length)] : 'SKIP';
-            db.ref(`spy_rooms/${currentRoomCode}/votes/${bot.uid}`).set(chosen);
+            const isBotSpy = spies.includes(bot.uid);
+            const chosenTarget = generateSmartBotVote({
+              botUid: bot.uid,
+              isSpy: isBotSpy,
+              activePlayers,
+              spies,
+              gameChat: roomData.gameChat
+            });
+            db.ref(`spy_rooms/${currentRoomCode}/votes/${bot.uid}`).set(chosenTarget);
           });
         }, 2500);
         return () => clearTimeout(botVoteTimer);
@@ -1045,6 +1064,7 @@ export default function App() {
   };
 
   const leaveRoom = async () => {
+    voice.leaveVoice();
     localStorage.removeItem('spy_station_room');
     releaseWakeLock();
     lastAnnouncedRoundRef.current = 0;
@@ -1188,17 +1208,13 @@ export default function App() {
   const handleAddBot = async () => {
     if (!currentRoomCode || !roomData) return;
     const playersObj = roomData.players || {};
-    const count = Object.keys(playersObj).length;
-    const botNames = lang === 'ar'
-      ? ['خالد', 'أحمد', 'ليلى', 'سارة', 'عمر', 'محمد', 'ياسمين']
-      : ['Khaled', 'Ahmed', 'Layla', 'Sara', 'Omar', 'Mohamed', 'Yasmine'];
+    const name = generateUniqueBotName(playersObj, lang);
     const botId = `bot_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    const name = botNames[count % botNames.length];
 
     sound.playClick();
     await db.ref(`spy_rooms/${currentRoomCode}/players/${botId}`).set({
       uid: botId,
-      name: `${name} 🤖`,
+      name: name,
       avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
       joinedAt: Date.now(),
       isSpectator: false,
@@ -1443,6 +1459,13 @@ export default function App() {
             currentUserUid={currentUser.uid}
             roomCode={currentRoomCode}
             room={roomData}
+            isVoiceJoined={voice.isJoined}
+            isVoiceMuted={voice.isMuted}
+            isVoiceSpeaking={voice.isSpeaking}
+            voiceUsers={voice.voiceUsers}
+            onJoinVoice={voice.joinVoice}
+            onLeaveVoice={voice.leaveVoice}
+            onToggleVoiceMute={voice.toggleMute}
             onAdvanceTurn={advanceTurn}
             onTriggerEmergencyVote={() => {
               db.ref(`spy_rooms/${currentRoomCode}`).update({
@@ -1452,13 +1475,24 @@ export default function App() {
               });
               broadcastAnnouncement(t.annEmergencyVote, 'danger');
             }}
-            onSendGameClue={word => {
+            onSendGameClue={(word, targetRound, targetTurnIndex) => {
+              const snapRoom = lastRoomSnapshotRef.current;
+              // Guard: strictly ignore stale or race-condition submissions from expired turns
+              if (
+                snapRoom?.status !== 'playing' ||
+                snapRoom?.round !== targetRound ||
+                snapRoom?.turnIndex !== targetTurnIndex ||
+                snapRoom?.turnOrder?.[targetTurnIndex] !== currentUser.uid
+              ) {
+                return;
+              }
+
               db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
                 uid: currentUser.uid,
                 sender: currentUser.displayName || 'Agent',
                 avatar: currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
                 text: word,
-                round: roomData.round || 1,
+                round: targetRound,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
               });
               advanceTurn();
@@ -1526,6 +1560,13 @@ export default function App() {
             friends={friends}
             sentRequests={sentRequests}
             friendRequests={friendRequests}
+            isVoiceJoined={voice.isJoined}
+            isVoiceMuted={voice.isMuted}
+            isVoiceSpeaking={voice.isSpeaking}
+            voiceUsers={voice.voiceUsers}
+            onJoinVoice={voice.joinVoice}
+            onLeaveVoice={voice.leaveVoice}
+            onToggleVoiceMute={voice.toggleMute}
             onCopyRoomCode={() => {
               if (navigator.clipboard) {
                 navigator.clipboard.writeText(currentRoomCode);
