@@ -54,21 +54,21 @@ export const StationsTab: React.FC<Props> = ({ lang, publicRooms, onJoinRoom }) 
               return (
                 <div
                   key={code}
-                  className="p-4 rounded-2xl bg-slate-950/70 border border-sky-400/20 hover:border-sky-400/50 transition flex items-center justify-between gap-3 shadow-md"
+                  className="p-3.5 sm:p-4 rounded-2xl bg-slate-950/70 border border-sky-400/20 hover:border-sky-400/50 transition flex items-center justify-between gap-2.5 sm:gap-4 shadow-md overflow-hidden"
                 >
-                  <div className="space-y-1 text-start">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-black text-sky-400 text-sm tracking-wider">
+                  <div className="space-y-1 text-start min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-black text-sky-400 text-sm tracking-wider shrink-0">
                         #{code}
                       </span>
-                      <span className="text-xs text-purple-300 font-bold truncate max-w-[140px]">
+                      <span className="text-[11px] sm:text-xs text-purple-300 font-bold truncate max-w-[130px] sm:max-w-[200px]">
                         ({catNames || t.catRandom})
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                    <div className="flex items-center gap-2.5 text-[10px] sm:text-[11px] text-slate-400 flex-wrap">
                       <span
-                        className={`flex items-center gap-1 font-bold ${
+                        className={`flex items-center gap-1 font-bold shrink-0 ${
                           isPlaying ? 'text-amber-400' : 'text-emerald-400'
                         }`}
                       >
@@ -80,12 +80,12 @@ export const StationsTab: React.FC<Props> = ({ lang, publicRooms, onJoinRoom }) 
                         <span>{isPlaying ? t.lblRoomStatusInProgress : t.lblRoomStatusWaiting}</span>
                       </span>
 
-                      <span className="flex items-center gap-1">
+                      <span className="flex items-center gap-1 shrink-0">
                         <Users className="w-3 h-3" />
                         <span>{activeCount}/{maxPlayers}</span>
                       </span>
 
-                      <span className="text-slate-500 hidden sm:inline">
+                      <span className="text-slate-500 hidden md:inline truncate max-w-[100px]">
                         {t.lblHostTag}: {hostName}
                       </span>
                     </div>
@@ -97,20 +97,20 @@ export const StationsTab: React.FC<Props> = ({ lang, publicRooms, onJoinRoom }) 
                       sound.triggerHaptic('light');
                       onJoinRoom(code);
                     }}
-                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center gap-1.5 shrink-0 ${
+                    className={`px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider transition flex items-center gap-1.5 shrink-0 whitespace-nowrap shadow-md cursor-pointer ${
                       isPlaying
                         ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40 hover:bg-purple-600/50'
-                        : 'bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 hover:brightness-110 active:scale-95 shadow-md shadow-sky-500/20'
+                        : 'bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 hover:brightness-110 active:scale-95 shadow-sky-500/20'
                     }`}
                   >
                     {isPlaying ? (
                       <>
-                        <Eye className="w-3.5 h-3.5" />
+                        <Eye className="w-3.5 h-3.5 shrink-0" />
                         <span>{t.btnJoinAsSpectator}</span>
                       </>
                     ) : (
                       <>
-                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <Play className="w-3.5 h-3.5 fill-current shrink-0" />
                         <span>{t.joinRoom}</span>
                       </>
                     )}

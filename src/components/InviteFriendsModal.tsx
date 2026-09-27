@@ -40,12 +40,15 @@ export const InviteFriendsModal: React.FC<Props> = ({
     try {
       sound.playTone(600, 'sine', 0.1);
       sound.triggerHaptic('light');
-      await db.ref(`users/${friendUid}/roomInvites/${currentUserUid}`).set({
-        roomCode: roomCode,
-        fromName: currentUserName,
-        fromAvatar: currentUserAvatar,
-        timestamp: firebase.database.ServerValue.TIMESTAMP
-      });
+      await Promise.all([
+        db.ref(`users/${friendUid}/roomInvites/${currentUserUid}`).set({
+          roomCode: roomCode,
+          fromName: currentUserName,
+          fromAvatar: currentUserAvatar,
+          timestamp: firebase.database.ServerValue.TIMESTAMP
+        }),
+        db.ref(`spy_rooms/${roomCode}/invitedPlayers/${friendUid}`).set(true)
+      ]);
       setInvited(prev => ({ ...prev, [friendUid]: true }));
       onToast(t.msgInviteSent.replace('{name}', friendName), 'success');
     } catch {

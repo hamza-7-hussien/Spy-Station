@@ -764,7 +764,19 @@ export default function App() {
         return;
       }
 
-      // If room is public, Host must approve!
+      // If user was invited to this room, admit them directly without host approval
+      if (room.invitedPlayers && room.invitedPlayers[currentUser.uid]) {
+        joinRoom(cleanCode);
+        return;
+      }
+
+      // If game is in progress (playing or voting), enter immediately as spectator without interrupting host
+      if (room.status === 'playing' || room.status === 'voting') {
+        joinRoom(cleanCode);
+        return;
+      }
+
+      // If room is public and in lobby, Host must approve!
       if (room.visibility === 'public') {
         const hostName = (room.hostUid && room.players?.[room.hostUid]?.name) || 'Commander';
         const reqRef = db.ref(`spy_rooms/${cleanCode}/joinRequests/${currentUser.uid}`);
@@ -1218,31 +1230,10 @@ export default function App() {
       const playersObj = { ...(roomData.players || {}) };
       let playersArr = Object.values(playersObj).filter(p => !p.isSpectator);
 
-      // If fewer than 3 players, auto-fill with astronaut bots so mission starts without any blockage!
+      // Require at least 3 players. Do NOT auto-inject bots unless host manually clicked Add Bot!
       if (playersArr.length < 3) {
-        showToast(t.lblStartingWithBots, 'normal');
-        const needed = 3 - playersArr.length;
-        const botNames = lang === 'ar'
-          ? ['خالد', 'أحمد', 'ليلى', 'سارة', 'عمر', 'ياسمين']
-          : ['Khaled', 'Ahmed', 'Layla', 'Sara', 'Omar', 'Yasmine'];
-
-        const botUpdates: Record<string, PlayerData> = {};
-        for (let i = 0; i < needed; i++) {
-          const botId = `bot_${Date.now()}_${i}`;
-          const name = botNames[i % botNames.length];
-          const newBot: PlayerData = {
-            uid: botId,
-            name: `${name} 🤖`,
-            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
-            joinedAt: Date.now(),
-            isSpectator: false,
-            isBot: true
-          };
-          botUpdates[botId] = newBot;
-          playersObj[botId] = newBot;
-        }
-        await db.ref(`spy_rooms/${currentRoomCode}/players`).update(botUpdates);
-        playersArr = Object.values(playersObj).filter(p => !p.isSpectator);
+        showToast(t.errNeedMinPlayers, 'danger');
+        return;
       }
 
       const cats =
