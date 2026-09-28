@@ -1,19 +1,21 @@
 import React from 'react';
 import { dictionary } from '../translations';
 import { Language, VoiceUserState } from '../types';
-import { Mic, MicOff, PhoneOff, Radio, Volume2 } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Radio, Volume2, Headphones, VolumeX } from 'lucide-react';
 import { sound } from '../audio';
 
 interface Props {
   lang: Language;
   isJoined: boolean;
   isMuted: boolean;
+  isDeafened?: boolean;
   isSpeaking: boolean;
   voiceUsers: Record<string, VoiceUserState>;
   currentUserUid: string;
   onJoinVoice: () => void;
   onLeaveVoice: () => void;
   onToggleMute: () => void;
+  onToggleDeafen?: () => void;
   compact?: boolean;
 }
 
@@ -21,12 +23,14 @@ export const VoiceChatBar: React.FC<Props> = ({
   lang,
   isJoined,
   isMuted,
+  isDeafened = false,
   isSpeaking,
   voiceUsers,
   currentUserUid,
   onJoinVoice,
   onLeaveVoice,
   onToggleMute,
+  onToggleDeafen = () => {},
   compact = false
 }) => {
   const t = dictionary[lang];
@@ -44,7 +48,7 @@ export const VoiceChatBar: React.FC<Props> = ({
             <Radio className="w-4 h-4" />
           </div>
           <div className="text-start min-w-0">
-            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+            <div className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
               <span>{t.voiceChat}</span>
               {activeCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[10px] font-mono">
@@ -52,7 +56,7 @@ export const VoiceChatBar: React.FC<Props> = ({
                 </span>
               )}
             </div>
-            <div className="text-[10px] text-slate-400 truncate">
+            <div className="text-[10px] text-slate-400 break-words">
               {lang === 'ar' ? 'تحدث واستمع لرواد الفضاء مباشرة' : 'Talk with astronauts in real-time'}
             </div>
           </div>
@@ -94,12 +98,17 @@ export const VoiceChatBar: React.FC<Props> = ({
         </div>
 
         <div className="text-start min-w-0">
-          <div className="text-xs font-black text-white flex items-center gap-2">
-            <span>{isMuted ? t.micMuted : t.micLive}</span>
+          <div className="text-xs font-black text-white flex items-center gap-2 flex-wrap">
+            <span>{isMuted ? (lang === 'ar' ? 'المايك مكتوم' : 'Mic Muted') : (lang === 'ar' ? 'المايك شغال' : 'Mic Live')}</span>
+            {isDeafened && (
+              <span className="text-rose-400 text-[10px] font-bold">
+                ({lang === 'ar' ? 'السماعة مقفولة' : 'Audio Deafened'})
+              </span>
+            )}
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping shrink-0" />
           </div>
 
-          <div className="text-[10px] text-slate-400 flex items-center gap-1.5 truncate">
+          <div className="text-[10px] text-slate-400 flex flex-wrap items-center gap-1.5 break-words">
             {currentRemoteSpeaker ? (
               <span className="text-emerald-300 font-bold flex items-center gap-1">
                 <Volume2 className="w-3 h-3 text-emerald-400 animate-bounce" />
@@ -116,22 +125,43 @@ export const VoiceChatBar: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         {/* Toggle Mic Button */}
         <button
           onClick={() => {
             sound.playClick();
             onToggleMute();
           }}
-          className={`px-3 py-2 rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-sm ${
+          className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs font-black transition flex items-center gap-1 cursor-pointer shadow-sm ${
             isMuted
               ? 'bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/50'
               : 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/50'
           }`}
-          title={isMuted ? 'Unmute' : 'Mute'}
+          title={isMuted ? (lang === 'ar' ? 'إلغاء كتم المايك' : 'Unmute Mic') : (lang === 'ar' ? 'كتم المايك' : 'Mute Mic')}
         >
           {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-          <span className="hidden sm:inline">{isMuted ? (lang === 'ar' ? 'إلغاء الكتم' : 'Unmute') : (lang === 'ar' ? 'كتم المايك' : 'Mute')}</span>
+          <span className="hidden sm:inline">
+            {isMuted ? (lang === 'ar' ? 'فتح المايك' : 'Unmute') : (lang === 'ar' ? 'كتم المايك' : 'Mute')}
+          </span>
+        </button>
+
+        {/* Toggle Headphone/Audio Button */}
+        <button
+          onClick={() => {
+            sound.playClick();
+            onToggleDeafen();
+          }}
+          className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs font-black transition flex items-center gap-1 cursor-pointer shadow-sm ${
+            isDeafened
+              ? 'bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/50'
+              : 'bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
+          }`}
+          title={isDeafened ? (lang === 'ar' ? 'تشغيل السماعة' : 'Unmute Audio') : (lang === 'ar' ? 'قفل السماعة' : 'Deafen Audio')}
+        >
+          {isDeafened ? <VolumeX className="w-3.5 h-3.5" /> : <Headphones className="w-3.5 h-3.5" />}
+          <span className="hidden sm:inline">
+            {isDeafened ? (lang === 'ar' ? 'فتح السماعة' : 'Hear Audio') : (lang === 'ar' ? 'قفل السماعة' : 'Deafen')}
+          </span>
         </button>
 
         {/* Leave Voice Button */}

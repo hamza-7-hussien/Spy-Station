@@ -4,11 +4,11 @@ import { Language, RoomData, PlayerData, SabotageAbility } from '../types';
 import { sound } from '../audio';
 import { db } from '../firebase';
 import firebase from 'firebase/compat/app';
-import { WordVisualCard } from '../components/WordVisualCard';
+import { getSecretWordDisplay } from '../words';
 import { CATEGORY_STYLES } from '../wordVisuals';
 import { SabotageActionModal } from '../components/SabotageActionModal';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
-import { VoiceChatBar } from '../components/VoiceChatBar';
+import { QuickVoiceControls } from '../components/QuickVoiceControls';
 import { VoiceUserState } from '../types';
 import {
   Clock,
@@ -38,11 +38,13 @@ interface Props {
   room: RoomData;
   isVoiceJoined?: boolean;
   isVoiceMuted?: boolean;
+  isVoiceDeafened?: boolean;
   isVoiceSpeaking?: boolean;
   voiceUsers?: Record<string, VoiceUserState>;
   onJoinVoice?: () => void;
   onLeaveVoice?: () => void;
   onToggleVoiceMute?: () => void;
+  onToggleVoiceDeafen?: () => void;
   onAdvanceTurn: () => void;
   onTriggerEmergencyVote: () => void;
   onUseSabotageCard?: () => void;
@@ -60,11 +62,13 @@ export const GameScreen: React.FC<Props> = ({
   room,
   isVoiceJoined = false,
   isVoiceMuted = false,
+  isVoiceDeafened = false,
   isVoiceSpeaking = false,
   voiceUsers = {},
   onJoinVoice = () => {},
   onLeaveVoice = () => {},
   onToggleVoiceMute = () => {},
+  onToggleVoiceDeafen = () => {},
   onAdvanceTurn,
   onTriggerEmergencyVote,
   onSendGameClue,
@@ -89,15 +93,11 @@ export const GameScreen: React.FC<Props> = ({
   const amSpectator = !!myPlayer.isSpectator;
   const isSpy = (room.spies || []).includes(currentUserUid);
 
-  // Chameleon mode decoy word
+  // Chameleon mode decoy word or regular word display using strict bilingual rules
   const isChameleonSpy = isSpy && room.gameMode === 'chameleon';
   const displayWord = isChameleonSpy
-    ? lang === 'ar'
-      ? myPlayer.chameleonWordAr || room.wordAr || room.word
-      : myPlayer.chameleonWord || room.word || room.wordAr
-    : lang === 'ar'
-    ? room.wordAr || room.word
-    : room.word || room.wordAr;
+    ? getSecretWordDisplay(myPlayer.chameleonWord, myPlayer.chameleonWordAr, room.wordCategory, lang)
+    : getSecretWordDisplay(room.word, room.wordAr, room.wordCategory, lang);
 
   const turnOrder = room.turnOrder || [];
   const turnIndex = room.turnIndex || 0;
@@ -395,31 +395,50 @@ export const GameScreen: React.FC<Props> = ({
       {/* ============================================================== */}
       {/* 🚀 TOP CLEAN STATUS BAR */}
       {/* ============================================================== */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-slate-900/90 border border-sky-500/25 backdrop-blur-xl shadow-lg gap-2">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-900/90 border border-sky-500/25 backdrop-blur-xl shadow-lg gap-2 flex-wrap sm:flex-nowrap">
+        <div className="flex items-center gap-1.5 min-w-0">
           <div className="p-1 rounded-lg bg-sky-500/20 text-sky-400 shrink-0">
             <Radar className="w-4 h-4 animate-spin" style={{ animationDuration: '6s' }} />
           </div>
-          <span className="font-heading font-black text-xs sm:text-sm text-white truncate">
-            SPY STATION #{roomCode}
-          </span>
-          <span className="px-2 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/30 text-sky-300 font-mono text-[11px] shrink-0 font-bold">
+          <div className="flex items-center gap-1 whitespace-nowrap min-w-0">
+            <span className="font-heading font-black text-xs sm:text-sm text-white">
+              {lang === 'ar' ? 'المحطة' : 'STATION'}
+            </span>
+            <span className="font-mono font-black text-xs sm:text-sm text-sky-400">
+              #{roomCode}
+            </span>
+          </div>
+          <span className="px-1.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/30 text-sky-300 font-mono text-[10px] sm:text-[11px] shrink-0 font-bold whitespace-nowrap">
             {t.lblRound} {currentRound}
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Quick Voice Controls (Microphone + Headphone side-by-side) */}
+          <QuickVoiceControls
+            lang={lang}
+            isJoined={isVoiceJoined}
+            isMuted={isVoiceMuted}
+            isDeafened={isVoiceDeafened}
+            isSpeaking={isVoiceSpeaking}
+            onJoinVoice={onJoinVoice}
+            onToggleVoiceMute={onToggleVoiceMute}
+            onToggleVoiceDeafen={onToggleVoiceDeafen}
+            size="sm"
+            hideLabelsOnMobile={true}
+          />
+
           {/* Dedicated Chat History Button */}
           <button
             onClick={() => {
               sound.playClick();
               setIsHistoryOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/40 text-sky-300 text-xs font-black transition cursor-pointer shadow-sm active:scale-95"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/40 text-sky-300 text-xs font-black transition cursor-pointer shadow-sm active:scale-95 shrink-0"
             title={t.btnChatHistory}
           >
             <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
-            <span className="hidden sm:inline">{t.btnChatHistory}</span>
+            <span className="hidden md:inline">{t.btnChatHistory}</span>
             {cluesList.length > 0 && (
               <span className="px-1.5 py-0.2 rounded-full bg-sky-400 text-slate-950 text-[10px] font-mono font-black">
                 {cluesList.length}
@@ -433,7 +452,7 @@ export const GameScreen: React.FC<Props> = ({
               const muted = sound.toggleMute();
               setIsMuted(muted);
             }}
-            className={`p-2 rounded-xl border transition cursor-pointer ${
+            className={`p-1.5 sm:p-2 rounded-xl border transition cursor-pointer shrink-0 ${
               isMuted
                 ? 'bg-rose-950/40 border-rose-500/40 text-rose-400'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
@@ -444,7 +463,7 @@ export const GameScreen: React.FC<Props> = ({
           </button>
 
           {spectatorCount > 0 && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800 text-slate-300 text-[10px]">
+            <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800 text-slate-300 text-[10px] shrink-0">
               <Eye className="w-3 h-3 text-slate-400" />
               <span>{spectatorCount}</span>
             </span>
@@ -453,7 +472,7 @@ export const GameScreen: React.FC<Props> = ({
           {onLeaveRoom && (
             <button
               onClick={onLeaveRoom}
-              className="p-2 rounded-xl bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-400 text-xs font-bold transition cursor-pointer"
+              className="p-1.5 sm:p-2 rounded-xl bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-400 text-xs font-bold transition cursor-pointer shrink-0"
               title={t.btnLeaveStation}
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -461,19 +480,6 @@ export const GameScreen: React.FC<Props> = ({
           )}
         </div>
       </div>
-
-      {/* Real-time Voice Chat Bar */}
-      <VoiceChatBar
-        lang={lang}
-        isJoined={isVoiceJoined}
-        isMuted={isVoiceMuted}
-        isSpeaking={isVoiceSpeaking}
-        voiceUsers={voiceUsers}
-        currentUserUid={currentUserUid}
-        onJoinVoice={onJoinVoice}
-        onLeaveVoice={onLeaveVoice}
-        onToggleMute={onToggleVoiceMute}
-      />
 
       {/* Role Warnings (Undercover / Chameleon) */}
       {isUndercover && (
@@ -514,17 +520,17 @@ export const GameScreen: React.FC<Props> = ({
             <Mic className={`w-5 h-5 ${isMyTurn ? 'animate-bounce' : ''}`} />
           </div>
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
               {lang === 'ar' ? 'الدور الحالي لإعطاء التلميح' : 'Current Speaking Turn'}
             </div>
-            <div className="text-base sm:text-lg font-black text-white truncate font-heading">
+            <div className="text-sm sm:text-base md:text-lg font-black text-white font-heading leading-tight break-words">
               {isMyTurn ? (
-                <span className="text-sky-300 flex items-center gap-1.5">
+                <span className="text-sky-300 flex flex-wrap items-center gap-1">
                   <span>{lang === 'ar' ? '👉 دورك الآن! أعطِ تلميحك' : '👉 YOUR TURN! Give your clue'}</span>
                 </span>
               ) : (
-                <span>{currentSpeaker}</span>
+                <span className="break-words">{currentSpeaker}</span>
               )}
             </div>
           </div>
@@ -584,28 +590,19 @@ export const GameScreen: React.FC<Props> = ({
               </p>
             </div>
           ) : (
-            <div className="flex items-center justify-center gap-3 py-1 animate-in zoom-in-95 duration-150">
-              <WordVisualCard
-                wordEn={room.word}
-                wordAr={room.wordAr}
-                category={room.wordCategory}
-                imageUrl={room.wordImage}
-                size="md"
-              />
-              <div className="text-start">
-                {room.wordCategory && (
-                  <div className="text-[11px] font-bold text-sky-400 flex items-center gap-1">
-                    <span>{CATEGORY_STYLES[room.wordCategory]?.icon}</span>
-                    <span>
-                      {lang === 'ar'
-                        ? CATEGORY_STYLES[room.wordCategory]?.titleAr
-                        : CATEGORY_STYLES[room.wordCategory]?.titleEn}
-                    </span>
-                  </div>
-                )}
-                <div className="text-2xl sm:text-3xl font-black text-white font-heading">
-                  {displayWord}
+            <div className="flex flex-col items-center justify-center gap-1.5 py-2 animate-in zoom-in-95 duration-150 text-center">
+              {room.wordCategory && (
+                <div className="text-xs font-bold text-sky-400 flex items-center justify-center gap-1.5">
+                  <span>{CATEGORY_STYLES[room.wordCategory]?.icon}</span>
+                  <span>
+                    {lang === 'ar'
+                      ? CATEGORY_STYLES[room.wordCategory]?.titleAr
+                      : CATEGORY_STYLES[room.wordCategory]?.titleEn}
+                  </span>
                 </div>
+              )}
+              <div className="text-2xl sm:text-4xl font-black text-white font-heading tracking-wide break-words max-w-full">
+                {displayWord}
               </div>
             </div>
           )
@@ -655,7 +652,7 @@ export const GameScreen: React.FC<Props> = ({
                 {/* Floating Speech Bubble Above Avatar */}
                 {bubble && (
                   <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-in zoom-in-75 duration-200">
-                    <div className="relative px-3 py-1 rounded-2xl bg-white text-slate-950 text-[11px] font-black shadow-xl border-2 border-sky-400 text-center max-w-[130px] truncate">
+                    <div className="relative px-2.5 py-1 rounded-2xl bg-white text-slate-950 text-[11px] font-black shadow-xl border-2 border-sky-400 text-center max-w-[160px] break-words leading-tight">
                       {bubble.text}
                       <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45 border-r-2 border-b-2 border-sky-400" />
                     </div>
@@ -698,7 +695,7 @@ export const GameScreen: React.FC<Props> = ({
                 </div>
 
                 {/* Player Name */}
-                <span className="text-[11px] font-bold text-white truncate max-w-[85px]">
+                <span className="text-[11px] font-bold text-white text-center break-words max-w-[95px] leading-tight">
                   {p?.name || 'Agent'}
                 </span>
 

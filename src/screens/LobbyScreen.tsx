@@ -4,7 +4,7 @@ import { Language, RoomData, PlayerData, FriendEntry, JoinRequest, VoiceUserStat
 import { CATEGORY_META } from '../words';
 import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert, Bot, Trash2, Mic, MicOff } from 'lucide-react';
 import { sound } from '../audio';
-import { VoiceChatBar } from '../components/VoiceChatBar';
+import { QuickVoiceControls } from '../components/QuickVoiceControls';
 
 interface Props {
   lang: Language;
@@ -17,11 +17,13 @@ interface Props {
   friendRequests: Record<string, unknown>;
   isVoiceJoined?: boolean;
   isVoiceMuted?: boolean;
+  isVoiceDeafened?: boolean;
   isVoiceSpeaking?: boolean;
   voiceUsers?: Record<string, VoiceUserState>;
   onJoinVoice?: () => void;
   onLeaveVoice?: () => void;
   onToggleVoiceMute?: () => void;
+  onToggleVoiceDeafen?: () => void;
   onCopyRoomCode: () => void;
   onOpenEditRoom: () => void;
   onOpenInviteFriends: () => void;
@@ -49,11 +51,13 @@ export const LobbyScreen: React.FC<Props> = ({
   friendRequests,
   isVoiceJoined = false,
   isVoiceMuted = false,
+  isVoiceDeafened = false,
   isVoiceSpeaking = false,
   voiceUsers = {},
   onJoinVoice = () => {},
   onLeaveVoice = () => {},
   onToggleVoiceMute = () => {},
+  onToggleVoiceDeafen = () => {},
   onCopyRoomCode,
   onOpenEditRoom,
   onOpenInviteFriends,
@@ -75,7 +79,7 @@ export const LobbyScreen: React.FC<Props> = ({
 
   const playersObj = room.players || {};
   const playersArr = Object.values(playersObj);
-  const activeCount = playersArr.filter(p => !p.isSpectator).length;
+  const activeCount = playersArr.length;
   const maxPlayers = room.maxPlayers || 20;
 
   const cats = room.categories || [];
@@ -162,20 +166,23 @@ export const LobbyScreen: React.FC<Props> = ({
           <div className="text-[11px] font-bold text-slate-400">
             {t.modePrefix} {t[`mode${room.gameMode === 'mole' ? 'MoleNetwork' : room.gameMode === 'silent' ? 'SilentStation' : room.gameMode === 'sabotage' ? 'Sabotage' : 'Normal'}` as keyof typeof t]}
           </div>
-        </div>
 
-        {/* Real-time Voice Chat Bar */}
-        <VoiceChatBar
-          lang={lang}
-          isJoined={isVoiceJoined}
-          isMuted={isVoiceMuted}
-          isSpeaking={isVoiceSpeaking}
-          voiceUsers={voiceUsers}
-          currentUserUid={currentUserUid}
-          onJoinVoice={onJoinVoice}
-          onLeaveVoice={onLeaveVoice}
-          onToggleMute={onToggleVoiceMute}
-        />
+          {/* Quick Voice Controls (Microphone + Headphone side-by-side) */}
+          <div className="flex items-center justify-center pt-2">
+            <QuickVoiceControls
+              lang={lang}
+              isJoined={isVoiceJoined}
+              isMuted={isVoiceMuted}
+              isDeafened={isVoiceDeafened}
+              isSpeaking={isVoiceSpeaking}
+              onJoinVoice={onJoinVoice}
+              onToggleVoiceMute={onToggleVoiceMute}
+              onToggleVoiceDeafen={onToggleVoiceDeafen}
+              size="md"
+              hideLabelsOnMobile={false}
+            />
+          </div>
+        </div>
 
         {/* Host controls */}
         {isHost && (
@@ -275,7 +282,7 @@ export const LobbyScreen: React.FC<Props> = ({
                       className="w-10 h-10 rounded-full object-cover border-2 border-sky-400/50 shrink-0"
                     />
                     <div className="min-w-0">
-                      <div className="font-bold text-xs text-white truncate">{req.name}</div>
+                      <div className="font-bold text-xs text-white break-words">{req.name}</div>
                       <div className="text-[10px] text-slate-400">{t.joinRequestPrompt}</div>
                     </div>
                   </div>
@@ -315,7 +322,7 @@ export const LobbyScreen: React.FC<Props> = ({
 
           <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
             {playersArr.map(p => {
-              const isInLobby = p.postGame === 'inLobby' || (!p.postGame && room.status === 'waiting');
+              const isInLobby = room.status === 'waiting' || p.postGame === 'inLobby' || p.isBot || p.uid.startsWith('bot_');
               const isSpeaking = !!voiceUsers?.[p.uid]?.speaking;
               const isVoiceActive = !!voiceUsers?.[p.uid]?.active;
               const isUserMuted = !!voiceUsers?.[p.uid]?.muted;
@@ -351,7 +358,7 @@ export const LobbyScreen: React.FC<Props> = ({
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                      <span className="font-bold text-xs text-slate-200 truncate">{p.name || 'Player'}</span>
+                      <span className="font-bold text-xs text-slate-200 break-words">{p.name || 'Player'}</span>
                       {p.uid === room.hostUid && (
                         <span title="Host">
                           <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
@@ -368,6 +375,23 @@ export const LobbyScreen: React.FC<Props> = ({
                         <span className={`w-1.5 h-1.5 rounded-full ${isInLobby ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
                         <span>{isInLobby ? t.lblInLobbyTag : t.lblInGameTag}</span>
                       </span>
+
+                      {/* Voice Controls on User's Row */}
+                      {p.uid === currentUserUid && (
+                        <QuickVoiceControls
+                          lang={lang}
+                          isJoined={isVoiceJoined}
+                          isMuted={isVoiceMuted}
+                          isDeafened={isVoiceDeafened}
+                          isSpeaking={isVoiceSpeaking}
+                          onJoinVoice={onJoinVoice}
+                          onToggleVoiceMute={onToggleVoiceMute}
+                          onToggleVoiceDeafen={onToggleVoiceDeafen}
+                          size="sm"
+                          hideLabelsOnMobile={true}
+                        />
+                      )}
+
                       {getFriendButton(p.uid)}
                     </div>
                   </div>

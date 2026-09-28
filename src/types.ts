@@ -89,6 +89,7 @@ export interface VoiceUserState {
   uid: string;
   name: string;
   muted: boolean;
+  deafened?: boolean;
   speaking: boolean;
   active: boolean;
   updatedAt: number;

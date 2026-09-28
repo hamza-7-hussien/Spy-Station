@@ -1,4 +1,4 @@
-import { CategoryKey } from './types';
+import { CategoryKey, Language } from './types';
 
 export const wordsDB: Record<CategoryKey, [string, string][]> = {
   players: [
@@ -96,24 +96,53 @@ export const wordsDB: Record<CategoryKey, [string, string][]> = {
     ["Buckingham Palace", "قصر باكنجهام"], ["Antarctica", "القارة القطبية الجنوبية"]
   ],
   movies: [
+    // Egyptian & Arab Movies and Series
     ["Kirah Wel Genn", "كيرة والجن"], ["Restart", "ريستارت"], ["Serr El Bate", "سره الباتع"],
-    ["Sayed El Nas", "سيد الناس"], ["Brens", "برنس"], ["Taj", "تاج"], ["Hogan", "هوجان"],
+    ["Sayed El Nas", "سيد الناس"], ["Brens", "البرنس"], ["Taj", "تاج"], ["Hogan", "هوجان"],
     ["Profile", "بروفايل"], ["Nasl El Aghrab", "نسل الأغراب"], ["Molouk El Gadaana", "ملوك الجدعنة"],
     ["Be 100 Wesh", "بـ100 وش"], ["Moussa", "موسى"], ["Bedon Sabek Enzar", "بدون سابق إنذار"],
-    ["El Ekhtiar 3", "الاختيار 3"], ["Welad Rizk El Madi", "ولاد رزق الماضي"],
+    ["El Ekhtiar", "الاختيار"], ["Welad Rizk", "ولاد رزق"],
     ["Faten Amal Harbi", "فاتن أمل حربي"], ["Gazirat Ghamam", "جزيرة غمام"], ["Beit El Roby", "بيت الروبي"],
     ["El Hashashin", "الحشاشين"], ["Joddar", "جودر"], ["Esm Mo2aqat", "اسم مؤقت"],
     ["El Maddah", "المداح"], ["Welad El Shams", "ولاد الشمس"], ["Taht El Wesaya", "تحت الوصاية"],
     ["Aho Da Elly Sar", "أهو ده اللي صار"], ["Pablo", "بابلو"], ["Tariki", "طريقي"],
-    ["El Mashwar", "المشوار"], ["Shahd El Malika", "شهد الملكة"], ["Welad Rizk 3", "ولاد رزق 3: القاضية"],
+    ["El Mashwar", "المشوار"], ["Shahd El Malika", "شهد الملكة"], ["Welad Rizk 3", "ولاد رزق 3"],
     ["El Kelab El Sabaa", "الكلاب السبعة"], ["Barshama", "برشامة"], ["Seko Seko", "سيكو سيكو"],
-    ["El Harifa 2", "الحريفة 2: الريمونتادا"], ["X Merati", "اكس مراتي"],
+    ["El Harifa", "الحريفة"], ["X Merati", "اكس مراتي"],
     ["El Hena Elly Ana Fih", "الهنا اللي أنا فيه"], ["Dae Serat Ahl El Dae", "ضي: سيرة أهل الضي"],
-    ["Lam Shamseya", "لام شمسية"], ["Gaafar El Omda 2", "جعفر العمدة 2"], ["Cobra", "كوبرا"],
-    ["Ard El Nefaq 2", "أرض النفاق 2"], ["El Rakoon", "الراكون"], ["Ramadan Kareem 3", "رمضان كريم 3"],
+    ["Lam Shamseya", "لام شمسية"], ["Gaafar El Omda", "جعفر العمدة"], ["Cobra", "كوبرا"],
+    ["Ard El Nefaq", "أرض النفاق"], ["El Rakoon", "الراكون"], ["Ramadan Kareem", "رمضان كريم"],
     ["Qesset Madina", "قصة مدينة"], ["Shoghl Fanadeq", "شغل فنادق"], ["Atabat El Bahga", "عتبات البهجة"],
     ["Hakim Series", "حكيم"], ["Moharib", "محارب"], ["El Amir", "الأمير"], ["Farawla", "فراولة"],
-    ["Kamel El Adad 2", "كامل العدد 2"], ["Lahzet Ghadab", "لحظة غضب"]
+    ["Kamel El Adad", "كامل العدد"], ["Lahzet Ghadab", "لحظة غضب"],
+    ["El Feel El Azraq", "الفيل الأزرق"], ["El Kabeer Awy", "الكبير أوي"],
+    ["El Lembi", "اللمبي"], ["X-Large", "إكس لارج"], ["Asal Eswed", "عسل أسود"],
+    ["Tito", "تيتو"], ["El Gezira", "الجزيرة"], ["Teer Enta", "طير إنت"],
+    ["Harb Karmouz", "حرب كرموز"], ["Ibrahim El Abyad", "إبراهيم الأبيض"],
+    ["Paranormal", "ما وراء الطبيعة"], ["Raafat El Hagan", "رأفت الهجان"],
+    ["Lan A'eesh Fi Gelbab Abi", "لن أعيش في جلباب أبي"], ["El Ostoora", "الأسطورة"],
+
+    // International & Foreign Movies and Series
+    ["Breaking Bad", "بريكنج باد"], ["Game of Thrones", "صراع العروش"],
+    ["Peaky Blinders", "بيكي بلايندرز"], ["Prison Break", "بريزون بريك"],
+    ["Stranger Things", "سترينجر ثينجز"], ["Squid Game", "لعبة الحبار"],
+    ["The Walking Dead", "ذا ووكينج ديد"], ["Sherlock", "شارلوك"],
+    ["Vikings", "فايكنجز"], ["Dark", "دارك"], ["The Last of Us", "ذا لاست أوف أس"],
+    ["Titanic", "تيتانيك"], ["Inception", "إنسبشن"], ["Interstellar", "إنترستيلر"],
+    ["The Dark Knight", "ذا دارك نايت"], ["The Godfather", "العراب"],
+    ["Avatar", "أفاتار"], ["Harry Potter", "هاري بوتر"],
+    ["The Lord of the Rings", "سيد الخواتم"], ["Gladiator", "المصارع"],
+    ["Oppenheimer", "أوبنهايمر"], ["Fight Club", "نادي القتال"],
+    ["Pulp Fiction", "بالب فيكشن"], ["The Matrix", "ماتريكس"],
+    ["Forrest Gump", "فورست جامب"], ["Joker", "الجوكر"],
+    ["Spider-Man", "سبايدرمان"], ["Avengers", "أفنجرز"],
+    ["Pirates of the Caribbean", "قراصنة الكاريبي"], ["Jurassic Park", "حديقة الديناصورات"],
+    ["Home Alone", "هوم ألون"], ["Star Wars", "حرب النجوم"],
+    ["Fast and Furious", "فاست آند فيوريوس"], ["Mission Impossible", "مهمة مستحيلة"],
+    ["John Wick", "جون ويك"], ["Top Gun", "توب جن"],
+    ["Barbie", "باربي"], ["Dune", "كثيب"], ["Shutter Island", "جزيرة شاتر"],
+    ["The Shawshank Redemption", "الخلاص من شاوشانك"], ["Narcos", "ناركوس"],
+    ["La Casa De Papel", "لاكاسا دي بابيل"]
   ],
   games: [
     ["GTA V", "جي تي إيه 5"], ["Minecraft", "ماين كرافت"], ["PUBG", "ببجي"], ["FIFA", "فيفا"],
@@ -243,3 +272,88 @@ export function getCombinedWordList(categories: CategoryKey[]): [string, string]
   if (combined.length === 0) combined = wordsDB.players;
   return combined;
 }
+
+// Known International / Foreign Movies and TV Series (all lowercase for reliable matching)
+export const FOREIGN_MOVIES_SET = new Set([
+  'breaking bad',
+  'game of thrones',
+  'peaky blinders',
+  'prison break',
+  'stranger things',
+  'squid game',
+  'the walking dead',
+  'sherlock',
+  'vikings',
+  'dark',
+  'the last of us',
+  'titanic',
+  'inception',
+  'interstellar',
+  'the dark knight',
+  'the godfather',
+  'avatar',
+  'harry potter',
+  'the lord of the rings',
+  'gladiator',
+  'oppenheimer',
+  'fight club',
+  'pulp fiction',
+  'the matrix',
+  'forrest gump',
+  'joker',
+  'spider-man',
+  'avengers',
+  'pirates of the caribbean',
+  'jurassic park',
+  'home alone',
+  'star wars',
+  'fast and furious',
+  'mission impossible',
+  'john wick',
+  'top gun',
+  'barbie',
+  'dune',
+  'shutter island',
+  'the shawshank redemption',
+  'narcos',
+  'la casa de papel'
+]);
+
+export function isForeignMovie(wordEn?: string | null): boolean {
+  if (!wordEn) return false;
+  return FOREIGN_MOVIES_SET.has(wordEn.trim().toLowerCase());
+}
+
+/**
+ * Universal Word Display Helper according to player's brief:
+ * - All categories (games, animals, players, food, singers, places, jobs, etc.):
+ *   Shows Arabic if player language is 'ar', English if player language is 'en'.
+ * - Exception for Movies & Series:
+ *   If Egyptian/Arab: ALWAYS shown in Arabic (both for 'ar' and 'en' users).
+ *   If Foreign/International: ALWAYS shown in English (both for 'ar' and 'en' users).
+ */
+export function getSecretWordDisplay(
+  wordEn: string | undefined | null,
+  wordAr: string | undefined | null,
+  category: CategoryKey | undefined | null,
+  lang: Language
+): string {
+  const en = (wordEn || '').trim();
+  const ar = (wordAr || '').trim();
+  if (!en && !ar) return '';
+
+  if (category === 'movies') {
+    if (isForeignMovie(en)) {
+      return en || ar;
+    }
+    // Egyptian / Arab movie or series: always Arabic
+    return ar || en;
+  }
+
+  // All other categories: adapt to selected language
+  if (lang === 'ar') {
+    return ar || en;
+  }
+  return en || ar;
+}
+

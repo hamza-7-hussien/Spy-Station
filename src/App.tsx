@@ -20,7 +20,6 @@ import {
   SabotageAbility
 } from './types';
 import { getCombinedWordList, wordsDB } from './words';
-import { getWordImage } from './wordVisuals';
 import { AuthScreen } from './screens/AuthScreen';
 import { HomeTab } from './screens/HomeTab';
 import { StationsTab } from './screens/StationsTab';
@@ -950,6 +949,11 @@ export default function App() {
         return;
       }
 
+      // In waiting lobby, ensure every player is an active astronaut (not spectator)
+      if (data.status === 'waiting' && data.players[currentUser.uid]?.isSpectator) {
+        db.ref(`spy_rooms/${cleanCode}/players/${currentUser.uid}/isSpectator`).set(false).catch(() => {});
+      }
+
       // Instant Host Migration: Check if host left or disconnected
       const playersObj = data.players || {};
       const activePlayers = Object.values(playersObj)
@@ -1244,7 +1248,7 @@ export default function App() {
 
     try {
       const playersObj = { ...(roomData.players || {}) };
-      let playersArr = Object.values(playersObj).filter(p => !p.isSpectator);
+      let playersArr = Object.values(playersObj);
 
       // Require at least 3 players. Do NOT auto-inject bots unless host manually clicked Add Bot!
       if (playersArr.length < 3) {
@@ -1259,7 +1263,6 @@ export default function App() {
       const chosenCat = cats[Math.floor(Math.random() * cats.length)];
       const wordList = wordsDB[chosenCat] || wordsDB.players;
       const selectedPair = wordList[Math.floor(Math.random() * wordList.length)];
-      const wordImg = getWordImage(selectedPair[0], selectedPair[1], chosenCat);
 
       const effectiveSpyCount = Math.max(
         1,
@@ -1333,7 +1336,7 @@ export default function App() {
         word: selectedPair[0] || 'Space Station',
         wordAr: selectedPair[1] || 'محطة الفضاء',
         wordCategory: chosenCat || 'players',
-        wordImage: wordImg || null,
+        wordImage: null,
         spies: spies,
         undercoverUid: undercoverUid || null,
         round: 1,
@@ -1461,11 +1464,13 @@ export default function App() {
             room={roomData}
             isVoiceJoined={voice.isJoined}
             isVoiceMuted={voice.isMuted}
+            isVoiceDeafened={voice.isDeafened}
             isVoiceSpeaking={voice.isSpeaking}
             voiceUsers={voice.voiceUsers}
             onJoinVoice={voice.joinVoice}
             onLeaveVoice={voice.leaveVoice}
             onToggleVoiceMute={voice.toggleMute}
+            onToggleVoiceDeafen={voice.toggleDeafen}
             onAdvanceTurn={advanceTurn}
             onTriggerEmergencyVote={() => {
               db.ref(`spy_rooms/${currentRoomCode}`).update({
@@ -1562,11 +1567,13 @@ export default function App() {
             friendRequests={friendRequests}
             isVoiceJoined={voice.isJoined}
             isVoiceMuted={voice.isMuted}
+            isVoiceDeafened={voice.isDeafened}
             isVoiceSpeaking={voice.isSpeaking}
             voiceUsers={voice.voiceUsers}
             onJoinVoice={voice.joinVoice}
             onLeaveVoice={voice.leaveVoice}
             onToggleVoiceMute={voice.toggleMute}
+            onToggleVoiceDeafen={voice.toggleDeafen}
             onCopyRoomCode={() => {
               if (navigator.clipboard) {
                 navigator.clipboard.writeText(currentRoomCode);

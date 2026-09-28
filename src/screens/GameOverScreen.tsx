@@ -3,7 +3,7 @@ import { dictionary } from '../translations';
 import { Language, RoomData, PlayerData } from '../types';
 import confetti from 'canvas-confetti';
 import { sound } from '../audio';
-import { WordVisualCard } from '../components/WordVisualCard';
+import { getSecretWordDisplay } from '../words';
 import { CATEGORY_STYLES } from '../wordVisuals';
 import { Trophy, RotateCcw, LogOut, Shield, Users } from 'lucide-react';
 
@@ -67,28 +67,19 @@ export const GameOverScreen: React.FC<Props> = ({
 
         {/* Revealed Secret Word Card */}
         {(room.word || room.wordAr) && (
-          <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-sky-500/30 flex items-center justify-center gap-3.5 shadow-inner">
-            <WordVisualCard
-              wordEn={room.word}
-              wordAr={room.wordAr}
-              category={room.wordCategory}
-              imageUrl={room.wordImage}
-              size="md"
-            />
-            <div className="text-start">
-              <span className="text-[10px] uppercase tracking-widest text-sky-400 font-bold block">
-                {lang === 'ar' ? 'الكلمة السرية للمهمة كانت' : 'Mission secret word was'}
-              </span>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                {room.wordCategory && (
-                  <span className="text-xs text-sky-300/80 font-bold">
-                    {CATEGORY_STYLES[room.wordCategory]?.icon}
-                  </span>
-                )}
-                <span className="text-xl sm:text-2xl font-black text-white font-heading">
-                  {lang === 'ar' ? room.wordAr || room.word : room.word || room.wordAr}
+          <div className="p-4 rounded-2xl bg-slate-950/70 border border-sky-500/30 flex flex-col items-center justify-center gap-1.5 shadow-inner text-center">
+            <span className="text-[11px] uppercase tracking-widest text-sky-400 font-bold block">
+              {lang === 'ar' ? 'الكلمة السرية للمهمة كانت' : 'Mission secret word was'}
+            </span>
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              {room.wordCategory && (
+                <span className="text-sm text-sky-300 font-bold">
+                  {CATEGORY_STYLES[room.wordCategory]?.icon}
                 </span>
-              </div>
+              )}
+              <span className="text-2xl sm:text-3xl font-black text-white font-heading break-words">
+                {getSecretWordDisplay(room.word, room.wordAr, room.wordCategory, lang)}
+              </span>
             </div>
           </div>
         )}

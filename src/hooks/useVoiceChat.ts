@@ -28,10 +28,12 @@ export function useVoiceChat({
 }: Props) {
   const [isJoined, setIsJoined] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isDeafened, setIsDeafened] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceUsers, setVoiceUsers] = useState<Record<string, VoiceUserState>>({});
 
   const localStreamRef = useRef<MediaStream | null>(null);
+  const isDeafenedRef = useRef<boolean>(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
@@ -222,6 +224,7 @@ export function useVoiceChat({
         audioElementsRef.current[peerUid] = audioEl;
       }
       audioEl.srcObject = event.streams[0];
+      audioEl.muted = isDeafenedRef.current;
       audioEl.play().catch(() => {});
     };
 
@@ -296,6 +299,7 @@ export function useVoiceChat({
         uid: currentUserUid,
         name: currentUserName,
         muted: false,
+        deafened: isDeafenedRef.current,
         speaking: false,
         active: true,
         updatedAt: firebase.database.ServerValue.TIMESTAMP
@@ -344,7 +348,7 @@ export function useVoiceChat({
     }
   }, [roomCode, currentUserUid]);
 
-  // Toggle Mute
+  // Toggle Mute (Microphone)
   const toggleMute = () => {
     if (!localStreamRef.current) return;
     const audioTrack = localStreamRef.current.getAudioTracks()[0];
@@ -360,6 +364,22 @@ export function useVoiceChat({
     }
   };
 
+  // Toggle Deafen (Headphones / Audio Output)
+  const toggleDeafen = useCallback(() => {
+    const nextDeafened = !isDeafenedRef.current;
+    isDeafenedRef.current = nextDeafened;
+    setIsDeafened(nextDeafened);
+
+    // Mute/unmute all incoming audio elements
+    Object.values(audioElementsRef.current).forEach(audioEl => {
+      audioEl.muted = nextDeafened;
+    });
+
+    if (roomCode && currentUserUid) {
+      db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/deafened`).set(nextDeafened).catch(() => {});
+    }
+  }, [roomCode, currentUserUid]);
+
   // Clean up on unmount or room leave
   useEffect(() => {
     return () => {
@@ -370,10 +390,12 @@ export function useVoiceChat({
   return {
     isJoined,
     isMuted,
+    isDeafened,
     isSpeaking,
     voiceUsers,
     joinVoice,
     leaveVoice,
-    toggleMute
+    toggleMute,
+    toggleDeafen
   };
 }

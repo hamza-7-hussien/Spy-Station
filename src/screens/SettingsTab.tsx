@@ -442,35 +442,19 @@ export const SettingsTab: React.FC<Props> = ({
           </div>
         </form>
 
-        {/* Check for Updates / Force Reload */}
+        {/* Update Game */}
         <button
-          onClick={async () => {
+          onClick={() => {
             sound.playTone(520, 'sine', 0.1);
-            onToast(lang === 'ar' ? 'جاري تحديث التطبيق وتفريغ الكاش...' : 'Updating & refreshing cache...', 'normal');
-            try {
-              if ('serviceWorker' in navigator) {
-                const regs = await navigator.serviceWorker.getRegistrations();
-                for (const reg of regs) {
-                  await reg.unregister();
-                }
-              }
-              if ('caches' in window) {
-                const keys = await caches.keys();
-                for (const k of keys) {
-                  await caches.delete(k);
-                }
-              }
-            } catch {
-              // ignore
-            }
+            onToast(lang === 'ar' ? 'جاري تحديث اللعبة...' : 'Updating game...', 'normal');
             setTimeout(() => {
               window.location.reload();
-            }, 500);
+            }, 300);
           }}
           className="w-full py-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-sky-400 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>{lang === 'ar' ? 'تحديث التطبيق ومسح الذاكرة المؤقتة' : 'Check for Updates & Clear Cache'}</span>
+          <span>{lang === 'ar' ? 'تحديث اللعبة 🚀' : 'Update Game 🚀'}</span>
         </button>
 
         {/* Logout */}
