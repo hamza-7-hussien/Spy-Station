@@ -425,7 +425,7 @@ export const GameScreen: React.FC<Props> = ({
             onToggleVoiceMute={onToggleVoiceMute}
             onToggleVoiceDeafen={onToggleVoiceDeafen}
             size="sm"
-            hideLabelsOnMobile={true}
+            compact={true}
           />
 
           {/* Dedicated Chat History Button */}
@@ -446,7 +446,7 @@ export const GameScreen: React.FC<Props> = ({
             )}
           </button>
 
-          {/* Sound Toggle */}
+          {/* Game Sound SFX Toggle (Completely Independent from Voice Chat) */}
           <button
             onClick={() => {
               const muted = sound.toggleMute();
@@ -457,7 +457,11 @@ export const GameScreen: React.FC<Props> = ({
                 ? 'bg-rose-950/40 border-rose-500/40 text-rose-400'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
             }`}
-            title={isMuted ? 'Unmute' : 'Mute'}
+            title={
+              isMuted
+                ? (lang === 'ar' ? 'تشغيل مؤثرات صوت اللعبة (مستقل عن الفويس)' : 'Unmute Game SFX (Independent from voice)')
+                : (lang === 'ar' ? 'كتم مؤثرات صوت اللعبة (مستقل عن الفويس)' : 'Mute Game SFX (Independent from voice)')
+            }
           >
             {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
           </button>

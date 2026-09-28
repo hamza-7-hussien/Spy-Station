@@ -166,22 +166,6 @@ export const LobbyScreen: React.FC<Props> = ({
           <div className="text-[11px] font-bold text-slate-400">
             {t.modePrefix} {t[`mode${room.gameMode === 'mole' ? 'MoleNetwork' : room.gameMode === 'silent' ? 'SilentStation' : room.gameMode === 'sabotage' ? 'Sabotage' : 'Normal'}` as keyof typeof t]}
           </div>
-
-          {/* Quick Voice Controls (Microphone + Headphone side-by-side) */}
-          <div className="flex items-center justify-center pt-2">
-            <QuickVoiceControls
-              lang={lang}
-              isJoined={isVoiceJoined}
-              isMuted={isVoiceMuted}
-              isDeafened={isVoiceDeafened}
-              isSpeaking={isVoiceSpeaking}
-              onJoinVoice={onJoinVoice}
-              onToggleVoiceMute={onToggleVoiceMute}
-              onToggleVoiceDeafen={onToggleVoiceDeafen}
-              size="md"
-              hideLabelsOnMobile={false}
-            />
-          </div>
         </div>
 
         {/* Host controls */}
@@ -330,13 +314,14 @@ export const LobbyScreen: React.FC<Props> = ({
               return (
                 <div
                   key={p.uid}
-                  className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all ${
+                  className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all gap-2 ${
                     isSpeaking
                       ? 'bg-emerald-950/40 border-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.3)]'
                       : 'bg-slate-950/70 border-slate-800'
                   }`}
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
+                  {/* Left: Avatar + Name + Badges */}
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
                     <div className="relative shrink-0">
                       <img
                         src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`}
@@ -357,16 +342,16 @@ export const LobbyScreen: React.FC<Props> = ({
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                      <span className="font-bold text-xs text-slate-200 break-words">{p.name || 'Player'}</span>
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+                      <span className="font-bold text-xs text-slate-200 truncate">{p.name || 'Player'}</span>
                       {p.uid === room.hostUid && (
-                        <span title="Host">
+                        <span title="Host" className="shrink-0">
                           <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
                         </span>
                       )}
                       {/* In Lobby vs In Game Badge */}
                       <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1 ${
+                        className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 ${
                           isInLobby
                             ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                             : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
@@ -376,46 +361,49 @@ export const LobbyScreen: React.FC<Props> = ({
                         <span>{isInLobby ? t.lblInLobbyTag : t.lblInGameTag}</span>
                       </span>
 
-                      {/* Voice Controls on User's Row */}
-                      {p.uid === currentUserUid && (
-                        <QuickVoiceControls
-                          lang={lang}
-                          isJoined={isVoiceJoined}
-                          isMuted={isVoiceMuted}
-                          isDeafened={isVoiceDeafened}
-                          isSpeaking={isVoiceSpeaking}
-                          onJoinVoice={onJoinVoice}
-                          onToggleVoiceMute={onToggleVoiceMute}
-                          onToggleVoiceDeafen={onToggleVoiceDeafen}
-                          size="sm"
-                          hideLabelsOnMobile={true}
-                        />
-                      )}
-
                       {getFriendButton(p.uid)}
                     </div>
                   </div>
 
-                  {isHost && p.uid !== currentUserUid && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      {!p.isBot && !p.uid.startsWith('bot_') && (
+                  {/* Right: Actions aligned to the right (Voice controls for self, Host controls for others) */}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Voice Controls on User's Row - Fixed compact size, never wraps */}
+                    {p.uid === currentUserUid && (
+                      <QuickVoiceControls
+                        lang={lang}
+                        isJoined={isVoiceJoined}
+                        isMuted={isVoiceMuted}
+                        isDeafened={isVoiceDeafened}
+                        isSpeaking={isVoiceSpeaking}
+                        onJoinVoice={onJoinVoice}
+                        onToggleVoiceMute={onToggleVoiceMute}
+                        onToggleVoiceDeafen={onToggleVoiceDeafen}
+                        size="sm"
+                        compact={true}
+                      />
+                    )}
+
+                    {isHost && p.uid !== currentUserUid && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        {!p.isBot && !p.uid.startsWith('bot_') && (
+                          <button
+                            onClick={() => onMakeHost(p.uid)}
+                            className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-400/10 transition cursor-pointer"
+                            title={lang === 'ar' ? 'ترقية لمضيف' : 'Promote to Host'}
+                          >
+                            <Crown className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                         <button
-                          onClick={() => onMakeHost(p.uid)}
-                          className="p-1 rounded-lg text-amber-400 hover:bg-amber-400/10 transition cursor-pointer"
-                          title={lang === 'ar' ? 'ترقية لمضيف' : 'Promote to Host'}
+                          onClick={() => onKickPlayer(p.uid)}
+                          className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
+                          title={lang === 'ar' ? 'طرد من الروم' : 'Kick from Station'}
                         >
-                          <Crown className="w-3.5 h-3.5" />
+                          <LogOut className="w-3.5 h-3.5" />
                         </button>
-                      )}
-                      <button
-                        onClick={() => onKickPlayer(p.uid)}
-                        className="p-1 rounded-lg text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
-                        title={lang === 'ar' ? 'طرد من الروم' : 'Kick from Station'}
-                      >
-                        <LogOut className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               );
             })}

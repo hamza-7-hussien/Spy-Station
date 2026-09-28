@@ -1,7 +1,7 @@
 import React from 'react';
 import { dictionary } from '../translations';
 import { Language, VoiceUserState } from '../types';
-import { Mic, MicOff, PhoneOff, Radio, Volume2, Headphones, VolumeX } from 'lucide-react';
+import { Mic, MicOff, PhoneOff, Radio, Volume2, Headphones, HeadphoneOff } from 'lucide-react';
 import { sound } from '../audio';
 
 interface Props {
@@ -156,9 +156,9 @@ export const VoiceChatBar: React.FC<Props> = ({
               ? 'bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/50'
               : 'bg-cyan-600/30 hover:bg-cyan-600/50 text-cyan-300 border border-cyan-500/50'
           }`}
-          title={isDeafened ? (lang === 'ar' ? 'تشغيل السماعة' : 'Unmute Audio') : (lang === 'ar' ? 'قفل السماعة' : 'Deafen Audio')}
+          title={isDeafened ? (lang === 'ar' ? 'تشغيل سماعة المحادثة' : 'Unmute Voice Audio') : (lang === 'ar' ? 'كتم سماعة المحادثة' : 'Deafen Voice Audio')}
         >
-          {isDeafened ? <VolumeX className="w-3.5 h-3.5" /> : <Headphones className="w-3.5 h-3.5" />}
+          {isDeafened ? <HeadphoneOff className="w-3.5 h-3.5 text-rose-400" /> : <Headphones className="w-3.5 h-3.5" />}
           <span className="hidden sm:inline">
             {isDeafened ? (lang === 'ar' ? 'فتح السماعة' : 'Hear Audio') : (lang === 'ar' ? 'قفل السماعة' : 'Deafen')}
           </span>
