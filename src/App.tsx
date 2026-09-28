@@ -101,6 +101,8 @@ export default function App() {
   const watchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const lastRoomSnapshotRef = useRef<RoomData | null>(null);
+  const pendingReqCleanupsRef = useRef<(() => void) | null>(null);
+  const activeFriendListenersRef = useRef<(() => void)[]>([]);
 
   const t = dictionary[lang];
 
@@ -229,18 +231,27 @@ export default function App() {
     friendsRef.on('value', snap => {
       const f = snap.val() || {};
       setFriends(f);
+
+      // Clean up previous child listeners to prevent memory leaks
+      activeFriendListenersRef.current.forEach(cleanup => cleanup());
+      activeFriendListenersRef.current = [];
+
       // Listen to friends' presence statuses and real-time profile updates
       Object.keys(f).forEach(fUid => {
-        db.ref(`status/${fUid}`).on('value', s => {
+        const sRef = db.ref(`status/${fUid}`);
+        const onStatus = (s: firebase.database.DataSnapshot) => {
           const val = s.val();
           setFriendStatuses(prev => ({
             ...prev,
             [fUid]: val && val.state === 'online' ? 'online' : 'offline'
           }));
-        });
+        };
+        sRef.on('value', onStatus);
+        activeFriendListenersRef.current.push(() => sRef.off('value', onStatus));
 
         // Real-time friend profile sync (name/avatar updates automatically for everyone)
-        db.ref(`users/${fUid}`).on('value', uSnap => {
+        const uRef = db.ref(`users/${fUid}`);
+        const onProfile = (uSnap: firebase.database.DataSnapshot) => {
           const uData = uSnap.val();
           if (uData && (uData.name || uData.avatar)) {
             setFriends(prev => {
@@ -256,7 +267,9 @@ export default function App() {
               };
             });
           }
-        });
+        };
+        uRef.on('value', onProfile);
+        activeFriendListenersRef.current.push(() => uRef.off('value', onProfile));
       });
     });
 
@@ -408,9 +421,10 @@ export default function App() {
             turnIntervalRef.current = null;
             return;
           }
-          const left = room.turnTimeLeft != null ? room.turnTimeLeft : room.turnSeconds || 20;
+          const defaultTurnSeconds = room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20);
+          const left = room.turnTimeLeft != null ? room.turnTimeLeft : defaultTurnSeconds;
           if (left <= 1) {
-            advanceTurn();
+            advanceTurn(room.turnIndex);
           } else {
             db.ref(`spy_rooms/${currentRoomCode}/turnTimeLeft`).set(left - 1);
           }
@@ -464,6 +478,7 @@ export default function App() {
   const awardXP = async (playersObj: Record<string, PlayerData>, spies: string[], winner: 'crew' | 'spies') => {
     const updates: Record<string, number> = {};
     for (const uid in playersObj) {
+      if (uid.startsWith('bot_') || playersObj[uid]?.isBot) continue;
       const isSpy = spies.includes(uid);
       const isWinner = (winner === 'crew' && !isSpy) || (winner === 'spies' && isSpy);
       const gain = 10 + (isWinner ? 25 : 0);
@@ -540,7 +555,7 @@ export default function App() {
             }, 6000);
 
             setTimeout(() => {
-              advanceTurn();
+              advanceTurn(latest?.turnIndex);
             }, 1200);
           }
         }, 2200);
@@ -575,12 +590,17 @@ export default function App() {
     }
   }, [isHost, currentRoomCode, roomData?.status, roomData?.turnIndex, roomData?.votes]);
 
-  // Advance Turn logic
-  const advanceTurn = async () => {
+  // Advance Turn logic (Guarded by expectedTurnIndex to prevent double-skipping race conditions)
+  const advanceTurn = async (expectedTurnIndex?: number) => {
     if (!currentRoomCode) return;
     try {
       await db.ref(`spy_rooms/${currentRoomCode}`).transaction(room => {
         if (!room || room.status !== 'playing' || !room.turnOrder) return room;
+        // If an expected turn index is specified, ensure turn hasn't already advanced
+        if (expectedTurnIndex !== undefined && room.turnIndex !== expectedTurnIndex) {
+          return room;
+        }
+
         const playersObj = room.players || {};
         let nextIndex = (room.turnIndex || 0) + 1;
 
@@ -590,6 +610,9 @@ export default function App() {
         ) {
           nextIndex++;
         }
+
+        const isRapid = room.gameMode === 'rapid';
+        const defaultTurnSeconds = isRapid ? 7 : (room.turnSeconds || 20);
 
         if (nextIndex >= room.turnOrder.length) {
           const currentRoundNum = room.round || 1;
@@ -605,12 +628,12 @@ export default function App() {
             room.round = currentRoundNum + 1;
             room.turnOrder = activeUids;
             room.turnIndex = 0;
-            room.turnTimeLeft = room.turnSeconds || 20;
+            room.turnTimeLeft = defaultTurnSeconds;
             room.votes = null;
           }
         } else {
           room.turnIndex = nextIndex;
-          room.turnTimeLeft = room.turnSeconds || 20;
+          room.turnTimeLeft = defaultTurnSeconds;
         }
         room.currentDrawing = null;
         return room;
@@ -767,7 +790,7 @@ export default function App() {
   // Request to Join Room (Public rooms require Host approval)
   const handleRequestJoinRoom = async (code: string) => {
     if (!currentUser) return;
-    const cleanCode = code.toUpperCase();
+    const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     try {
       const snap = await db.ref(`spy_rooms/${cleanCode}`).once('value');
       const room = snap.val();
@@ -812,7 +835,7 @@ export default function App() {
 
         // Track live queue position among pending requests
         const allRequestsRef = db.ref(`spy_rooms/${cleanCode}/joinRequests`);
-        allRequestsRef.on('value', allSnap => {
+        const onAllReqs = (allSnap: firebase.database.DataSnapshot) => {
           const allReqs = allSnap.val() || {};
           const myReq = allReqs[currentUser.uid];
           if (!myReq) return;
@@ -822,26 +845,35 @@ export default function App() {
               return req && req.status === 'pending' && (req.timestamp || 0) < (myReq.timestamp || 0);
             }).length;
           setPendingJoinApproval(prev => prev ? { ...prev, queuePosition: pendingBefore + 1 } : null);
-        });
+        };
+        allRequestsRef.on('value', onAllReqs);
 
         // Listen for host decision
-        reqRef.on('value', respSnap => {
+        const onDecision = (respSnap: firebase.database.DataSnapshot) => {
           const reqData = respSnap.val();
           if (!reqData) return;
           if (reqData.status === 'accepted') {
-            reqRef.off();
-            allRequestsRef.off();
+            reqRef.off('value', onDecision);
+            allRequestsRef.off('value', onAllReqs);
+            pendingReqCleanupsRef.current = null;
             setPendingJoinApproval(null);
             joinRoom(cleanCode);
             showToast(t.joinRequestAccepted, 'success');
           } else if (reqData.status === 'rejected') {
-            reqRef.off();
-            allRequestsRef.off();
-            reqRef.remove();
+            reqRef.off('value', onDecision);
+            allRequestsRef.off('value', onAllReqs);
+            pendingReqCleanupsRef.current = null;
+            reqRef.remove().catch(() => {});
             setPendingJoinApproval(null);
             showToast(t.joinRequestDeclined, 'danger');
           }
-        });
+        };
+        reqRef.on('value', onDecision);
+
+        pendingReqCleanupsRef.current = () => {
+          reqRef.off('value', onDecision);
+          allRequestsRef.off('value', onAllReqs);
+        };
         return;
       }
 
@@ -854,6 +886,10 @@ export default function App() {
 
   const handleCancelJoinRequest = async () => {
     if (pendingJoinApproval && currentUser) {
+      if (pendingReqCleanupsRef.current) {
+        pendingReqCleanupsRef.current();
+        pendingReqCleanupsRef.current = null;
+      }
       db.ref(`spy_rooms/${pendingJoinApproval.code}/joinRequests/${currentUser.uid}`).remove().catch(() => {});
       setPendingJoinApproval(null);
     }
@@ -898,7 +934,7 @@ export default function App() {
   // Join Room lifecycle
   const joinRoom = async (code: string) => {
     if (!currentUser) return;
-    const cleanCode = code.toUpperCase();
+    const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     setCurrentRoomCode(cleanCode);
     localStorage.setItem('spy_station_room', cleanCode);
     requestWakeLock();
@@ -1022,6 +1058,7 @@ export default function App() {
                 timestamp: firebase.database.ServerValue.TIMESTAMP
               }
             });
+            awardXP(playersObj, data.spies || [], 'crew');
             return;
           }
         }
@@ -1471,7 +1508,7 @@ export default function App() {
             onLeaveVoice={voice.leaveVoice}
             onToggleVoiceMute={voice.toggleMute}
             onToggleVoiceDeafen={voice.toggleDeafen}
-            onAdvanceTurn={advanceTurn}
+            onAdvanceTurn={() => advanceTurn(roomData?.turnIndex)}
             onTriggerEmergencyVote={() => {
               db.ref(`spy_rooms/${currentRoomCode}`).update({
                 status: 'voting',
@@ -1500,7 +1537,10 @@ export default function App() {
                 round: targetRound,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
               });
-              advanceTurn();
+              advanceTurn(targetTurnIndex);
+            }}
+            onAwardCrewXP={(pObj, spies) => {
+              awardXP(pObj, spies, 'crew');
             }}
             onSendSpyChat={msg => {
               db.ref(`spy_rooms/${currentRoomCode}/spyChat`).push({
@@ -1531,7 +1571,11 @@ export default function App() {
               });
               const snap = await db.ref(`spy_rooms/${currentRoomCode}/players`).once('value');
               const pObj = snap.val() || {};
-              const viewing = Object.values(pObj).some((p: unknown) => (p as PlayerData).postGame !== 'inLobby');
+              // Only human players need to acknowledge returning to lobby
+              const viewing = Object.values(pObj).some((p: unknown) => {
+                const pl = p as PlayerData;
+                return !pl.isBot && !pl.uid.startsWith('bot_') && pl.postGame !== 'inLobby';
+              });
 
               if (!viewing) {
                 const reset: Record<string, PlayerData> = {};

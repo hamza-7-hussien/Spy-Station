@@ -16,6 +16,19 @@ class AudioManager {
     if (savedMute !== null) {
       this.muted = savedMute === 'true';
     }
+
+    // Auto-unlock AudioContext on first user interaction (critical for iOS Safari & Android Chrome)
+    if (typeof window !== 'undefined') {
+      const unlockAudio = () => {
+        this.initCtx();
+        window.removeEventListener('click', unlockAudio);
+        window.removeEventListener('touchstart', unlockAudio);
+        window.removeEventListener('pointerdown', unlockAudio);
+      };
+      window.addEventListener('click', unlockAudio, { once: true, passive: true });
+      window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+      window.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
+    }
   }
 
   private initCtx() {

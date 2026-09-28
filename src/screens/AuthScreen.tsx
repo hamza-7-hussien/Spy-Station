@@ -76,7 +76,7 @@ export const AuthScreen: React.FC<Props> = ({ lang, onToggleLanguage, onToast })
     e.preventDefault();
     sound.triggerHaptic('medium');
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
     const cleanUsername = username.trim();
 
@@ -161,7 +161,7 @@ export const AuthScreen: React.FC<Props> = ({ lang, onToggleLanguage, onToast })
 
   const handleSendResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    const mail = (resetEmail || email).trim();
+    const mail = (resetEmail || email).trim().toLowerCase();
     if (!mail) {
       return onToast(t.errFillFields, 'danger');
     }

@@ -51,6 +51,7 @@ interface Props {
   onOpenSabotageSwap?: () => void;
   onSendGameClue: (word: string, targetRound: number, targetTurnIndex: number) => void;
   onSendSpyChat: (msg: string) => void;
+  onAwardCrewXP?: (players: Record<string, PlayerData>, spies: string[]) => void;
   onToast: (msg: string, type?: 'normal' | 'danger' | 'success') => void;
   onLeaveRoom?: () => void;
 }
@@ -73,6 +74,7 @@ export const GameScreen: React.FC<Props> = ({
   onTriggerEmergencyVote,
   onSendGameClue,
   onSendSpyChat,
+  onAwardCrewXP,
   onToast,
   onLeaveRoom
 }) => {
@@ -359,6 +361,7 @@ export const GameScreen: React.FC<Props> = ({
             timestamp: firebase.database.ServerValue.TIMESTAMP
           }
         });
+        onAwardCrewXP?.(playersObj, room.spies || []);
       } else {
         sound.playClick();
         await db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}/disqualifiedVote`).set(true);
@@ -605,8 +608,8 @@ export const GameScreen: React.FC<Props> = ({
                   </span>
                 </div>
               )}
-              <div className="text-2xl sm:text-4xl font-black text-white font-heading tracking-wide break-words max-w-full">
-                {displayWord}
+              <div className="text-xl sm:text-3xl md:text-4xl font-black text-white font-heading tracking-wide break-words max-w-full text-center leading-tight">
+                {displayWord || (lang === 'ar' ? 'كلمة سرية' : 'Secret Word')}
               </div>
             </div>
           )

@@ -65,19 +65,23 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
               .filter(Boolean);
 
             const isMyTarget = votes[currentUserUid] === p.uid;
+            const isSelf = p.uid === currentUserUid;
+            const isSelectable = canVote && !isSelf;
 
             return (
               <div
                 key={p.uid}
-                onClick={() => canVote && handleVote(p.uid)}
+                onClick={() => isSelectable && handleVote(p.uid)}
                 className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
-                  canVote
+                  isSelectable
                     ? 'cursor-pointer hover:border-purple-400/60 hover:bg-slate-800/80 active:scale-[0.99]'
+                    : isSelf
+                    ? 'cursor-default opacity-85 bg-slate-950/40 border-slate-800/80'
                     : 'cursor-default'
                 } ${
                   isMyTarget
                     ? 'border-sky-400 bg-sky-500/15 shadow-[0_0_15px_rgba(56,189,248,0.3)]'
-                    : 'border-slate-800 bg-slate-950/70'
+                    : !isSelf ? 'border-slate-800 bg-slate-950/70' : ''
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -86,11 +90,18 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
                     alt="avatar"
                     className="w-10 h-10 rounded-full object-cover border border-purple-400/40"
                   />
-                  <span className="font-bold text-sm text-slate-100">{p.name || 'Player'}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-sm text-slate-100">{p.name || 'Player'}</span>
+                    {isSelf && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-sky-400 border border-slate-700 font-bold">
+                        {lang === 'ar' ? 'أنت' : 'You'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Live mini avatars of players who voted for this person */}
-                <div className="flex items-center -space-x-2">
+                <div className="flex items-center -space-x-2 rtl:space-x-reverse">
                   {votersForThisPlayer.map(v => (
                     <img
                       key={v.uid}
@@ -133,7 +144,7 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
           {skipVoters.length > 0 && (
             <div className="flex items-center gap-1 pt-1">
               <span className="text-[11px] text-slate-400 font-bold">{t.btnSkipVote}:</span>
-              <div className="flex items-center -space-x-1.5">
+              <div className="flex items-center -space-x-1.5 rtl:space-x-reverse">
                 {skipVoters.map(v => (
                   <img
                     key={v.uid}

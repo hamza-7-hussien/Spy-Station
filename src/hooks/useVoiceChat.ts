@@ -83,7 +83,9 @@ export function useVoiceChat({
           sum += dataArray[i];
         }
         const avg = sum / dataArray.length;
-        const nowSpeaking = avg > 18;
+        // Check if local track is disabled/muted
+        const isTrackMuted = !localStreamRef.current.getAudioTracks().some(t => t.enabled);
+        const nowSpeaking = !isTrackMuted && avg > 18;
 
         setIsSpeaking(prev => {
           if (prev !== nowSpeaking) {
@@ -221,6 +223,12 @@ export function useVoiceChat({
       if (!audioEl) {
         audioEl = document.createElement('audio');
         audioEl.autoplay = true;
+        audioEl.style.position = 'fixed';
+        audioEl.style.pointerEvents = 'none';
+        audioEl.style.opacity = '0';
+        audioEl.style.width = '1px';
+        audioEl.style.height = '1px';
+        document.body.appendChild(audioEl);
         audioElementsRef.current[peerUid] = audioEl;
       }
       audioEl.srcObject = event.streams[0];
@@ -247,7 +255,20 @@ export function useVoiceChat({
     for (const peer of peers) {
       // Deterministic polite offerer pattern: UID with smaller string creates offer
       if (currentUserUid < peer.uid) {
+        const existingPc = peerConnectionsRef.current[peer.uid];
+        // Do not create duplicate offers if connection is already established or negotiating
+        if (
+          existingPc &&
+          (existingPc.connectionState === 'connected' ||
+           existingPc.connectionState === 'connecting' ||
+           existingPc.signalingState !== 'stable')
+        ) {
+          continue;
+        }
+
         const pc = createPeerConnection(peer.uid);
+        if (pc.signalingState !== 'stable') continue;
+
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);

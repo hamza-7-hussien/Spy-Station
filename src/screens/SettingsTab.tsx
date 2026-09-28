@@ -223,8 +223,11 @@ export const SettingsTab: React.FC<Props> = ({
               alt="Avatar"
               className="w-24 h-24 rounded-full object-cover border-2 border-purple-400 shadow-[0_0_20px_rgba(192,132,252,0.4)] bg-slate-950"
               onError={e => {
-                // fallback if broken URL
-                (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/bottts/svg?seed=${userId || 'agent'}`;
+                const target = e.target as HTMLImageElement;
+                if (!target.dataset.fallbackApplied) {
+                  target.dataset.fallbackApplied = 'true';
+                  target.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${userId || 'agent'}`;
+                }
               }}
             />
             {uploading && (

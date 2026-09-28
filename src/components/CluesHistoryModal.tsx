@@ -157,7 +157,7 @@ export const CluesHistoryModal: React.FC<Props> = ({
                         </div>
 
                         {/* Clue Word / Clue Text */}
-                        <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-sky-400/40 text-sky-200 text-xs sm:text-sm font-black tracking-wide shadow-inner max-w-[160px] truncate text-center">
+                        <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-sky-400/40 text-sky-200 text-xs sm:text-sm font-black tracking-wide shadow-inner max-w-[200px] break-words text-center">
                           "{clue.text}"
                         </div>
                       </div>
