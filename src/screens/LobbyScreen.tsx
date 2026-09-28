@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { dictionary } from '../translations';
 import { Language, RoomData, PlayerData, FriendEntry, JoinRequest, VoiceUserState } from '../types';
 import { CATEGORY_META } from '../words';
-import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert, Bot, Trash2, Mic, MicOff } from 'lucide-react';
+import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert, Bot, Trash2, Mic, MicOff, Headphones, HeadphoneOff, Clock } from 'lucide-react';
 import { sound } from '../audio';
 import { QuickVoiceControls } from '../components/QuickVoiceControls';
 
@@ -38,6 +38,7 @@ interface Props {
   onSendChatMessage: (text: string) => void;
   onAcceptJoinRequest?: (uid: string) => void;
   onDeclineJoinRequest?: (uid: string) => void;
+  onToast?: (msg: string, type?: 'normal' | 'danger' | 'success') => void;
 }
 
 export const LobbyScreen: React.FC<Props> = ({
@@ -71,7 +72,8 @@ export const LobbyScreen: React.FC<Props> = ({
   onAcceptFriendRequest,
   onSendChatMessage,
   onAcceptJoinRequest,
-  onDeclineJoinRequest
+  onDeclineJoinRequest,
+  onToast = () => {}
 }) => {
   const [chatMsg, setChatMsg] = useState('');
   const [isStartingGame, setIsStartingGame] = useState(false);
@@ -81,6 +83,12 @@ export const LobbyScreen: React.FC<Props> = ({
   const playersArr = Object.values(playersObj);
   const activeCount = playersArr.length;
   const maxPlayers = room.maxPlayers || 20;
+
+  // Check if all human players are in the lobby before allowing start
+  const humanPlayers = playersArr.filter(p => !p.isBot && !p.uid.startsWith('bot_'));
+  const allPlayersInLobby = humanPlayers.every(
+    p => room.status === 'waiting' || p.postGame === 'inLobby'
+  );
 
   const cats = room.categories || [];
   const catNames = cats
@@ -103,18 +111,18 @@ export const LobbyScreen: React.FC<Props> = ({
     }
   };
 
-  const getFriendButton = (uid: string) => {
-    if (uid === currentUserUid) return null;
+  const getFriendButton = (uid: string, isBot?: boolean) => {
+    if (uid === currentUserUid || isBot || uid.startsWith('bot_')) return null;
+    // If already friends: show nothing next to them
     if (friends && friends[uid]) {
-      return (
-        <span className="text-[10px] font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-400/20">
-          {t.tagAlreadyFriend}
-        </span>
-      );
+      return null;
     }
     if (sentRequests && sentRequests[uid]) {
       return (
-        <span className="text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full">
+        <span
+          title={lang === 'ar' ? 'طلب صداقة معلق' : 'Friend request pending'}
+          className="text-[10px] font-bold text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full shrink-0"
+        >
           {t.btnPending}
         </span>
       );
@@ -123,7 +131,7 @@ export const LobbyScreen: React.FC<Props> = ({
       return (
         <button
           onClick={() => onAcceptFriendRequest(uid)}
-          className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full hover:bg-emerald-500/30 transition cursor-pointer"
+          className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-full hover:bg-emerald-500/30 transition cursor-pointer shrink-0"
         >
           {t.tagRequestReceived}
         </button>
@@ -132,7 +140,7 @@ export const LobbyScreen: React.FC<Props> = ({
     return (
       <button
         onClick={() => onSendFriendRequest(uid)}
-        className="p-1 rounded-lg text-sky-300 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-400/20 transition cursor-pointer"
+        className="p-1 rounded-lg text-sky-300 bg-sky-500/15 hover:bg-sky-500/30 border border-sky-400/30 transition cursor-pointer shrink-0"
         title={lang === 'ar' ? 'إضافة كصديق' : 'Add Friend'}
       >
         <UserPlus className="w-3.5 h-3.5" />
@@ -164,7 +172,18 @@ export const LobbyScreen: React.FC<Props> = ({
             {t.categoryPrefix} {catNames || t.catRandom}
           </div>
           <div className="text-[11px] font-bold text-slate-400">
-            {t.modePrefix} {t[`mode${room.gameMode === 'mole' ? 'MoleNetwork' : room.gameMode === 'silent' ? 'SilentStation' : room.gameMode === 'sabotage' ? 'Sabotage' : 'Normal'}` as keyof typeof t]}
+            {t.modePrefix}{' '}
+            {room.gameMode === 'mole'
+              ? t.modeMoleNetwork
+              : room.gameMode === 'chameleon'
+              ? t.modeChameleon
+              : room.gameMode === 'rapid'
+              ? t.modeRapid
+              : room.gameMode === 'undercover'
+              ? t.modeUndercover
+              : room.gameMode === 'silent'
+              ? t.modeSilentStation
+              : t.modeNormal}
           </div>
         </div>
 
@@ -211,8 +230,18 @@ export const LobbyScreen: React.FC<Props> = ({
             </div>
 
             <button
-              disabled={isStartingGame}
+              disabled={isStartingGame || !allPlayersInLobby}
               onClick={async () => {
+                if (!allPlayersInLobby) {
+                  sound.playTone(280, 'sawtooth', 0.1);
+                  onToast(
+                    lang === 'ar'
+                      ? 'لا يمكن بدء الجولة! هناك لاعبون لم يعودوا إلى اللوبي بعد.'
+                      : 'Cannot start mission! Some players have not returned to the lobby yet.',
+                    'danger'
+                  );
+                  return;
+                }
                 sound.playClick();
                 sound.triggerHaptic('medium');
                 setIsStartingGame(true);
@@ -222,20 +251,35 @@ export const LobbyScreen: React.FC<Props> = ({
                   setTimeout(() => setIsStartingGame(false), 2500);
                 }
               }}
-              className={`w-full py-3.5 rounded-2xl font-black text-sm tracking-wider uppercase shadow-lg shadow-sky-500/25 transition flex items-center justify-center gap-2 cursor-pointer ${
-                isStartingGame
-                  ? 'bg-slate-700 text-slate-300 opacity-80 cursor-wait'
-                  : 'bg-gradient-to-r from-sky-400 via-indigo-500 to-purple-500 text-slate-950 hover:brightness-110 active:scale-95'
+              className={`w-full py-3.5 rounded-2xl font-black text-sm tracking-wider uppercase shadow-lg transition flex items-center justify-center gap-2 cursor-pointer ${
+                !allPlayersInLobby
+                  ? 'bg-slate-900 border-2 border-amber-500/50 text-amber-300 opacity-80 cursor-not-allowed'
+                  : isStartingGame
+                  ? 'bg-slate-700 text-slate-300 opacity-80 cursor-wait shadow-sky-500/25'
+                  : 'bg-gradient-to-r from-sky-400 via-indigo-500 to-purple-500 text-slate-950 hover:brightness-110 active:scale-95 shadow-sky-500/25'
               }`}
             >
-              <Play className={`w-4 h-4 fill-current ${isStartingGame ? 'animate-spin' : ''}`} />
-              <span>
-                {isStartingGame
-                  ? lang === 'ar'
-                    ? 'جاري إطلاق المهمة...'
-                    : 'Launching Mission...'
-                  : t.btnStartGame}
-              </span>
+              {!allPlayersInLobby ? (
+                <>
+                  <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+                  <span>
+                    {lang === 'ar'
+                      ? 'بانتظار عودة الجميع للوبي...'
+                      : 'Waiting for all to return to lobby...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Play className={`w-4 h-4 fill-current ${isStartingGame ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isStartingGame
+                      ? lang === 'ar'
+                        ? 'جاري إطلاق المهمة...'
+                        : 'Launching Mission...'
+                      : t.btnStartGame}
+                  </span>
+                </>
+              )}
             </button>
           </div>
         )}
@@ -306,16 +350,22 @@ export const LobbyScreen: React.FC<Props> = ({
 
           <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1">
             {playersArr.map(p => {
-              const isInLobby = room.status === 'waiting' || p.postGame === 'inLobby' || p.isBot || p.uid.startsWith('bot_');
-              const isSpeaking = !!voiceUsers?.[p.uid]?.speaking;
-              const isVoiceActive = !!voiceUsers?.[p.uid]?.active;
-              const isUserMuted = !!voiceUsers?.[p.uid]?.muted;
+              const isBot = p.isBot || p.uid.startsWith('bot_');
+              const isMe = p.uid === currentUserUid;
+              const isInLobby = room.status === 'waiting' || p.postGame === 'inLobby' || isBot;
+
+              const userVoice = voiceUsers?.[p.uid];
+              const isSpeaking = !!userVoice?.speaking;
+              const isUserMuted = userVoice ? !!userVoice.muted : true;
+              const isUserDeafened = userVoice ? !!userVoice.deafened : false;
 
               return (
                 <div
                   key={p.uid}
                   className={`flex items-center justify-between p-2.5 rounded-2xl border transition-all gap-2 ${
-                    isSpeaking
+                    !isInLobby
+                      ? 'opacity-35 grayscale contrast-50 bg-slate-950/30 border-slate-900 shadow-none'
+                      : isSpeaking
                       ? 'bg-emerald-950/40 border-emerald-400 shadow-[0_0_15px_rgba(52,211,153,0.3)]'
                       : 'bg-slate-950/70 border-slate-800'
                   }`}
@@ -327,48 +377,66 @@ export const LobbyScreen: React.FC<Props> = ({
                         src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`}
                         alt="avatar"
                         className={`w-8 h-8 rounded-full object-cover transition-all ${
-                          isSpeaking
+                          !isInLobby
+                            ? 'opacity-40 grayscale border border-slate-800'
+                            : isSpeaking
                             ? 'border-2 border-emerald-400 ring-4 ring-emerald-400/40 animate-pulse'
                             : 'border border-sky-400/40'
                         }`}
                       />
-                      {isVoiceActive && (
-                        <div
-                          className={`absolute -bottom-1 -right-1 p-0.5 rounded-full ${
-                            isUserMuted ? 'bg-rose-600 text-white' : 'bg-emerald-500 text-slate-950'
-                          }`}
-                        >
-                          {isUserMuted ? <MicOff className="w-2.5 h-2.5" /> : <Mic className="w-2.5 h-2.5" />}
-                        </div>
-                      )}
                     </div>
                     <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
-                      <span className="font-bold text-xs text-slate-200 truncate">{p.name || 'Player'}</span>
+                      <span className={`font-bold text-xs truncate ${!isInLobby ? 'text-slate-500' : 'text-slate-200'}`}>
+                        {p.name || 'Player'}
+                      </span>
                       {p.uid === room.hostUid && (
                         <span title="Host" className="shrink-0">
                           <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
                         </span>
                       )}
-                      {/* In Lobby vs In Game Badge */}
-                      <span
-                        className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 ${
-                          isInLobby
-                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                        }`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full ${isInLobby ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
-                        <span>{isInLobby ? t.lblInLobbyTag : t.lblInGameTag}</span>
-                      </span>
 
-                      {getFriendButton(p.uid)}
+                      {getFriendButton(p.uid, isBot)}
                     </div>
                   </div>
 
-                  {/* Right: Actions aligned to the right (Voice controls for self, Host controls for others) */}
+                  {/* Right: Actions aligned to the right (Voice controls for self, Voice status for others, Host controls) */}
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {/* Voice Controls on User's Row - Fixed compact size, never wraps */}
-                    {p.uid === currentUserUid && (
+                    {/* Live Voice Status for Other Human Players */}
+                    {!isBot && !isMe && (
+                      <div className="flex items-center gap-1.5 px-2 py-1 rounded-xl bg-slate-900/90 border border-slate-800 shrink-0">
+                        <span
+                          title={
+                            !isUserMuted
+                              ? (lang === 'ar' ? 'المايك مفتوح' : 'Mic Live')
+                              : (lang === 'ar' ? 'المايك مكتوم' : 'Mic Muted')
+                          }
+                          className="flex items-center justify-center"
+                        >
+                          {!isUserMuted ? (
+                            <Mic className={`w-3.5 h-3.5 ${isSpeaking ? 'text-emerald-400 animate-bounce' : 'text-emerald-400'}`} />
+                          ) : (
+                            <MicOff className="w-3.5 h-3.5 text-rose-400/80" />
+                          )}
+                        </span>
+                        <span
+                          title={
+                            !isUserDeafened
+                              ? (lang === 'ar' ? 'السماعة مفتوحة (يستمع)' : 'Audio Live')
+                              : (lang === 'ar' ? 'السماعة مقفولة' : 'Audio Deafened')
+                          }
+                          className="flex items-center justify-center"
+                        >
+                          {!isUserDeafened ? (
+                            <Headphones className="w-3.5 h-3.5 text-cyan-400" />
+                          ) : (
+                            <HeadphoneOff className="w-3.5 h-3.5 text-rose-400/80" />
+                          )}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Voice Controls on User's Row */}
+                    {isMe && (
                       <QuickVoiceControls
                         lang={lang}
                         isJoined={isVoiceJoined}
@@ -385,7 +453,7 @@ export const LobbyScreen: React.FC<Props> = ({
 
                     {isHost && p.uid !== currentUserUid && (
                       <div className="flex items-center gap-1 shrink-0">
-                        {!p.isBot && !p.uid.startsWith('bot_') && (
+                        {!isBot && (
                           <button
                             onClick={() => onMakeHost(p.uid)}
                             className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-400/10 transition cursor-pointer"

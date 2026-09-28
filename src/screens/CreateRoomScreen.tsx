@@ -176,18 +176,6 @@ export const CreateRoomScreen: React.FC<Props> = ({
       color: 'from-teal-500/20 to-cyan-500/20',
       border: 'border-teal-400',
       text: 'text-teal-300'
-    },
-    {
-      id: 'sabotage' as GameMode,
-      title: lang === 'ar' ? 'عمليات التخريب التكتيكية' : 'Tactical Sabotage',
-      desc:
-        lang === 'ar'
-          ? 'رادار حراري، كتم الصوت، رصاصة فضية، وتشويش الإشارة اللاسلكية!'
-          : 'Thermal scans, silence hacks, silver bullets & signal scramblers!',
-      icon: Zap,
-      color: 'from-amber-500/20 to-rose-500/20',
-      border: 'border-amber-400',
-      text: 'text-amber-300'
     }
   ];
 

@@ -1,18 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { dictionary } from '../translations';
-import { Language, RoomData, PlayerData, SabotageAbility } from '../types';
+import { Language, RoomData, PlayerData } from '../types';
 import { sound } from '../audio';
 import { db } from '../firebase';
 import firebase from 'firebase/compat/app';
 import { getSecretWordDisplay } from '../words';
 import { CATEGORY_STYLES } from '../wordVisuals';
-import { SabotageActionModal } from '../components/SabotageActionModal';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
 import { QuickVoiceControls } from '../components/QuickVoiceControls';
 import { VoiceUserState } from '../types';
 import {
   Clock,
   Mic,
+  MicOff,
+  Headphones,
+  HeadphoneOff,
   AlertTriangle,
   Eye,
   Send,
@@ -47,8 +49,6 @@ interface Props {
   onToggleVoiceDeafen?: () => void;
   onAdvanceTurn: () => void;
   onTriggerEmergencyVote: () => void;
-  onUseSabotageCard?: () => void;
-  onOpenSabotageSwap?: () => void;
   onSendGameClue: (word: string, targetRound: number, targetTurnIndex: number) => void;
   onSendSpyChat: (msg: string) => void;
   onAwardCrewXP?: (players: Record<string, PlayerData>, spies: string[]) => void;
@@ -83,7 +83,6 @@ export const GameScreen: React.FC<Props> = ({
   const [isCardFlipped, setIsCardFlipped] = useState(false);
   const [isMuted, setIsMuted] = useState(sound.isMuted());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [activeSabotageModal, setActiveSabotageModal] = useState<SabotageAbility | null>(null);
   const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -294,100 +293,6 @@ export const GameScreen: React.FC<Props> = ({
     }
   };
 
-  // Sabotage Execution
-  const handleExecuteSabotage = async (targetUid: string) => {
-    if (!activeSabotageModal || !currentUserUid) return;
-    const ability = activeSabotageModal;
-    setActiveSabotageModal(null);
-
-    await db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}`).update({
-      sabotageUsed: true
-    });
-
-    if (ability === 'thermal_scan') {
-      const order = room.turnOrder || [];
-      const idx = order.indexOf(targetUid);
-      if (idx !== -1) {
-        const leftIdx = (idx - 1 + order.length) % order.length;
-        const rightIdx = (idx + 1) % order.length;
-        const leftUid = order[leftIdx];
-        const rightUid = order[rightIdx];
-        const spies = room.spies || [];
-        const isNeighborSpy = spies.includes(leftUid) || spies.includes(rightUid);
-
-        if (isNeighborSpy) {
-          sendSpeechBubble('⚠️ رادار الفحص يرصد جاسوساً مجاوراً!');
-          onToast(
-            lang === 'ar'
-              ? '📡 نتائج الرادار الحراري: تم رصد توقيع حراري لجاسوس يجلس بجوار هذا اللاعب مباشرة!'
-              : '📡 Thermal Scan Result: A spy sits directly adjacent to this player!',
-            'danger'
-          );
-        } else {
-          onToast(
-            lang === 'ar'
-              ? '📡 نتائج الرادار الحراري: لا يوجد جواسيس مجاورين لهذا اللاعب.'
-              : '📡 Thermal Scan Result: Immediate neighbors are clear.',
-            'success'
-          );
-        }
-      }
-    } else if (ability === 'silence_hack') {
-      await db.ref(`spy_rooms/${roomCode}/players/${targetUid}/isSilenced`).set(true);
-      const targetName = playersObj[targetUid]?.name || 'Agent';
-      onToast(
-        lang === 'ar'
-          ? `🤐 تم كتم ${targetName}! سيُجبر على التلميح بالإيموجي في دوره.`
-          : `🤐 ${targetName} has been silenced! Emojis only on next turn.`,
-        'normal'
-      );
-    } else if (ability === 'silver_bullet') {
-      const isTargetSpy = (room.spies || []).includes(targetUid);
-      const targetName = playersObj[targetUid]?.name || 'Agent';
-      if (isTargetSpy) {
-        sound.playSpyChord();
-        await db.ref(`spy_rooms/${roomCode}`).update({
-          status: 'gameover',
-          winnerTeam: 'crew',
-          finalSpies: room.spies,
-          finalPlayers: playersObj,
-          votes: null,
-          announcement: {
-            msg:
-              lang === 'ar'
-                ? `🎯 أصابت الرصاصة الفضية الجاسوس ${targetName}! انتصر الطاقم الفضائي!`
-                : `🎯 Silver Bullet eliminated spy ${targetName}! Crew wins!`,
-            type: 'success',
-            timestamp: firebase.database.ServerValue.TIMESTAMP
-          }
-        });
-        onAwardCrewXP?.(playersObj, room.spies || []);
-      } else {
-        sound.playClick();
-        await db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}/disqualifiedVote`).set(true);
-        sendSpeechBubble('❌ تهمتي كانت خاطئة!');
-        onToast(
-          lang === 'ar'
-            ? `❌ ${targetName} مواطن بريء! تم سحب حق التصويت منك في هذه الجولة!`
-            : `❌ ${targetName} was innocent! Your vote is forfeited this round!`,
-          'danger'
-        );
-      }
-    }
-  };
-
-  const handleExecuteScramble = async () => {
-    setActiveSabotageModal(null);
-    sound.playSabotageScan();
-    await db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}/sabotageUsed`).set(true);
-    await db.ref(`spy_rooms/${roomCode}/scrambleActive`).set(true);
-    sendSpeechBubble('⚡ تشويش راداري شامل!');
-    onToast(lang === 'ar' ? '⚡ تم تشويش أجهزة الاتصال بنجاح!' : '⚡ Signal scrambler activated!', 'danger');
-    setTimeout(() => {
-      db.ref(`spy_rooms/${roomCode}/scrambleActive`).set(false).catch(() => {});
-    }, 9000);
-  };
-
   // Active players list
   const activeUids = (turnOrder.length > 0 ? turnOrder : Object.keys(playersObj)).filter(
     uid => playersObj[uid] && !playersObj[uid].isSpectator
@@ -595,6 +500,17 @@ export const GameScreen: React.FC<Props> = ({
               <p className="text-xs font-bold text-rose-300/80 mt-0.5">
                 {lang === 'ar' ? 'اسمع تلميحات الرواد وخمن الكلمة دون أن تُكشف!' : 'Blend in and guess the secret word!'}
               </p>
+              {room.gameMode === 'mole' && (room.spies || []).length > 1 && (
+                <div className="mt-2 p-2 rounded-xl bg-purple-950/70 border border-purple-500/40 text-xs text-purple-200">
+                  <span className="font-bold text-purple-300">{lang === 'ar' ? 'شركاؤك في شبكة الجواسيس: ' : 'Fellow Spies: '}</span>
+                  <span>
+                    {(room.spies || [])
+                      .filter(sUid => sUid !== currentUserUid)
+                      .map(sUid => playersObj[sUid]?.name || 'Agent')
+                      .join('، ')}
+                  </span>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center gap-1.5 py-2 animate-in zoom-in-95 duration-150 text-center">
@@ -611,6 +527,13 @@ export const GameScreen: React.FC<Props> = ({
               <div className="text-xl sm:text-3xl md:text-4xl font-black text-white font-heading tracking-wide break-words max-w-full text-center leading-tight">
                 {displayWord || (lang === 'ar' ? 'كلمة سرية' : 'Secret Word')}
               </div>
+              {isChameleonSpy && (
+                <div className="mt-1 px-2.5 py-1 rounded-xl bg-emerald-950/60 border border-emerald-400/40 text-[11px] font-bold text-emerald-300">
+                  {lang === 'ar'
+                    ? '🦎 أنت الحرباء: هذه كلمتك التوأم المضللة، تكلم بثقة وحذر دون كشف نفسك!'
+                    : '🦎 You are the Chameleon: This is your twin decoy word, blend in!'}
+                </div>
+              )}
             </div>
           )
         ) : (
@@ -639,9 +562,13 @@ export const GameScreen: React.FC<Props> = ({
             const bubble = speechBubbles[uid];
             const isSilenced = !!p?.isSilenced;
             const isMe = uid === currentUserUid;
-            const isVoiceSpeaking = !!voiceUsers?.[uid]?.speaking;
-            const isVoiceActive = !!voiceUsers?.[uid]?.active;
-            const isUserMuted = !!voiceUsers?.[uid]?.muted;
+            const isBot = !!p?.isBot || uid.startsWith('bot_');
+
+            const userVoice = voiceUsers?.[uid];
+            const isVoiceSpeaking = !!userVoice?.speaking;
+            const isUserMuted = userVoice ? !!userVoice.muted : true;
+            const isUserDeafened = userVoice ? !!userVoice.deafened : false;
+            const isFellowMoleSpy = isSpy && room.gameMode === 'mole' && (room.spies || []).includes(uid) && !isMe;
 
             return (
               <div
@@ -666,7 +593,7 @@ export const GameScreen: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* Avatar Portrait */}
+                {/* Avatar Portrait - Clean with NO mic badge overlay */}
                 <div className="relative mb-1">
                   <img
                     src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
@@ -681,19 +608,6 @@ export const GameScreen: React.FC<Props> = ({
                         : 'border-slate-700'
                     }`}
                   />
-                  {isVoiceActive ? (
-                    <div
-                      className={`absolute -bottom-1 -right-1 p-1 rounded-full shadow-md ${
-                        isUserMuted ? 'bg-rose-600 text-white' : 'bg-emerald-400 text-slate-950'
-                      }`}
-                    >
-                      {isUserMuted ? <MuteIcon className="w-2.5 h-2.5" /> : <Mic className="w-2.5 h-2.5" />}
-                    </div>
-                  ) : isTurn ? (
-                    <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-sky-400 text-slate-950 shadow-md">
-                      <Mic className="w-3 h-3" />
-                    </div>
-                  ) : null}
                   {isSilenced && (
                     <div className="absolute -top-1 -right-1 p-1 rounded-full bg-rose-600 text-white shadow-md">
                       <MuteIcon className="w-2.5 h-2.5" />
@@ -701,15 +615,68 @@ export const GameScreen: React.FC<Props> = ({
                   )}
                 </div>
 
-                {/* Player Name */}
-                <span className="text-[11px] font-bold text-white text-center break-words max-w-[95px] leading-tight">
-                  {p?.name || 'Agent'}
-                </span>
+                {/* Player Name + Mole Badge */}
+                <div className="flex items-center justify-center gap-1 max-w-[95px]">
+                  <span className="text-[11px] font-bold text-white text-center truncate leading-tight">
+                    {p?.name || 'Agent'}
+                  </span>
+                  {isFellowMoleSpy && (
+                    <span title={lang === 'ar' ? 'شريكك في التجسس' : 'Fellow Spy'} className="text-[10px]">
+                      🕵️
+                    </span>
+                  )}
+                </div>
 
                 {isMe && (
-                  <span className="text-[9px] font-bold text-sky-400 mt-0.5">
+                  <span className="text-[9px] font-bold text-sky-400">
                     ({lang === 'ar' ? 'أنت' : 'You'})
                   </span>
+                )}
+
+                {/* Voice Status Pill: Mic & Headphone for all real players */}
+                {!isBot && (
+                  <div className="flex items-center justify-center gap-1.5 mt-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={isMe ? onToggleVoiceMute : undefined}
+                      className={`flex items-center justify-center ${isMe ? 'cursor-pointer hover:scale-110 transition' : 'cursor-default'}`}
+                      title={
+                        isMe
+                          ? isUserMuted
+                            ? (lang === 'ar' ? 'المايك مكتوم - اضغط لفتحه' : 'Unmute Mic')
+                            : (lang === 'ar' ? 'المايك شغال - اضغط لكتمه' : 'Mute Mic')
+                          : !isUserMuted
+                          ? (lang === 'ar' ? 'المايك مفتوح' : 'Mic Live')
+                          : (lang === 'ar' ? 'المايك مكتوم' : 'Mic Muted')
+                      }
+                    >
+                      {!isUserMuted ? (
+                        <Mic className={`w-3 h-3 ${isVoiceSpeaking ? 'text-emerald-400 animate-bounce' : 'text-emerald-400'}`} />
+                      ) : (
+                        <MicOff className="w-3 h-3 text-rose-400/80" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={isMe ? onToggleVoiceDeafen : undefined}
+                      className={`flex items-center justify-center ${isMe ? 'cursor-pointer hover:scale-110 transition' : 'cursor-default'}`}
+                      title={
+                        isMe
+                          ? isUserDeafened
+                            ? (lang === 'ar' ? 'السماعة مقفولة - اضغط للاستماع' : 'Hear Audio')
+                            : (lang === 'ar' ? 'السماعة شغالة - اضغط لكتم صوت اللاعبين' : 'Deafen')
+                          : !isUserDeafened
+                          ? (lang === 'ar' ? 'السماعة مفتوحة (يستمع)' : 'Audio Live')
+                          : (lang === 'ar' ? 'السماعة مقفولة' : 'Audio Deafened')
+                      }
+                    >
+                      {!isUserDeafened ? (
+                        <Headphones className="w-3 h-3 text-cyan-400" />
+                      ) : (
+                        <HeadphoneOff className="w-3 h-3 text-rose-400/80" />
+                      )}
+                    </button>
+                  </div>
                 )}
               </div>
             );
@@ -742,7 +709,7 @@ export const GameScreen: React.FC<Props> = ({
               }`}
             />
 
-            {isMyTurn && (
+            {isMyTurn ? (
               <div className="flex gap-2">
                 <button
                   onClick={clearCanvas}
@@ -758,6 +725,15 @@ export const GameScreen: React.FC<Props> = ({
                   <Check className="w-3.5 h-3.5" />
                   <span>{t.btnDoneDrawing}</span>
                 </button>
+              </div>
+            ) : (
+              <div className="text-center py-1.5 px-3 rounded-xl bg-slate-950/60 border border-sky-500/20 text-xs font-bold text-sky-300 flex items-center justify-center gap-2 animate-pulse">
+                <Brush className="w-3.5 h-3.5 text-sky-400" />
+                <span>
+                  {lang === 'ar'
+                    ? `جاري رسم التلميح مباشرة بواسطة: [${currentSpeaker}]...`
+                    : `${currentSpeaker} is drawing their clue live...`}
+                </span>
               </div>
             )}
           </div>
@@ -854,42 +830,6 @@ export const GameScreen: React.FC<Props> = ({
             )}
           </div>
         )}
-
-        {/* Tactical Sabotage Trigger (Sabotage Mode) */}
-        {room.gameMode === 'sabotage' && !amSpectator && (
-          <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-500/40 flex items-center justify-between">
-            <div className="text-start space-y-0.5">
-              <div className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">
-                {t.lblYourSabotageAbility}
-              </div>
-              <div className="text-xs font-black text-white">
-                {myPlayer.sabotageAbility === 'thermal_scan'
-                  ? t.sabotageThermalScan
-                  : myPlayer.sabotageAbility === 'silence_hack'
-                  ? t.sabotageSilenceHack
-                  : myPlayer.sabotageAbility === 'silver_bullet'
-                  ? t.sabotageSilverBullet
-                  : t.sabotageSignalScramble}
-                {myPlayer.sabotageUsed ? ` (${t.lblSabotageUsed})` : ''}
-              </div>
-            </div>
-
-            <button
-              disabled={!!myPlayer.sabotageUsed}
-              onClick={() => {
-                const ab = myPlayer.sabotageAbility || 'thermal_scan';
-                setActiveSabotageModal(ab);
-              }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black transition cursor-pointer shadow-md ${
-                myPlayer.sabotageUsed
-                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white hover:brightness-110 active:scale-95'
-              }`}
-            >
-              {t.btnUseSabotage}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Mole Network Private Spy Comms (If Mole Mode & User is Spy) */}
@@ -931,21 +871,6 @@ export const GameScreen: React.FC<Props> = ({
             </button>
           </form>
         </div>
-      )}
-
-      {/* Sabotage Action Modal */}
-      {activeSabotageModal && (
-        <SabotageActionModal
-          lang={lang}
-          currentUserUid={currentUserUid}
-          ability={activeSabotageModal}
-          turnOrder={turnOrder}
-          players={playersObj}
-          isOpen={!!activeSabotageModal}
-          onClose={() => setActiveSabotageModal(null)}
-          onExecute={handleExecuteSabotage}
-          onExecuteScramble={handleExecuteScramble}
-        />
       )}
 
       {/* Chat & Clues History Modal */}

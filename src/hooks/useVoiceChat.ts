@@ -290,8 +290,8 @@ export function useVoiceChat({
     }
   }, [isJoined, voiceUsers, connectToActivePeers]);
 
-  // Join Voice Chat
-  const joinVoice = async () => {
+  // Join Voice Chat (startMuted defaults to true so headphones are on and mic is muted)
+  const joinVoice = async (startMuted: boolean = true) => {
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         onToast?.(permissionErrorMsg, 'danger');
@@ -307,9 +307,16 @@ export function useVoiceChat({
         video: false
       });
 
+      // Mute microphone track if startMuted is requested
+      stream.getAudioTracks().forEach(track => {
+        track.enabled = !startMuted;
+      });
+
       localStreamRef.current = stream;
       setIsJoined(true);
-      setIsMuted(false);
+      setIsMuted(startMuted);
+      setIsDeafened(false);
+      isDeafenedRef.current = false;
 
       // Start volume detector
       startVolumeDetection(stream);
@@ -319,19 +326,16 @@ export function useVoiceChat({
       await myVoiceRef.set({
         uid: currentUserUid,
         name: currentUserName,
-        muted: false,
-        deafened: isDeafenedRef.current,
+        muted: startMuted,
+        deafened: false,
         speaking: false,
         active: true,
         updatedAt: firebase.database.ServerValue.TIMESTAMP
       });
 
       myVoiceRef.onDisconnect().remove();
-
-      onToast?.('🎙️ تم تفعيل المحادثة الصوتية بنجاح!', 'success');
     } catch (err) {
-      console.error('Voice join error:', err);
-      onToast?.(permissionErrorMsg, 'danger');
+      console.warn('Voice auto-join waiting for user interaction:', err);
     }
   };
 
@@ -369,9 +373,32 @@ export function useVoiceChat({
     }
   }, [roomCode, currentUserUid]);
 
+  // Automatically connect to voice when entering a room with headphones active and mic muted
+  useEffect(() => {
+    if (roomCode && currentUserUid && !isJoined) {
+      joinVoice(true);
+      const onUserGesture = () => {
+        if (!localStreamRef.current) {
+          joinVoice(true);
+        }
+        window.removeEventListener('click', onUserGesture);
+        window.removeEventListener('touchstart', onUserGesture);
+      };
+      window.addEventListener('click', onUserGesture, { once: true });
+      window.addEventListener('touchstart', onUserGesture, { once: true });
+      return () => {
+        window.removeEventListener('click', onUserGesture);
+        window.removeEventListener('touchstart', onUserGesture);
+      };
+    }
+  }, [roomCode, currentUserUid]);
+
   // Toggle Mute (Microphone)
   const toggleMute = () => {
-    if (!localStreamRef.current) return;
+    if (!localStreamRef.current) {
+      joinVoice(false);
+      return;
+    }
     const audioTrack = localStreamRef.current.getAudioTracks()[0];
     if (audioTrack) {
       const nextState = !audioTrack.enabled;

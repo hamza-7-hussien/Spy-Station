@@ -16,8 +16,7 @@ import {
   FriendEntry,
   FriendRequest,
   RoomInvite,
-  JoinRequest,
-  SabotageAbility
+  JoinRequest
 } from './types';
 import { getCombinedWordList, wordsDB } from './words';
 import { AuthScreen } from './screens/AuthScreen';
@@ -1314,13 +1313,21 @@ export default function App() {
         spies.push(playersArr[0].uid);
       }
 
+      // Ensure all human players are in the lobby before starting
+      const notInLobby = playersArr.filter(
+        p => !p.isBot && !p.uid.startsWith('bot_') && p.postGame !== 'inLobby' && roomData.status !== 'waiting'
+      );
+      if (notInLobby.length > 0) {
+        showToast(
+          lang === 'ar'
+            ? 'لا يمكن بدء الجيم حتى يعود جميع اللاعبين إلى اللوبي!'
+            : 'Cannot start game until all players return to lobby!',
+          'danger'
+        );
+        return;
+      }
+
       const resetPlayers: Record<string, PlayerData> = {};
-      const tacticalAbilities: SabotageAbility[] = [
-        'thermal_scan',
-        'silence_hack',
-        'silver_bullet',
-        'signal_scramble'
-      ];
 
       // Chameleon mode: pick a twin word
       const otherPairs = wordList.filter(pair => pair[0] !== selectedPair[0]);
@@ -1343,11 +1350,6 @@ export default function App() {
           isSpectator: false,
           postGame: null,
           role: isThisSpy ? 'spy' : p.uid === undercoverUid ? 'undercover' : 'crew',
-          sabotageAbility:
-            roomData.gameMode === 'sabotage'
-              ? tacticalAbilities[Math.floor(Math.random() * tacticalAbilities.length)]
-              : null,
-          sabotageUsed: false,
           isSilenced: false,
           disqualifiedVote: false
         };
@@ -1676,6 +1678,7 @@ export default function App() {
             }}
             onAcceptJoinRequest={handleAcceptJoinRequest}
             onDeclineJoinRequest={handleDeclineJoinRequest}
+            onToast={showToast}
           />
         )}
 

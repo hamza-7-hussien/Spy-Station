@@ -6,8 +6,7 @@ export type GameMode =
   | 'rapid'
   | 'mole'
   | 'undercover'
-  | 'silent'
-  | 'sabotage';
+  | 'silent';
 
 export type CategoryKey =
   | 'players'
@@ -19,12 +18,6 @@ export type CategoryKey =
   | 'jobs'
   | 'singers';
 
-export type SabotageAbility =
-  | 'thermal_scan'
-  | 'silence_hack'
-  | 'silver_bullet'
-  | 'signal_scramble';
-
 export interface PlayerData {
   uid: string;
   name: string;
@@ -33,14 +26,12 @@ export interface PlayerData {
   isSpectator?: boolean;
   isBot?: boolean;
   postGame?: 'inLobby' | null;
-  sabotageAbility?: SabotageAbility | null;
-  sabotageUsed?: boolean;
-  isSilenced?: boolean; // silenced by silence_hack in current turn
-  disqualifiedVote?: boolean; // silver bullet backfire
   role?: 'spy' | 'undercover' | 'crew';
   chameleonWord?: string; // in chameleon mode
   chameleonWordAr?: string;
   currentEmojiClue?: string | null;
+  isSilenced?: boolean;
+  disqualifiedVote?: boolean;
 }
 
 export interface RoomData {
