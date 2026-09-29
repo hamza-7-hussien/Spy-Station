@@ -16,7 +16,8 @@ import {
   Sparkles,
   Link as LinkIcon,
   Lock,
-  KeyRound
+  KeyRound,
+  Music
 } from 'lucide-react';
 
 interface Props {
@@ -91,6 +92,8 @@ export const SettingsTab: React.FC<Props> = ({
   const [name, setName] = useState(userName);
   const [avatarUrl, setAvatarUrl] = useState(userAvatar);
   const [volume, setVolume] = useState(sound.getVolume());
+  const [bgmVolume, setBgmVolume] = useState(sound.getBgmVolume());
+  const [isBgmMuted, setIsBgmMuted] = useState(sound.isBgmMuted());
   const [uploading, setUploading] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -371,6 +374,43 @@ export const SettingsTab: React.FC<Props> = ({
             value={volume}
             onChange={handleVolumeChange}
             className="w-full accent-sky-400 h-2 bg-slate-950 rounded-lg cursor-pointer"
+          />
+        </div>
+
+        {/* Background Music Volume & Toggle */}
+        <div className="space-y-2 pt-2 border-t border-slate-800/60">
+          <label className="text-xs font-bold text-slate-400 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Music className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{lang === 'ar' ? 'موسيقى الخلفية السينمائية' : 'Background Music (BGM)'}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const next = sound.toggleBgm();
+                setIsBgmMuted(next);
+              }}
+              className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border transition cursor-pointer ${
+                !isBgmMuted
+                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/40'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              {!isBgmMuted ? (lang === 'ar' ? 'مفعلة 🎵' : 'ON 🎵') : (lang === 'ar' ? 'مكتومة' : 'OFF')}
+            </button>
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={bgmVolume}
+            onChange={(e) => {
+              const val = parseFloat(e.target.value);
+              setBgmVolume(val);
+              sound.setBgmVolume(val);
+            }}
+            className="w-full accent-indigo-400 h-2 bg-slate-950 rounded-lg cursor-pointer"
           />
         </div>
 

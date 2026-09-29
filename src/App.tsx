@@ -646,21 +646,47 @@ export default function App() {
 
         if (nextIndex >= room.turnOrder.length) {
           const currentRoundNum = room.round || 1;
-          // Voting triggers every 5 rounds (Round 5, 10, 15...)
-          if (currentRoundNum % 5 === 0) {
-            room.status = 'voting';
-            room.voteTimeLeft = 80;
-            room.votes = null;
-          } else {
-            const activeUids = Object.values(playersObj)
-              .filter((p: unknown) => !(p as PlayerData).isSpectator)
-              .map((p: unknown) => (p as PlayerData).uid);
-            room.round = currentRoundNum + 1;
-            room.turnOrder = activeUids;
-            room.turnIndex = 0;
-            room.turnTimeLeft = defaultTurnSeconds;
-            room.votes = null;
+          const activeUids: string[] = Array.from(
+            new Set(
+              Object.values(playersObj)
+                .filter((p: unknown) => !(p as PlayerData).isSpectator)
+                .map((p: unknown) => (p as PlayerData).uid)
+            )
+          );
+
+          // Get the player who just finished speaking in the current round
+          const prevTurnOrder: string[] = room.turnOrder || [];
+          const lastSpeaker = prevTurnOrder[prevTurnOrder.length - 1];
+
+          // Rotate turn order circularly so every player gets exactly one turn per round,
+          // and the starting player of the new round is NEVER the player who just finished!
+          let nextTurnOrder = [...activeUids];
+          if (prevTurnOrder.length > 0) {
+            const preservedOrder = prevTurnOrder.filter(uid => activeUids.includes(uid));
+            activeUids.forEach(uid => {
+              if (!preservedOrder.includes(uid)) preservedOrder.push(uid);
+            });
+
+            if (preservedOrder.length > 1) {
+              // Circular shift: move first speaker to end so the next speaker takes the lead
+              const shifted = preservedOrder.slice(1).concat(preservedOrder.slice(0, 1));
+              // Guarantee shifted[0] !== lastSpeaker
+              if (shifted[0] === lastSpeaker && shifted.length > 1) {
+                const first = shifted.shift()!;
+                shifted.push(first);
+              }
+              nextTurnOrder = shifted;
+            } else {
+              nextTurnOrder = preservedOrder;
+            }
           }
+
+          // Advance round seamlessly without forced 5-round vote popups
+          room.round = currentRoundNum + 1;
+          room.turnOrder = nextTurnOrder;
+          room.turnIndex = 0;
+          room.turnTimeLeft = defaultTurnSeconds;
+          room.votes = null;
         } else {
           room.turnIndex = nextIndex;
           room.turnTimeLeft = defaultTurnSeconds;
@@ -723,10 +749,11 @@ export default function App() {
       const ejectedUid = rawEjectedUid;
 
       if (!ejectedUid) {
+        const safeActiveUids = Array.from(new Set(Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid)));
         await db.ref(`spy_rooms/${currentRoomCode}`).update({
           status: 'playing',
           round: nextRound,
-          turnOrder: Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid),
+          turnOrder: safeActiveUids,
           turnIndex: 0,
           turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
           votes: null,
@@ -763,10 +790,11 @@ export default function App() {
         await db.ref(`spy_rooms/${currentRoomCode}/spies`).set(updatedSpies);
         broadcastAnnouncement(t.annSpyEjectedMoreRemain.replace('{name}', ejectedName), 'danger');
 
+        const safeActiveUids = Array.from(new Set(Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid)));
         await db.ref(`spy_rooms/${currentRoomCode}`).update({
           status: 'playing',
           round: nextRound,
-          turnOrder: Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid),
+          turnOrder: safeActiveUids,
           turnIndex: 0,
           turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
           votes: null,
@@ -776,7 +804,7 @@ export default function App() {
       }
 
       await db.ref(`spy_rooms/${currentRoomCode}/players`).set(playersObj);
-      const remainingActiveUids = Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid);
+      const remainingActiveUids = Array.from(new Set(Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid)));
       const remainingSpiesCount = currentSpies.filter(uid => remainingActiveUids.includes(uid)).length;
       const remainingInnocentCount = remainingActiveUids.length - remainingSpiesCount;
 
@@ -1395,7 +1423,7 @@ export default function App() {
         resetPlayers[p.uid] = playerObj;
       });
 
-      const shuffled = playersArr.map(p => p.uid).sort(() => Math.random() - 0.5);
+      const shuffled = Array.from(new Set(playersArr.map(p => p.uid))).sort(() => Math.random() - 0.5);
       lastAnnouncedRoundRef.current = 0;
       const initialTurnSeconds = roomData.gameMode === 'rapid' ? 7 : (roomData.turnSeconds || 20);
 

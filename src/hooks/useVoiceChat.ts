@@ -15,7 +15,10 @@ const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' }
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' }
   ]
 };
 
@@ -39,7 +42,25 @@ export function useVoiceChat({
   const animationFrameRef = useRef<number | null>(null);
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
   const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
+  const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   const lastSpeakingUpdateRef = useRef<number>(0);
+
+  // Resume all audio elements upon user click/tap to bypass browser autoplay restrictions
+  useEffect(() => {
+    const unlockAudios = () => {
+      Object.values(audioElementsRef.current).forEach(el => {
+        if (el && el.paused) {
+          el.play().catch(() => {});
+        }
+      });
+    };
+    window.addEventListener('click', unlockAudios, { passive: true });
+    window.addEventListener('touchstart', unlockAudios, { passive: true });
+    return () => {
+      window.removeEventListener('click', unlockAudios);
+      window.removeEventListener('touchstart', unlockAudios);
+    };
+  }, []);
 
   // Sync voiceStates from Firebase
   useEffect(() => {
@@ -85,12 +106,12 @@ export function useVoiceChat({
         const avg = sum / dataArray.length;
         // Check if local track is disabled/muted
         const isTrackMuted = !localStreamRef.current.getAudioTracks().some(t => t.enabled);
-        const nowSpeaking = !isTrackMuted && avg > 18;
+        const nowSpeaking = !isTrackMuted && avg > 16;
 
         setIsSpeaking(prev => {
           if (prev !== nowSpeaking) {
             const now = Date.now();
-            if (now - lastSpeakingUpdateRef.current > 300) {
+            if (now - lastSpeakingUpdateRef.current > 250) {
               lastSpeakingUpdateRef.current = now;
               db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/speaking`).set(nowSpeaking).catch(() => {});
             }
@@ -121,76 +142,20 @@ export function useVoiceChat({
     setIsSpeaking(false);
   };
 
-  // WebRTC Peer signaling listener
-  useEffect(() => {
-    if (!isJoined || !roomCode || !currentUserUid) return;
-
-    const signalingRef = db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}`);
-
-    const onIncomingSignal = async (snap: firebase.database.DataSnapshot) => {
-      const signals = snap.val() || {};
-
-      for (const peerUid in signals) {
-        const signalData = signals[peerUid];
-        if (!signalData) continue;
-
-        let pc = peerConnectionsRef.current[peerUid];
-        if (!pc && localStreamRef.current) {
-          pc = createPeerConnection(peerUid);
-        }
-        if (!pc) continue;
-
-        // Process Offer
-        if (signalData.offer && pc.signalingState !== 'have-local-offer') {
-          try {
-            await pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-
-            await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${peerUid}/${currentUserUid}/answer`).set({
-              type: answer.type,
-              sdp: answer.sdp
-            });
-            // Clear processed offer
-            db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/offer`).remove();
-          } catch (err) {
-            console.error('Error handling offer:', err);
-          }
-        }
-
-        // Process Answer
-        if (signalData.answer && pc.signalingState === 'have-local-offer') {
-          try {
-            await pc.setRemoteDescription(new RTCSessionDescription(signalData.answer));
-            db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/answer`).remove();
-          } catch (err) {
-            console.error('Error handling answer:', err);
-          }
-        }
-
-        // Process Candidates
-        if (signalData.candidates) {
-          for (const candKey in signalData.candidates) {
-            const cand = signalData.candidates[candKey];
-            if (cand) {
-              try {
-                await pc.addIceCandidate(new RTCIceCandidate(cand));
-              } catch (e) {
-                // ignore late candidate
-              }
-            }
-          }
-          db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/candidates`).remove();
+  // Helper to drain queued ICE candidates once remote description is set
+  const drainCandidateQueue = async (peerUid: string, pc: RTCPeerConnection) => {
+    const queue = pendingCandidatesRef.current[peerUid];
+    if (queue && queue.length > 0) {
+      for (const cand of queue) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch {
+          // ignore late candidate
         }
       }
-    };
-
-    signalingRef.on('value', onIncomingSignal);
-
-    return () => {
-      signalingRef.off('value', onIncomingSignal);
-    };
-  }, [isJoined, roomCode, currentUserUid]);
+      pendingCandidatesRef.current[peerUid] = [];
+    }
+  };
 
   // Create WebRTC Peer Connection helper
   const createPeerConnection = useCallback((peerUid: string): RTCPeerConnection => {
@@ -200,8 +165,9 @@ export function useVoiceChat({
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerConnectionsRef.current[peerUid] = pc;
+    pendingCandidatesRef.current[peerUid] = [];
 
-    // Add local audio tracks
+    // Add local audio tracks if available
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach(track => {
         pc.addTrack(track, localStreamRef.current!);
@@ -223,6 +189,7 @@ export function useVoiceChat({
       if (!audioEl) {
         audioEl = document.createElement('audio');
         audioEl.autoplay = true;
+        (audioEl as unknown as { playsInline: boolean }).playsInline = true;
         audioEl.style.position = 'fixed';
         audioEl.style.pointerEvents = 'none';
         audioEl.style.opacity = '0';
@@ -247,6 +214,86 @@ export function useVoiceChat({
 
     return pc;
   }, [roomCode, currentUserUid]);
+
+  // WebRTC Peer signaling listener
+  useEffect(() => {
+    if (!isJoined || !roomCode || !currentUserUid) return;
+
+    const signalingRef = db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}`);
+
+    const onIncomingSignal = async (snap: firebase.database.DataSnapshot) => {
+      const signals = snap.val() || {};
+
+      for (const peerUid in signals) {
+        const signalData = signals[peerUid];
+        if (!signalData) continue;
+
+        let pc = peerConnectionsRef.current[peerUid];
+        if (!pc) {
+          pc = createPeerConnection(peerUid);
+        }
+
+        // Process Offer
+        if (signalData.offer && pc.signalingState !== 'have-local-offer') {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
+            await drainCandidateQueue(peerUid, pc);
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${peerUid}/${currentUserUid}/answer`).set({
+              type: answer.type,
+              sdp: answer.sdp
+            });
+            // Clear processed offer
+            db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/offer`).remove();
+          } catch (err) {
+            console.error('Error handling offer:', err);
+          }
+        }
+
+        // Process Answer
+        if (signalData.answer && pc.signalingState === 'have-local-offer') {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(signalData.answer));
+            await drainCandidateQueue(peerUid, pc);
+            db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/answer`).remove();
+          } catch (err) {
+            console.error('Error handling answer:', err);
+          }
+        }
+
+        // Process Candidates
+        if (signalData.candidates) {
+          for (const candKey in signalData.candidates) {
+            const cand = signalData.candidates[candKey];
+            if (cand) {
+              if (pc.remoteDescription && pc.remoteDescription.type) {
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(cand));
+                } catch {
+                  // ignore
+                }
+              } else {
+                if (!pendingCandidatesRef.current[peerUid]) {
+                  pendingCandidatesRef.current[peerUid] = [];
+                }
+                pendingCandidatesRef.current[peerUid].push(cand);
+              }
+            }
+          }
+          db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/candidates`).remove();
+        }
+      }
+    };
+
+    signalingRef.on('value', onIncomingSignal);
+
+    return () => {
+      signalingRef.off('value', onIncomingSignal);
+    };
+  }, [isJoined, roomCode, currentUserUid, createPeerConnection]);
 
   // Connect to peers who are already active
   const connectToActivePeers = useCallback(async () => {
@@ -300,10 +347,12 @@ export function useVoiceChat({
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        },
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true },
+          channelCount: { ideal: 1 },
+          sampleRate: { ideal: 48000 }
+        } as MediaTrackConstraints,
         video: false
       });
 
@@ -313,6 +362,20 @@ export function useVoiceChat({
       });
 
       localStreamRef.current = stream;
+
+      // Attach tracks to any already-created peer connections
+      Object.values(peerConnectionsRef.current).forEach(pc => {
+        const senders = pc.getSenders();
+        stream.getAudioTracks().forEach(track => {
+          if (!senders.some(s => s.track === track)) {
+            try {
+              pc.addTrack(track, stream);
+            } catch {
+              // ignore
+            }
+          }
+        });
+      });
       setIsJoined(true);
       setIsMuted(startMuted);
       setIsDeafened(false);

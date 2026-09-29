@@ -3,8 +3,12 @@ class AudioManager {
   private ctx: AudioContext | null = null;
   private volume: number = 0.45;
   private muted: boolean = false;
-  private ambientGain: GainNode | null = null;
-  private isAmbientPlaying: boolean = false;
+  private bgmMuted: boolean = false;
+  private bgmVolume: number = 0.28;
+  private bgmGain: GainNode | null = null;
+  private isBgmPlaying: boolean = false;
+  private bgmTimer: number | null = null;
+  private bgmStep: number = 0;
 
   constructor() {
     const savedVol = localStorage.getItem('spy_station_vol');
@@ -16,11 +20,21 @@ class AudioManager {
     if (savedMute !== null) {
       this.muted = savedMute === 'true';
     }
+    const savedBgmMute = localStorage.getItem('spy_station_bgm_muted');
+    if (savedBgmMute !== null) {
+      this.bgmMuted = savedBgmMute === 'true';
+    } else {
+      // Default to music enabled
+      this.bgmMuted = false;
+    }
 
     // Auto-unlock AudioContext on first user interaction (critical for iOS Safari & Android Chrome)
     if (typeof window !== 'undefined') {
       const unlockAudio = () => {
         this.initCtx();
+        if (!this.bgmMuted && !this.isBgmPlaying) {
+          this.startBgm();
+        }
         window.removeEventListener('click', unlockAudio);
         window.removeEventListener('touchstart', unlockAudio);
         window.removeEventListener('pointerdown', unlockAudio);
@@ -56,6 +70,187 @@ class AudioManager {
       this.playTone(520, 'sine', 0.08, 0.3);
     }
     return this.muted;
+  }
+
+  // Background Music (BGM) Controls
+  public isBgmMuted(): boolean {
+    return this.bgmMuted;
+  }
+
+  public toggleBgm(): boolean {
+    this.bgmMuted = !this.bgmMuted;
+    localStorage.setItem('spy_station_bgm_muted', String(this.bgmMuted));
+    if (this.bgmMuted) {
+      this.stopBgm();
+    } else {
+      this.startBgm();
+    }
+    return this.bgmMuted;
+  }
+
+  public getBgmVolume(): number {
+    return this.bgmVolume;
+  }
+
+  public setBgmVolume(vol: number) {
+    this.bgmVolume = Math.min(1, Math.max(0, vol));
+    if (this.bgmGain && this.ctx) {
+      this.bgmGain.gain.setTargetAtTime(this.bgmMuted ? 0 : this.bgmVolume, this.ctx.currentTime, 0.1);
+    }
+  }
+
+  // Start procedural atmospheric cyber/spy music
+  public startBgm() {
+    if (this.bgmMuted || this.isBgmPlaying) return;
+    this.initCtx();
+    if (!this.ctx) return;
+
+    this.isBgmPlaying = true;
+    if (!this.bgmGain) {
+      this.bgmGain = this.ctx.createGain();
+      this.bgmGain.connect(this.ctx.destination);
+    }
+    const now = this.ctx.currentTime;
+    this.bgmGain.gain.setValueAtTime(0.001, now);
+    this.bgmGain.gain.linearRampToValueAtTime(this.bgmVolume, now + 1.2);
+
+    this.scheduleBgmLoop();
+  }
+
+  public stopBgm() {
+    this.isBgmPlaying = false;
+    if (this.bgmTimer) {
+      window.clearTimeout(this.bgmTimer);
+      this.bgmTimer = null;
+    }
+    if (this.bgmGain && this.ctx) {
+      const now = this.ctx.currentTime;
+      this.bgmGain.gain.setValueAtTime(this.bgmGain.gain.value, now);
+      this.bgmGain.gain.linearRampToValueAtTime(0.0001, now + 0.8);
+    }
+  }
+
+  // Procedural Suspense Spy Loop (BPM 84, D minor / mysterious spy progression)
+  private scheduleBgmLoop() {
+    if (!this.isBgmPlaying || this.bgmMuted || !this.ctx || !this.bgmGain) return;
+
+    const bpm = 84;
+    const stepDuration = 60 / bpm / 2; // eighth notes (~0.357s)
+
+    // Cinematic Spy Chord Progressions (Root, Third, Fifth, Seventh/Ninth)
+    const chords = [
+      [73.42, 146.83, 220.0, 261.63, 329.63], // Dm9
+      [65.41, 130.81, 196.0, 246.94, 311.13], // C minor / diminished touch
+      [58.27, 116.54, 174.61, 233.08, 293.66], // Bb major 7
+      [55.0, 110.0, 164.81, 220.0, 277.18]     // A7 suspense
+    ];
+
+    const currentChordIdx = Math.floor((this.bgmStep % 32) / 8);
+    const chordNotes = chords[currentChordIdx];
+
+    const now = this.ctx.currentTime;
+
+    try {
+      // 1. Warm Sub-Bass Pulse on downbeats (beats 0, 4, 8...)
+      if (this.bgmStep % 4 === 0) {
+        const bassOsc = this.ctx.createOscillator();
+        const bassGain = this.ctx.createGain();
+        const bassFilter = this.ctx.createBiquadFilter();
+
+        bassOsc.type = 'triangle';
+        bassOsc.frequency.setValueAtTime(chordNotes[0], now);
+
+        bassFilter.type = 'lowpass';
+        bassFilter.frequency.setValueAtTime(140, now);
+
+        bassGain.gain.setValueAtTime(0.001, now);
+        bassGain.gain.linearRampToValueAtTime(0.35, now + 0.05);
+        bassGain.gain.exponentialRampToValueAtTime(0.001, now + stepDuration * 2.5);
+
+        bassOsc.connect(bassFilter);
+        bassFilter.connect(bassGain);
+        bassGain.connect(this.bgmGain);
+
+        bassOsc.start(now);
+        bassOsc.stop(now + stepDuration * 2.6);
+      }
+
+      // 2. Ethereal Ambient Pad Chord (on each chord change: step 0, 8, 16, 24)
+      if (this.bgmStep % 8 === 0) {
+        chordNotes.slice(1, 4).forEach((freq, idx) => {
+          if (!this.ctx || !this.bgmGain) return;
+          const padOsc = this.ctx.createOscillator();
+          const padGain = this.ctx.createGain();
+          const padFilter = this.ctx.createBiquadFilter();
+
+          padOsc.type = 'sawtooth';
+          padOsc.frequency.setValueAtTime(freq * (1 + (idx === 0 ? 0.002 : -0.002)), now);
+
+          padFilter.type = 'lowpass';
+          padFilter.frequency.setValueAtTime(320, now);
+          padFilter.Q.setValueAtTime(2, now);
+
+          const padLen = stepDuration * 7.5;
+          padGain.gain.setValueAtTime(0.001, now);
+          padGain.gain.linearRampToValueAtTime(0.09, now + 0.8);
+          padGain.gain.exponentialRampToValueAtTime(0.001, now + padLen);
+
+          padOsc.connect(padFilter);
+          padFilter.connect(padGain);
+          padGain.connect(this.bgmGain);
+
+          padOsc.start(now);
+          padOsc.stop(now + padLen + 0.1);
+        });
+      }
+
+      // 3. Spy Bell Arpeggiator Motif (soft, subtle espionage notes)
+      const arpPattern = [0, 2, 4, 3, 1, 3, 2, 4];
+      const noteOffset = arpPattern[this.bgmStep % 8];
+      if (this.bgmStep % 2 === 0 && Math.random() > 0.25) {
+        const leadFreq = chordNotes[noteOffset % chordNotes.length] * 2;
+        const arpOsc = this.ctx.createOscillator();
+        const arpGain = this.ctx.createGain();
+
+        arpOsc.type = 'sine';
+        arpOsc.frequency.setValueAtTime(leadFreq, now);
+
+        arpGain.gain.setValueAtTime(0.001, now);
+        arpGain.gain.linearRampToValueAtTime(0.12, now + 0.02);
+        arpGain.gain.exponentialRampToValueAtTime(0.0001, now + stepDuration * 0.9);
+
+        arpOsc.connect(arpGain);
+        arpGain.connect(this.bgmGain);
+
+        arpOsc.start(now);
+        arpOsc.stop(now + stepDuration);
+      }
+
+      // 4. Subtle Cyber Tick / Rhythm Heartbeat (tactical suspense click)
+      if (this.bgmStep % 2 === 1) {
+        const tickOsc = this.ctx.createOscillator();
+        const tickGain = this.ctx.createGain();
+        tickOsc.type = 'sine';
+        tickOsc.frequency.setValueAtTime(1200, now);
+        tickOsc.frequency.exponentialRampToValueAtTime(200, now + 0.03);
+
+        tickGain.gain.setValueAtTime(0.02, now);
+        tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
+
+        tickOsc.connect(tickGain);
+        tickGain.connect(this.bgmGain);
+
+        tickOsc.start(now);
+        tickOsc.stop(now + 0.04);
+      }
+    } catch {
+      // ignore
+    }
+
+    this.bgmStep = (this.bgmStep + 1) % 64;
+    this.bgmTimer = window.setTimeout(() => {
+      this.scheduleBgmLoop();
+    }, stepDuration * 1000);
   }
 
   public getVolume(): number {

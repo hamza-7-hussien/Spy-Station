@@ -48,11 +48,13 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
             <span>{t.voteTitle}</span>
           </div>
 
-          <div className="flex items-center justify-center gap-1.5 text-sky-400 font-mono font-black text-lg pt-1">
-            <Clock className="w-4 h-4 text-sky-400" />
-            <span>
-              {t.lblVoteTime} {room.voteTimeLeft != null ? room.voteTimeLeft : 80}s
-            </span>
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <div className="flex items-center gap-2 px-4 py-1.5 rounded-2xl bg-black/60 border border-sky-400/40 shadow-[0_0_15px_rgba(56,189,248,0.25)] text-sky-300 font-mono font-black text-base">
+              <Clock className="w-4 h-4 text-sky-400 animate-spin" style={{ animationDuration: '8s' }} />
+              <span>
+                {t.lblVoteTime} {room.voteTimeLeft != null ? room.voteTimeLeft : 80}s
+              </span>
+            </div>
           </div>
         </div>
 
@@ -66,22 +68,21 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
 
             const isMyTarget = votes[currentUserUid] === p.uid;
             const isSelf = p.uid === currentUserUid;
-            const isSelectable = canVote && !isSelf;
+            // Players can now vote for ANY active player, including themselves!
+            const isSelectable = canVote;
 
             return (
               <div
                 key={p.uid}
                 onClick={() => isSelectable && handleVote(p.uid)}
-                className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${
+                className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all ${
                   isSelectable
-                    ? 'cursor-pointer hover:border-purple-400/60 hover:bg-slate-800/80 active:scale-[0.99]'
-                    : isSelf
-                    ? 'cursor-default opacity-85 bg-slate-950/40 border-slate-800/80'
-                    : 'cursor-default'
+                    ? 'cursor-pointer hover:border-purple-400/80 hover:bg-slate-800/80 active:scale-[0.99]'
+                    : 'cursor-default opacity-85'
                 } ${
                   isMyTarget
-                    ? 'border-sky-400 bg-sky-500/15 shadow-[0_0_15px_rgba(56,189,248,0.3)]'
-                    : !isSelf ? 'border-slate-800 bg-slate-950/70' : ''
+                    ? 'border-sky-400 bg-sky-500/20 shadow-[0_0_20px_rgba(56,189,248,0.35)] ring-2 ring-sky-400/50'
+                    : 'border-slate-800 bg-slate-950/70'
                 }`}
               >
                 <div className="flex items-center gap-3">
@@ -93,8 +94,8 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-sm text-slate-100">{p.name || 'Player'}</span>
                     {isSelf && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-sky-400 border border-slate-700 font-bold">
-                        {lang === 'ar' ? 'أنت' : 'You'}
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 font-bold">
+                        {lang === 'ar' ? 'أنت (يمكنك التصويت لنفسك)' : 'You (Can vote for self)'}
                       </span>
                     )}
                   </div>

@@ -93,3 +93,28 @@
 .pulse-glow {
   animation: pulseGlow 2.5s ease-in-out infinite;
 }
+
+@keyframes neonFlicker {
+  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 25px rgba(244, 63, 94, 0.9));
+  }
+  20%, 24%, 55% {
+    opacity: 0.4;
+    filter: drop-shadow(0 0 5px rgba(244, 63, 94, 0.3));
+  }
+}
+
+.animate-neon-flicker {
+  animation: neonFlicker 2s infinite alternate;
+}
+
+@keyframes scanlineSweep {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(1000%); }
+}
+
+.scanline-sweep {
+  animation: scanlineSweep 4s linear infinite;
+}
+

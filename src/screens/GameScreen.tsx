@@ -31,7 +31,8 @@ import {
   RotateCw,
   Lock,
   MessageSquare,
-  Zap
+  Zap,
+  Music
 } from 'lucide-react';
 
 interface Props {
@@ -83,6 +84,7 @@ export const GameScreen: React.FC<Props> = ({
   const [spyInput, setSpyInput] = useState('');
   const [isCardFlipped, setIsCardFlipped] = useState(false);
   const [isMuted, setIsMuted] = useState(sound.isMuted());
+  const [isBgmMuted, setIsBgmMuted] = useState(sound.isBgmMuted());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -335,40 +337,41 @@ export const GameScreen: React.FC<Props> = ({
       {/* ============================================================== */}
       {isBlackoutActive && (
         <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-between p-6 bg-red-950/40 mix-blend-color-burn border-8 border-rose-600/40 animate-pulse">
-          {/* Top Warning Banner */}
-          <div className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-black/80 border border-rose-500 text-rose-400 shadow-[0_0_30px_rgba(244,63,94,0.6)] backdrop-blur-md">
+          {/* Top Warning Banner with Tactical Emergency Timer HUD */}
+          <div className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-black/85 border border-rose-500 text-rose-400 shadow-[0_0_35px_rgba(244,63,94,0.7)] backdrop-blur-md">
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-rose-500 animate-bounce" />
               <span className="font-heading font-black text-xs sm:text-sm tracking-wider uppercase">
                 {lang === 'ar' ? '🚨 بروتوكول التعتيم اللاسلكي: انقطاع الاتصالات والكهرباء!' : '🚨 BLACKOUT PROTOCOL: POWER & COMMS DOWN!'}
               </span>
             </div>
-            <span className="text-[10px] font-mono text-rose-300 font-bold animate-ping">
-              EMERGENCY
-            </span>
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-400/50 text-rose-300 text-xs font-mono font-black shadow-[0_0_15px_rgba(244,63,94,0.4)]">
+              <Clock className="w-3.5 h-3.5 animate-spin text-rose-400" style={{ animationDuration: '4s' }} />
+              <span>EMERGENCY</span>
+            </div>
           </div>
 
-          {/* Central Split-Second Intel Flash for High Focus Agents */}
+          {/* Central Split-Second Intel Flash: PURE GLOWING TEXT WITHOUT ANY RECTANGLE/BOX */}
           {showBlackoutFlash && (
-            <div className="my-auto px-6 py-4 rounded-3xl bg-black/95 border-2 border-rose-500 text-center shadow-[0_0_50px_rgba(244,63,94,0.9)] animate-in zoom-in-95 duration-100 max-w-md pointer-events-auto">
+            <div className="my-auto text-center animate-in zoom-in-90 duration-75 pointer-events-none select-none px-4 max-w-xl">
               {isSpy ? (
-                // For Spies: Split-second flash of the Secret Word
-                <div>
-                  <div className="text-[10px] font-mono font-bold text-rose-400 mb-1 uppercase tracking-widest">
-                    ⚡ {lang === 'ar' ? 'رصد خاطف فائق السرعة للكلمة السرية!' : 'ULTRA-FAST INTEL FLASH: SECRET WORD!'}
+                // For Spies: Split-second flash of the Secret Word (Clean typography without card/rectangle)
+                <div className="space-y-2">
+                  <div className="text-xs sm:text-sm font-mono font-black text-rose-400 tracking-widest uppercase drop-shadow-[0_0_12px_rgba(244,63,94,0.9)]">
+                    ⚡ {lang === 'ar' ? 'رصد استخباري فائق السرعة للكلمة السرية' : 'ULTRA-FAST INTEL FLASH: SECRET WORD'} ⚡
                   </div>
-                  <div className="text-2xl sm:text-4xl font-black text-white font-heading tracking-wide">
+                  <div className="text-4xl sm:text-6xl md:text-7xl font-black font-heading tracking-wider text-white drop-shadow-[0_0_35px_rgba(244,63,94,1)] animate-pulse">
                     {displayWord || (lang === 'ar' ? 'الكلمة السرية' : 'Secret Word')}
                   </div>
                 </div>
               ) : (
-                // For Non-Spies: Split-second flash of Spy Names
-                <div>
-                  <div className="text-[10px] font-mono font-bold text-rose-400 mb-1 uppercase tracking-widest">
-                    ⚡ {lang === 'ar' ? 'رصد رادار خاطف لأسماء الجواسيس!' : 'ULTRA-FAST INTEL FLASH: IDENTIFIED SPIES!'}
+                // For Non-Spies: Split-second flash of Spy Names (Clean typography without card/rectangle)
+                <div className="space-y-2">
+                  <div className="text-xs sm:text-sm font-mono font-black text-rose-400 tracking-widest uppercase drop-shadow-[0_0_12px_rgba(244,63,94,0.9)]">
+                    ⚡ {lang === 'ar' ? 'رصد رادار خاطف لأسماء الجواسيس' : 'ULTRA-FAST INTEL FLASH: IDENTIFIED SPIES'} ⚡
                   </div>
-                  <div className="text-xl sm:text-3xl font-black text-rose-300 font-heading tracking-wide">
-                    {(room.spies || []).map(sUid => playersObj[sUid]?.name || 'Agent').join('، ')}
+                  <div className="text-3xl sm:text-5xl md:text-6xl font-black font-heading tracking-wider text-rose-300 drop-shadow-[0_0_35px_rgba(244,63,94,1)] animate-pulse">
+                    {(room.spies || []).map(sUid => playersObj[sUid]?.name || 'Agent').join(' ، ')}
                   </div>
                 </div>
               )}
@@ -434,6 +437,26 @@ export const GameScreen: React.FC<Props> = ({
                 {cluesList.length}
               </span>
             )}
+          </button>
+
+          {/* Background Music (BGM) Toggle */}
+          <button
+            onClick={() => {
+              const bgmMuted = sound.toggleBgm();
+              setIsBgmMuted(bgmMuted);
+            }}
+            className={`p-1.5 sm:p-2 rounded-xl border transition cursor-pointer shrink-0 ${
+              isBgmMuted
+                ? 'bg-slate-800/80 border-slate-700 text-slate-500 hover:text-slate-300'
+                : 'bg-indigo-950/70 border-indigo-500/60 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.35)]'
+            }`}
+            title={
+              isBgmMuted
+                ? (lang === 'ar' ? 'تشغيل موسيقى التجسس 🎵' : 'Play Background Music 🎵')
+                : (lang === 'ar' ? 'كتم موسيقى التجسس 🎵' : 'Mute Background Music 🎵')
+            }
+          >
+            <Music className={`w-3.5 h-3.5 ${!isBgmMuted ? 'text-indigo-400 animate-pulse' : ''}`} />
           </button>
 
           {/* Game Sound SFX Toggle (Completely Independent from Voice Chat) */}
@@ -530,16 +553,46 @@ export const GameScreen: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Timer Ring / Box */}
+        {/* Tactical HUD Circular & Digital Countdown Timer */}
         <div
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl border font-mono font-black text-sm shrink-0 shadow-inner ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border font-mono font-black text-sm shrink-0 transition-all ${
             timeLeft <= 5
-              ? 'bg-rose-950/80 border-rose-500 text-rose-400 animate-ping'
-              : 'bg-slate-950 border-sky-500/30 text-sky-300'
+              ? 'bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_20px_rgba(244,63,94,0.6)] animate-pulse ring-2 ring-rose-500/40'
+              : 'bg-slate-950/90 border-sky-500/40 text-sky-300 shadow-[0_0_12px_rgba(56,189,248,0.2)]'
           }`}
         >
-          <Clock className="w-4 h-4 text-sky-400" />
-          <span>00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</span>
+          {/* Mini Tactical Circular SVG Gauge */}
+          <div className="relative w-5 h-5 flex items-center justify-center shrink-0">
+            <svg className="w-5 h-5 -rotate-90" viewBox="0 0 24 24">
+              <circle
+                cx="12"
+                cy="12"
+                r="9"
+                className="stroke-slate-800"
+                strokeWidth="2.5"
+                fill="none"
+              />
+              <circle
+                cx="12"
+                cy="12"
+                r="9"
+                className={`${timeLeft <= 5 ? 'stroke-rose-500' : 'stroke-sky-400'} transition-all duration-1000 ease-linear`}
+                strokeWidth="2.5"
+                strokeDasharray="56.5"
+                strokeDashoffset={56.5 * (1 - Math.max(0, Math.min(1, timeLeft / (room.turnSeconds || 20))))}
+                strokeLinecap="round"
+                fill="none"
+              />
+            </svg>
+            <Clock className={`w-2.5 h-2.5 absolute ${timeLeft <= 5 ? 'text-rose-400' : 'text-sky-400'}`} />
+          </div>
+
+          <span className="text-sm tracking-wider">00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</span>
+          {timeLeft <= 5 && (
+            <span className="text-[10px] px-1 py-0.2 rounded bg-rose-500 text-black font-extrabold tracking-tighter">
+              !
+            </span>
+          )}
         </div>
       </div>
 
