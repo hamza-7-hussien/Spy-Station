@@ -183,6 +183,8 @@ export const LobbyScreen: React.FC<Props> = ({
               ? t.modeUndercover
               : room.gameMode === 'silent'
               ? t.modeSilentStation
+              : room.gameMode === 'blackout'
+              ? t.modeBlackout
               : t.modeNormal}
           </div>
         </div>

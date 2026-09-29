@@ -18,7 +18,7 @@ import {
   RoomInvite,
   JoinRequest
 } from './types';
-import { getCombinedWordList, wordsDB } from './words';
+import { getCombinedWordList, wordsDB, getSmartTwinWord } from './words';
 import { AuthScreen } from './screens/AuthScreen';
 import { HomeTab } from './screens/HomeTab';
 import { StationsTab } from './screens/StationsTab';
@@ -422,6 +422,37 @@ export default function App() {
           }
           const defaultTurnSeconds = room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20);
           const left = room.turnTimeLeft != null ? room.turnTimeLeft : defaultTurnSeconds;
+
+          // Blackout Protocol Trigger Engine (Host Authoritative)
+          // Starts from Round 3+, unpredictable intervals, requires at least 3 rounds gap (e.g. after Rd 6 next is Rd 10+)
+          // Can occur near round start, middle, or near end. Lasts 3.5 seconds.
+          if (room.gameMode === 'blackout' && !room.blackoutActive) {
+            const currentRound = room.round || 1;
+            const lastBO = room.lastBlackoutRound || 0;
+            // Must be at least round 3 and at least 3 full rounds elapsed since last blackout (gap >= 3)
+            const gap = currentRound - lastBO;
+            if (currentRound >= 3 && (lastBO === 0 || gap >= 4)) {
+              // Trigger chance during turn: start (left near max), middle (halfway), or end (left <= 4)
+              const isStartMoment = left === defaultTurnSeconds - 2;
+              const isMidMoment = left === Math.floor(defaultTurnSeconds / 2);
+              const isEndMoment = left === 3;
+              if (isStartMoment || isMidMoment || isEndMoment) {
+                // Random roll: 40% probability when moment strikes
+                if (Math.random() < 0.4) {
+                  db.ref(`spy_rooms/${currentRoomCode}`).update({
+                    blackoutActive: true,
+                    lastBlackoutRound: currentRound
+                  });
+                  setTimeout(() => {
+                    db.ref(`spy_rooms/${currentRoomCode}`).update({
+                      blackoutActive: false
+                    }).catch(() => {});
+                  }, 3500);
+                }
+              }
+            }
+          }
+
           if (left <= 1) {
             advanceTurn(room.turnIndex);
           } else {
@@ -1329,10 +1360,8 @@ export default function App() {
 
       const resetPlayers: Record<string, PlayerData> = {};
 
-      // Chameleon mode: pick a twin word
-      const otherPairs = wordList.filter(pair => pair[0] !== selectedPair[0]);
-      const chameleonPair =
-        otherPairs.length > 0 ? otherPairs[Math.floor(Math.random() * otherPairs.length)] : selectedPair;
+      // Chameleon mode: pick a smart twin word closely aligned in nationality, style, or era
+      const chameleonPair = getSmartTwinWord(selectedPair, chosenCat || 'players', wordList);
 
       // Undercover mode: pick an undercover protector who knows the spy
       const nonSpies = playersArr.filter(p => !spies.includes(p.uid));
@@ -1379,6 +1408,8 @@ export default function App() {
         spies: spies,
         undercoverUid: undercoverUid || null,
         round: 1,
+        blackoutActive: false,
+        lastBlackoutRound: 0,
         turnOrder: shuffled,
         turnIndex: 0,
         turnTimeLeft: initialTurnSeconds,

@@ -332,6 +332,187 @@ export function isForeignMovie(wordEn?: string | null): boolean {
  *   If Egyptian/Arab: ALWAYS shown in Arabic (both for 'ar' and 'en' users).
  *   If Foreign/International: ALWAYS shown in English (both for 'ar' and 'en' users).
  */
+// ==============================================================
+// 🦎 SMART TWIN CHAMELEON PAIRS & CLUSTERS
+// Ensures the Chameleon gets a word intimately close in nationality,
+// era, genre, or style to make deception truly challenging and fun!
+// ==============================================================
+const TWIN_PAIRS_MAP: Record<string, string> = {
+  // --- Football Players (Same team / rivalry / nationality / role) ---
+  "Messi": "Ronaldo", "Ronaldo": "Messi",
+  "Neymar": "Mbappe", "Mbappe": "Neymar",
+  "Haaland": "De Bruyne", "De Bruyne": "Haaland",
+  "Salah": "Mane", "Mane": "Salah",
+  "Modric": "Kroos", "Kroos": "Modric",
+  "Pedri": "Gavi", "Gavi": "Pedri",
+  "Bellingham": "Foden", "Foden": "Bellingham",
+  "Saka": "Rashford", "Rashford": "Saka",
+  "Benzema": "Suarez", "Suarez": "Benzema",
+  "Vinicius Jr": "Rodrygo", "Rodrygo": "Vinicius Jr",
+  "Casillas": "Buffon", "Buffon": "Casillas",
+  "Iniesta": "Xavi", "Xavi": "Iniesta",
+  "Ramos": "Puyol", "Puyol": "Ramos",
+  "Alisson": "Ederson", "Ederson": "Alisson",
+  "Courtois": "Ter Stegen", "Ter Stegen": "Courtois",
+  "Robben": "Ribery", "Ribery": "Robben",
+  "Musiala": "Wirtz", "Wirtz": "Musiala",
+  "Lamine Yamal": "Pedri",
+  "Julian Alvarez": "Enzo Fernandez", "Enzo Fernandez": "Julian Alvarez",
+  "Drogba": "Eto'o", "Eto'o": "Drogba",
+  "Abou Trika": "El Khatib", "El Khatib": "Abou Trika",
+  "Trezeguet": "Marmoush", "Marmoush": "Trezeguet",
+  "Mostafa Mohamed": "Emad Meteb", "Emad Meteb": "Mostafa Mohamed",
+  "Hossam Hassan": "Ahmed Hassan", "Ahmed Hassan": "Hossam Hassan",
+  "Elneny": "Ahmed Fathy", "Ahmed Fathy": "Elneny",
+  "Mahrez": "Salah",
+  "Pele": "Maradona", "Maradona": "Pele",
+  "Zidane": "Ronaldinho", "Ronaldinho": "Zidane",
+  "Kane": "Lewandowski", "Lewandowski": "Kane",
+  "Casemiro": "Bruno Fernandes", "Bruno Fernandes": "Casemiro",
+  "Hakimi": "Theo Hernandez", "Theo Hernandez": "Hakimi",
+  "Camavinga": "Valverde", "Valverde": "Camavinga",
+  "Cole Palmer": "Foden",
+
+  // --- Food (Same cuisine / style) ---
+  "Pizza": "Burger", "Burger": "Pizza",
+  "Shawarma": "Kebab", "Kebab": "Shawarma",
+  "Falafel": "Koshary", "Koshary": "Falafel",
+  "Molokhia": "Mahshi", "Mahshi": "Molokhia",
+  "Sushi": "Ramen", "Ramen": "Sushi",
+  "Pasta": "Lasagna", "Lasagna": "Pasta",
+  "Crepe": "Waffles", "Waffles": "Crepe",
+  "Pancakes": "Donuts", "Donuts": "Pancakes",
+  "Cheesecake": "Tiramisu", "Tiramisu": "Cheesecake",
+  "Kunafa": "Baklava", "Baklava": "Kunafa",
+  "Basbousa": "Om Ali", "Om Ali": "Basbousa",
+  "Tacos": "Burrito", "Burrito": "Tacos",
+  "Quesadilla": "Nachos", "Nachos": "Quesadilla",
+  "Steak": "BBQ Ribs", "BBQ Ribs": "Steak",
+  "Fried Chicken": "Chicken Wings", "Chicken Wings": "Fried Chicken",
+  "Biryani": "Curry", "Curry": "Biryani",
+  "Samosa": "Spring Rolls", "Spring Rolls": "Samosa",
+  "Hot Dog": "Sandwich", "Sandwich": "Hot Dog",
+  "Hawawshi": "Feteer", "Feteer": "Hawawshi",
+  "Ice Cream": "Gelato", "Gelato": "Ice Cream",
+  "Grilled Shrimp": "Calamari", "Calamari": "Grilled Shrimp",
+  "Boba Tea": "Dalgona Coffee", "Dalgona Coffee": "Boba Tea",
+  "Dubai Chocolate": "Chocolate Kunafa", "Chocolate Kunafa": "Dubai Chocolate",
+
+  // --- Places (Same region / landmark type) ---
+  "Pyramids": "Sphinx", "Sphinx": "Pyramids",
+  "Eiffel Tower": "Louvre Museum", "Louvre Museum": "Eiffel Tower",
+  "Big Ben": "Buckingham Palace", "Buckingham Palace": "Big Ben",
+  "Statue of Liberty": "Times Square", "Times Square": "Statue of Liberty",
+  "Colosseum": "Vatican City", "Vatican City": "Colosseum",
+  "Burj Khalifa": "Dubai", "Dubai": "Burj Khalifa",
+  "Mecca": "Medina", "Medina": "Mecca",
+  "Cairo Tower": "Khan El Khalili", "Khan El Khalili": "Cairo Tower",
+  "Sharm El Sheikh": "Hurghada", "Hurghada": "Sharm El Sheikh",
+  "Tokyo": "Seoul", "Seoul": "Tokyo",
+  "Paris": "Rome", "Rome": "Paris",
+  "London": "New York", "New York": "London",
+  "Niagara Falls": "Victoria Falls", "Victoria Falls": "Niagara Falls",
+  "Mount Everest": "Mount Kilimanjaro", "Mount Kilimanjaro": "Mount Everest",
+  "Venice": "Amsterdam", "Amsterdam": "Venice",
+  "Taj Mahal": "Petra", "Petra": "Taj Mahal",
+  "Great Wall of China": "Machu Picchu", "Machu Picchu": "Great Wall of China",
+  "Maldives": "Bali", "Bali": "Maldives",
+  "Luxor Temple": "Karnak Temple", "Karnak Temple": "Luxor Temple",
+
+  // --- Movies & Series ---
+  "Titanic": "Avatar", "Avatar": "Titanic",
+  "The Dark Knight": "Joker", "Joker": "The Dark Knight",
+  "Harry Potter": "Lord of the Rings", "Lord of the Rings": "Harry Potter",
+  "Inception": "Interstellar", "Interstellar": "Inception",
+  "Avengers": "Spider-Man", "Spider-Man": "Avengers",
+  "Kirah Wel Genn": "El Feel El Azraq", "El Feel El Azraq": "Kirah Wel Genn",
+  "El Lemby": "Booha", "Booha": "El Lemby",
+  "Ibrahim Labyad": "Tito", "Tito": "Ibrahim Labyad",
+  "Squid Game": "Money Heist", "Money Heist": "Squid Game",
+  "Breaking Bad": "Better Call Saul", "Better Call Saul": "Breaking Bad",
+  "Game of Thrones": "House of the Dragon", "House of the Dragon": "Game of Thrones",
+  "The Godfather": "Scarface", "Scarface": "The Godfather",
+
+  // --- Games ---
+  "PUBG": "Free Fire", "Free Fire": "PUBG",
+  "Fortnite": "Warzone", "Warzone": "Fortnite",
+  "FIFA": "PES", "PES": "FIFA",
+  "GTA": "Cyberpunk 2077", "Cyberpunk 2077": "GTA",
+  "Minecraft": "Roblox", "Roblox": "Minecraft",
+  "League of Legends": "Dota 2", "Dota 2": "League of Legends",
+  "Valorant": "CS:GO", "CS:GO": "Valorant",
+  "Elden Ring": "Dark Souls", "Dark Souls": "Elden Ring",
+  "Among Us": "Fall Guys", "Fall Guys": "Among Us",
+  "Subway Surfers": "Temple Run", "Temple Run": "Subway Surfers",
+
+  // --- Animals ---
+  "Lion": "Tiger", "Tiger": "Lion",
+  "Wolf": "Fox", "Fox": "Wolf",
+  "Cat": "Dog", "Dog": "Cat",
+  "Eagle": "Falcon", "Falcon": "Eagle",
+  "Dolphin": "Whale", "Whale": "Dolphin",
+  "Shark": "Orca", "Orca": "Shark",
+  "Elephant": "Rhino", "Rhino": "Elephant",
+  "Giraffe": "Zebra", "Zebra": "Giraffe",
+  "Cheetah": "Leopard", "Leopard": "Cheetah",
+  "Rabbit": "Hamster", "Hamster": "Rabbit",
+  "Monkey": "Chimpanzee", "Chimpanzee": "Monkey",
+
+  // --- Jobs ---
+  "Doctor": "Pharmacist", "Pharmacist": "Doctor",
+  "Nurse": "Surgeon", "Surgeon": "Nurse",
+  "Engineer": "Architect", "Architect": "Engineer",
+  "Pilot": "Flight Attendant", "Flight Attendant": "Pilot",
+  "Police Officer": "Detective", "Detective": "Police Officer",
+  "Teacher": "Professor", "Professor": "Teacher",
+  "Judge": "Lawyer", "Lawyer": "Judge",
+  "Chef": "Baker", "Baker": "Chef",
+  "Astronaut": "Astronomer", "Astronomer": "Astronaut",
+  "Programmer": "Data Scientist", "Data Scientist": "Programmer",
+
+  // --- Singers ---
+  "Amr Diab": "Tamer Hosny", "Tamer Hosny": "Amr Diab",
+  "Mohamed Hamaki": "Ramy Sabry", "Ramy Sabry": "Mohamed Hamaki",
+  "Wegz": "Marwan Pablo", "Marwan Pablo": "Wegz",
+  "Sherine": "Angham", "Angham": "Sherine",
+  "Umm Kulthum": "Abdel Halim Hafez", "Abdel Halim Hafez": "Umm Kulthum",
+  "Drake": "Travis Scott", "Travis Scott": "Drake",
+  "The Weeknd": "Bruno Mars", "Bruno Mars": "The Weeknd",
+  "Taylor Swift": "Ariana Grande", "Ariana Grande": "Taylor Swift",
+  "Billie Eilish": "Olivia Rodrigo", "Olivia Rodrigo": "Billie Eilish",
+  "Eminem": "50 Cent", "50 Cent": "Eminem"
+};
+
+export function getSmartTwinWord(
+  targetPair: [string, string],
+  category: CategoryKey,
+  availableList: [string, string][]
+): [string, string] {
+  const targetEn = targetPair[0].trim();
+
+  // 1. Direct matched pair
+  const twinEn = TWIN_PAIRS_MAP[targetEn];
+  if (twinEn) {
+    const found = availableList.find(p => p[0].toLowerCase() === twinEn.toLowerCase());
+    if (found) return found;
+  }
+
+  // 2. Fallback: pick the closest neighbor in the category list (next or prev item)
+  const idx = availableList.findIndex(p => p[0] === targetPair[0]);
+  if (idx !== -1) {
+    // Pick adjacent neighbor
+    const neighborIdx = (idx % 2 === 0 ? idx + 1 : idx - 1 + availableList.length) % availableList.length;
+    const neighbor = availableList[neighborIdx];
+    if (neighbor && neighbor[0] !== targetPair[0]) {
+      return neighbor;
+    }
+  }
+
+  // 3. Fallback: any other item from the same category
+  const others = availableList.filter(p => p[0] !== targetPair[0]);
+  return others.length > 0 ? others[Math.floor(Math.random() * others.length)] : targetPair;
+}
+
 export function getSecretWordDisplay(
   wordEn: string | undefined | null,
   wordAr: string | undefined | null,
@@ -356,4 +537,5 @@ export function getSecretWordDisplay(
   }
   return en || ar;
 }
+
 

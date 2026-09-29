@@ -197,6 +197,59 @@ class AudioManager {
     }
   }
 
+  // Blackout Protocol emergency sirens and static glitch sound
+  public playBlackoutAlarm() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // High-low alarm sweep
+      [0, 0.4, 0.8].forEach(offset => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(880, now + offset);
+        osc.frequency.exponentialRampToValueAtTime(320, now + offset + 0.3);
+        gain.gain.setValueAtTime(0.001, now + offset);
+        gain.gain.linearRampToValueAtTime(this.volume * 0.35, now + offset + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.35);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.36);
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  public playGlitchStatic() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const bufferSize = this.ctx.sampleRate * 0.15;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+      const gain = this.ctx.createGain();
+      const now = this.ctx.currentTime;
+      gain.gain.setValueAtTime(this.volume * 0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      noise.connect(gain);
+      gain.connect(this.ctx.destination);
+      noise.start(now);
+    } catch {
+      // ignore
+    }
+  }
+
   public playChime(notes: [number, number, number][], type: OscillatorType = 'sine') {
     if (this.muted || this.volume <= 0) return;
     notes.forEach(([freq, delayMs, duration]) => {

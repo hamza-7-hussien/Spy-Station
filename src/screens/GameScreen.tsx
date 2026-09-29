@@ -30,7 +30,8 @@ import {
   VolumeX as MuteIcon,
   RotateCw,
   Lock,
-  MessageSquare
+  MessageSquare,
+  Zap
 } from 'lucide-react';
 
 interface Props {
@@ -132,6 +133,33 @@ export const GameScreen: React.FC<Props> = ({
       bubblesRef.off('value', onBubbles);
     };
   }, [roomCode]);
+
+  // Blackout Protocol State for GameScreen (Audio & Visuals)
+  const isBlackoutActive = !!room.blackoutActive;
+  const [showBlackoutFlash, setShowBlackoutFlash] = useState(false);
+
+  useEffect(() => {
+    if (isBlackoutActive) {
+      sound.playBlackoutAlarm();
+      sound.playGlitchStatic();
+      sound.triggerHaptic('heavy');
+
+      // The split-second flash occurs after the sudden darkness starts
+      const flashTimer = setTimeout(() => {
+        setShowBlackoutFlash(true);
+        sound.triggerHaptic('light');
+        // Split-second flash disappears very quickly (approx 380ms)
+        const hideTimer = setTimeout(() => {
+          setShowBlackoutFlash(false);
+        }, 380);
+        return () => clearTimeout(hideTimer);
+      }, 900);
+
+      return () => clearTimeout(flashTimer);
+    } else {
+      setShowBlackoutFlash(false);
+    }
+  }, [isBlackoutActive]);
 
   // Audio timer pulse
   useEffect(() => {
@@ -299,7 +327,61 @@ export const GameScreen: React.FC<Props> = ({
   );
 
   return (
-    <div className="w-full max-w-3xl mx-auto space-y-3.5 pb-24 pt-1 text-start select-none relative z-10">
+    <div className={`w-full max-w-3xl mx-auto space-y-3.5 pb-24 pt-1 text-start select-none relative z-10 transition-colors duration-500 ${
+      isBlackoutActive ? 'brightness-75 saturate-150' : ''
+    }`}>
+      {/* ============================================================== */}
+      {/* 🚨 BLACKOUT PROTOCOL EMERGENCY OVERLAY */}
+      {/* ============================================================== */}
+      {isBlackoutActive && (
+        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-between p-6 bg-red-950/40 mix-blend-color-burn border-8 border-rose-600/40 animate-pulse">
+          {/* Top Warning Banner */}
+          <div className="w-full flex items-center justify-between px-4 py-2 rounded-2xl bg-black/80 border border-rose-500 text-rose-400 shadow-[0_0_30px_rgba(244,63,94,0.6)] backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-rose-500 animate-bounce" />
+              <span className="font-heading font-black text-xs sm:text-sm tracking-wider uppercase">
+                {lang === 'ar' ? '🚨 بروتوكول التعتيم اللاسلكي: انقطاع الاتصالات والكهرباء!' : '🚨 BLACKOUT PROTOCOL: POWER & COMMS DOWN!'}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono text-rose-300 font-bold animate-ping">
+              EMERGENCY
+            </span>
+          </div>
+
+          {/* Central Split-Second Intel Flash for High Focus Agents */}
+          {showBlackoutFlash && (
+            <div className="my-auto px-6 py-4 rounded-3xl bg-black/95 border-2 border-rose-500 text-center shadow-[0_0_50px_rgba(244,63,94,0.9)] animate-in zoom-in-95 duration-100 max-w-md pointer-events-auto">
+              {isSpy ? (
+                // For Spies: Split-second flash of the Secret Word
+                <div>
+                  <div className="text-[10px] font-mono font-bold text-rose-400 mb-1 uppercase tracking-widest">
+                    ⚡ {lang === 'ar' ? 'رصد خاطف فائق السرعة للكلمة السرية!' : 'ULTRA-FAST INTEL FLASH: SECRET WORD!'}
+                  </div>
+                  <div className="text-2xl sm:text-4xl font-black text-white font-heading tracking-wide">
+                    {displayWord || (lang === 'ar' ? 'الكلمة السرية' : 'Secret Word')}
+                  </div>
+                </div>
+              ) : (
+                // For Non-Spies: Split-second flash of Spy Names
+                <div>
+                  <div className="text-[10px] font-mono font-bold text-rose-400 mb-1 uppercase tracking-widest">
+                    ⚡ {lang === 'ar' ? 'رصد رادار خاطف لأسماء الجواسيس!' : 'ULTRA-FAST INTEL FLASH: IDENTIFIED SPIES!'}
+                  </div>
+                  <div className="text-xl sm:text-3xl font-black text-rose-300 font-heading tracking-wide">
+                    {(room.spies || []).map(sUid => playersObj[sUid]?.name || 'Agent').join('، ')}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bottom Alert */}
+          <div className="text-center text-[11px] font-bold text-rose-300/80 bg-black/70 px-4 py-1.5 rounded-full border border-rose-500/30">
+            {lang === 'ar' ? '⚡ رصد خاطف لجزء من الثانية.. هل كنت مركزاً؟' : '⚡ Split-second transmission glitch.. Did you catch it?'}
+          </div>
+        </div>
+      )}
+
       {/* ============================================================== */}
       {/* 🚀 TOP CLEAN STATUS BAR */}
       {/* ============================================================== */}
@@ -527,13 +609,6 @@ export const GameScreen: React.FC<Props> = ({
               <div className="text-xl sm:text-3xl md:text-4xl font-black text-white font-heading tracking-wide break-words max-w-full text-center leading-tight">
                 {displayWord || (lang === 'ar' ? 'كلمة سرية' : 'Secret Word')}
               </div>
-              {isChameleonSpy && (
-                <div className="mt-1 px-2.5 py-1 rounded-xl bg-emerald-950/60 border border-emerald-400/40 text-[11px] font-bold text-emerald-300">
-                  {lang === 'ar'
-                    ? '🦎 أنت الحرباء: هذه كلمتك التوأم المضللة، تكلم بثقة وحذر دون كشف نفسك!'
-                    : '🦎 You are the Chameleon: This is your twin decoy word, blend in!'}
-                </div>
-              )}
             </div>
           )
         ) : (
@@ -599,7 +674,9 @@ export const GameScreen: React.FC<Props> = ({
                     src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
                     alt={p?.name}
                     className={`w-12 h-12 rounded-full object-cover border-2 transition-all ${
-                      isVoiceSpeaking
+                      isBlackoutActive
+                        ? 'opacity-20 grayscale brightness-50 border-rose-900 filter blur-[1px]'
+                        : isVoiceSpeaking
                         ? 'border-emerald-300 ring-4 ring-emerald-400 animate-pulse'
                         : isTurn
                         ? 'border-sky-300 ring-4 ring-sky-400/40'
@@ -615,12 +692,14 @@ export const GameScreen: React.FC<Props> = ({
                   )}
                 </div>
 
-                {/* Player Name + Mole Badge */}
+                {/* Player Name + Mole Badge (Hidden during blackout protocol) */}
                 <div className="flex items-center justify-center gap-1 max-w-[95px]">
-                  <span className="text-[11px] font-bold text-white text-center truncate leading-tight">
-                    {p?.name || 'Agent'}
+                  <span className={`text-[11px] font-bold text-center truncate leading-tight ${
+                    isBlackoutActive ? 'text-rose-500/40 tracking-widest' : 'text-white'
+                  }`}>
+                    {isBlackoutActive ? '██████' : (p?.name || 'Agent')}
                   </span>
-                  {isFellowMoleSpy && (
+                  {isFellowMoleSpy && !isBlackoutActive && (
                     <span title={lang === 'ar' ? 'شريكك في التجسس' : 'Fellow Spy'} className="text-[10px]">
                       🕵️
                     </span>

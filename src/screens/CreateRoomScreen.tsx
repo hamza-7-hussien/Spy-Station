@@ -20,7 +20,8 @@ import {
   Radio,
   Radar,
   Flame,
-  Eye
+  Eye,
+  ChevronRight
 } from 'lucide-react';
 import { sound } from '../audio';
 
@@ -78,6 +79,23 @@ export const CreateRoomScreen: React.FC<Props> = ({
   const [maxPlayers, setMaxPlayers] = useState<number>(initialValues?.maxPlayers || 8);
   const [spyCount, setSpyCount] = useState<number>(initialValues?.spyCount || 1);
   const [turnSeconds, setTurnSeconds] = useState<number>(initialValues?.turnSeconds || 20);
+  const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+
+  const handleSelectMode = (selectedModeId: GameMode) => {
+    sound.playTone(500, 'sine', 0.08);
+    if (selectedModeId === 'mole') {
+      if (spyCount < 2) setSpyCount(2);
+      if (maxPlayers < 4) setMaxPlayers(4);
+      onToast(
+        lang === 'ar'
+          ? '🕸️ تم ضبط الجواسيس إلى 2 واللاعبين إلى 4 تلقائياً لتفعيل شبكة العملاء!'
+          : '🕸️ Auto-set 2 spies and 4 players for Mole Network!',
+        'normal'
+      );
+    }
+    setGameMode(selectedModeId);
+    setIsModeModalOpen(false);
+  };
 
   const toggleCategory = (cat: CategoryKey) => {
     sound.playTone(480, 'sine', 0.08);
@@ -103,6 +121,14 @@ export const CreateRoomScreen: React.FC<Props> = ({
     if (cats.length === 0) {
       return onToast(t.errNoCategory, 'danger');
     }
+    if (gameMode === 'mole' && (spyCount < 2 || maxPlayers < 4)) {
+      return onToast(
+        lang === 'ar'
+          ? 'شبكة العملاء تتطلب 4 لاعبين على الأقل وجاسوسين (2) على الأقل!'
+          : 'Mole Network requires at least 4 players and 2 spies!',
+        'danger'
+      );
+    }
     onConfirm({
       visibility,
       categories: cats,
@@ -122,6 +148,19 @@ export const CreateRoomScreen: React.FC<Props> = ({
       color: 'from-sky-500/20 to-indigo-500/20',
       border: 'border-sky-400',
       text: 'text-sky-300'
+    },
+    {
+      id: 'blackout' as GameMode,
+      title: lang === 'ar' ? 'التعتيم اللاسلكي (Blackout)' : 'Blackout Protocol',
+      desc:
+        lang === 'ar'
+          ? 'انقطاع مفاجئ للاتصالات وظلام أحمر طارئ؛ رصد خاطف للجواسيس أو الكلمة لجزء من الثانية للمركزين فقط!'
+          : 'Sudden blackout & sirens; split-second flash reveals spies or secret word!',
+      icon: Zap,
+      color: 'from-rose-500/20 to-red-500/20',
+      border: 'border-rose-400',
+      text: 'text-rose-300',
+      badge: lang === 'ar' ? 'جديد ⚡' : 'NEW ⚡'
     },
     {
       id: 'chameleon' as GameMode,
@@ -150,11 +189,15 @@ export const CreateRoomScreen: React.FC<Props> = ({
     {
       id: 'mole' as GameMode,
       title: lang === 'ar' ? 'شبكة العملاء' : 'Mole Network',
-      desc: lang === 'ar' ? 'الجواسيس يعرفون بعضهم وينسقون سراً بشات خاص' : 'Spies know each other and coordinate secretly',
+      desc:
+        lang === 'ar'
+          ? 'الجواسيس يعرفون بعضهم وينسقون سراً بشات خاص (يتطلب 4+ لاعبين وجاسوسين 2+ على الأقل)'
+          : 'Spies know each other and coordinate secretly (Requires 4+ players & 2+ spies)',
       icon: Shield,
       color: 'from-purple-500/20 to-pink-500/20',
       border: 'border-purple-400',
-      text: 'text-purple-300'
+      text: 'text-purple-300',
+      badge: lang === 'ar' ? '4+ لاعبين • 2+ جواسيس' : '4+ players • 2+ spies'
     },
     {
       id: 'undercover' as GameMode,
@@ -285,53 +328,60 @@ export const CreateRoomScreen: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* 2. Game Mode Selection - Cyberpunk Card Grid */}
+          {/* 2. Game Mode Selection - Compact Elegant Banner with Modal Selector */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5 text-indigo-400" />
-              <span>{t.lblGameMode}</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-indigo-400" />
+                <span>{t.lblGameMode}</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setIsModeModalOpen(true)}
+                className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1 transition cursor-pointer"
+              >
+                <span>{lang === 'ar' ? 'تغيير المود' : 'Change Mode'}</span>
+                <ChevronRight className={`w-3.5 h-3.5 ${lang === 'ar' ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {GAME_MODES.map(mode => {
-                const Icon = mode.icon;
-                const isSelected = gameMode === mode.id;
-                return (
-                  <button
-                    key={mode.id}
-                    type="button"
-                    onClick={() => {
-                      sound.playTone(500, 'sine', 0.08);
-                      setGameMode(mode.id);
-                    }}
-                    className={`p-3 rounded-2xl border text-start transition-all cursor-pointer relative flex items-start gap-3 ${
-                      isSelected
-                        ? `bg-gradient-to-br ${mode.color} ${mode.border} shadow-[0_0_15px_rgba(56,189,248,0.2)]`
-                        : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 opacity-75 hover:opacity-100'
-                    }`}
-                  >
-                    <div className={`p-2 rounded-xl bg-slate-900 border border-slate-800 shrink-0 ${mode.text}`}>
-                      <Icon className="w-4 h-4" />
+            {/* Currently Active Mode Card (High Quality Compact Hero) */}
+            {(() => {
+              const activeModeObj = GAME_MODES.find(m => m.id === gameMode) || GAME_MODES[0];
+              const Icon = activeModeObj.icon;
+              return (
+                <div
+                  onClick={() => setIsModeModalOpen(true)}
+                  className={`p-3.5 rounded-2xl border bg-gradient-to-r ${activeModeObj.color} ${activeModeObj.border} shadow-lg cursor-pointer hover:brightness-110 transition flex items-center justify-between gap-3`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={`p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 shrink-0 ${activeModeObj.text}`}>
+                      <Icon className="w-5 h-5" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs font-bold ${isSelected ? 'text-white' : 'text-slate-300'}`}>
-                          {mode.title}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white truncate font-heading">
+                          {activeModeObj.title}
                         </span>
-                        {isSelected && (
-                          <div className="w-4 h-4 rounded-full bg-sky-400 text-slate-950 flex items-center justify-center shrink-0">
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
+                        {activeModeObj.badge && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500/30 text-rose-300 border border-rose-500/40">
+                            {activeModeObj.badge}
+                          </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-2 leading-relaxed">
-                        {mode.desc}
+                      <p className="text-[11px] text-slate-300 mt-0.5 line-clamp-1">
+                        {activeModeObj.desc}
                       </p>
                     </div>
-                  </button>
-                );
-              })}
-            </div>
+                  </div>
+
+                  <div className="shrink-0 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700/60 text-xs font-bold text-sky-400 flex items-center gap-1">
+                    <span>{lang === 'ar' ? 'المودات' : 'Modes'}</span>
+                    <Sliders className="w-3.5 h-3.5" />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* 3. Spy Count - Visual Interactive Segmented Agent Bar */}
@@ -346,7 +396,17 @@ export const CreateRoomScreen: React.FC<Props> = ({
                   type="button"
                   onClick={() => {
                     sound.playTone(400, 'sine', 0.06);
-                    setSpyCount(Math.max(1, spyCount - 1));
+                    const next = Math.max(1, spyCount - 1);
+                    setSpyCount(next);
+                    if (gameMode === 'mole' && next < 2) {
+                      setGameMode('normal');
+                      onToast(
+                        lang === 'ar'
+                          ? 'تم تحويل النمط للطور الكلاسيكي؛ شبكة العملاء تتطلب جاسوسين على الأقل!'
+                          : 'Switched to Classic; Mole Network requires at least 2 spies!',
+                        'normal'
+                      );
+                    }
                   }}
                   disabled={spyCount <= 1}
                   className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-slate-200 cursor-pointer"
@@ -415,6 +475,15 @@ export const CreateRoomScreen: React.FC<Props> = ({
                     const next = Math.max(3, maxPlayers - 1);
                     setMaxPlayers(next);
                     if (spyCount >= Math.ceil(next / 2)) setSpyCount(Math.max(1, Math.floor((next - 1) / 2)));
+                    if (gameMode === 'mole' && next < 4) {
+                      setGameMode('normal');
+                      onToast(
+                        lang === 'ar'
+                          ? 'تم تحويل النمط للطور الكلاسيكي؛ شبكة العملاء تتطلب 4 لاعبين على الأقل!'
+                          : 'Switched to Classic; Mole Network requires at least 4 players!',
+                        'normal'
+                      );
+                    }
                   }}
                   disabled={maxPlayers <= 3}
                   className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center text-slate-200 cursor-pointer"
@@ -551,6 +620,116 @@ export const CreateRoomScreen: React.FC<Props> = ({
           </div>
         </form>
       </div>
+
+      {/* ============================================================== */}
+      {/* 🎮 GAME MODES SELECTION MODAL (Elegant Cyberpunk Drawer/Popup) */}
+      {/* ============================================================== */}
+      {isModeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in-50 duration-200">
+          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-sky-500/30 p-5 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-black text-base text-white">
+                    {lang === 'ar' ? 'اختر مود اللعبة' : 'Select Game Mode'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {lang === 'ar' ? 'جميع الأطوار شغالة ومضبوطة بالكامل' : 'All modes are active and optimized'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModeModalOpen(false)}
+                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modes List */}
+            <div className="overflow-y-auto space-y-2.5 py-4 pr-1 flex-1">
+              {GAME_MODES.map(mode => {
+                const Icon = mode.icon;
+                const isSelected = gameMode === mode.id;
+                const isMole = mode.id === 'mole';
+                const isMoleDisabled = isMole && (maxPlayers < 4 || spyCount < 2);
+
+                return (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    disabled={isMoleDisabled}
+                    onClick={() => handleSelectMode(mode.id)}
+                    className={`w-full p-3.5 rounded-2xl border text-start transition-all relative flex items-start gap-3.5 ${
+                      isMoleDisabled
+                        ? 'opacity-40 bg-slate-950/40 border-slate-900 cursor-not-allowed grayscale'
+                        : isSelected
+                        ? `bg-gradient-to-r ${mode.color} ${mode.border} shadow-[0_0_20px_rgba(56,189,248,0.25)] cursor-pointer ring-1 ring-sky-400/50`
+                        : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700 hover:bg-slate-950/90 cursor-pointer'
+                    }`}
+                  >
+                    <div className={`p-2.5 rounded-xl bg-slate-900 border border-slate-800 shrink-0 ${mode.text}`}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs sm:text-sm font-bold ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                            {mode.title}
+                          </span>
+                          {mode.badge && (
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-rose-500/25 text-rose-300 border border-rose-500/30">
+                              {mode.badge}
+                            </span>
+                          )}
+                        </div>
+
+                        {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-sky-400 text-slate-950 flex items-center justify-center shrink-0">
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          </div>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        {mode.desc}
+                      </p>
+
+                      {isMoleDisabled && (
+                        <div className="mt-2 text-[10px] font-bold text-rose-400 flex items-center gap-1">
+                          <span>⚠️</span>
+                          <span>
+                            {lang === 'ar'
+                              ? 'يتطلب زيادة اللاعبين إلى 4+ والجواسيس إلى 2+ لاختياره'
+                              : 'Requires at least 4 players and 2 spies to select'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsModeModalOpen(false)}
+                className="py-2 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
+              >
+                {lang === 'ar' ? 'إغلاق' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

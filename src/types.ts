@@ -6,7 +6,8 @@ export type GameMode =
   | 'rapid'
   | 'mole'
   | 'undercover'
-  | 'silent';
+  | 'silent'
+  | 'blackout';
 
 export type CategoryKey =
   | 'players'
@@ -74,6 +75,8 @@ export interface RoomData {
     timestamp: number;
   };
   voiceStates?: Record<string, VoiceUserState>;
+  blackoutActive?: boolean;
+  lastBlackoutRound?: number;
 }
 
 export interface VoiceUserState {
