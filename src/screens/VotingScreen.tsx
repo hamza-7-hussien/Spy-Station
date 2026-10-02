@@ -95,7 +95,7 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
                     <span className="font-bold text-sm text-slate-100">{p.name || 'Player'}</span>
                     {isSelf && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 font-bold">
-                        {lang === 'ar' ? 'أنت (يمكنك التصويت لنفسك)' : 'You (Can vote for self)'}
+                        {lang === 'ar' ? 'أنت' : 'You'}
                       </span>
                     )}
                   </div>

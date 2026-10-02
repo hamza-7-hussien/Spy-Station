@@ -90,6 +90,7 @@ export const GameScreen: React.FC<Props> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const lastPulseSecondRef = useRef<number>(-1);
+  const lastDrawingSyncRef = useRef<number>(0);
 
   const t = dictionary[lang];
   const playersObj = room.players || {};
@@ -223,6 +224,11 @@ export const GameScreen: React.FC<Props> = ({
     if (!isDrawing || !isMyTurn || room.gameMode !== 'silent') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    const now = Date.now();
+    if (now - lastDrawingSyncRef.current < 40) return;
+    lastDrawingSyncRef.current = now;
+
     const rect = canvas.getBoundingClientRect();
     const x = (e.clientX - rect.left) / rect.width;
     const y = (e.clientY - rect.top) / rect.height;
