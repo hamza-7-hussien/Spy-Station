@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Spy Station - وضع عدم الاتصال</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #030712;
+      color: #f8fafc;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      border-radius: 24px;
+      padding: 32px 24px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 0 40px rgba(56, 189, 248, 0.15);
+    }
+    .icon {
+      font-size: 54px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 22px;
+      margin: 0 0 10px;
+      color: #38bdf8;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 14px;
+      line-height: 1.6;
+      margin: 0 0 24px;
+    }
+    button {
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      color: #030712;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 14px;
+      font-weight: 800;
+      font-size: 15px;
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    button:active {
+      transform: scale(0.97);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🛰️📡</div>
+    <h1>انقطاع إشارة المحطة الفضائية</h1>
+    <p>أنت حالياً في وضع عدم الاتصال (Offline Mode). تم حفظ ملفات وبيانات اللعبة على جهازك وستعود المحطة للعمل تلقائياً فور عودة إشارة الإنترنت!</p>
+    <button onclick="window.location.reload()">إعادة المحاولة 🔄</button>
+  </div>
+</body>
+</html>
