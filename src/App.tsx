@@ -2064,7 +2064,6 @@ export default function App() {
             setInCreateModal(true);
           }}
           onJoinRoom={handleRequestJoinRoom}
-          onChangeLanguage={l => setLang(l)}
         />
       )}
 

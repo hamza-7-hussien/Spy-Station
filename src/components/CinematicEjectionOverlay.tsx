@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { sound } from '../audio';
 import { Language } from '../types';
+import { dictionary } from '../translations';
 import { ShieldAlert, Sparkles, Lock, HeartCrack } from 'lucide-react';
 
 interface Props {
@@ -18,6 +19,7 @@ export const CinematicEjectionOverlay: React.FC<Props> = ({
   isSpy,
   onComplete
 }) => {
+  const t = dictionary[lang];
   const [animStage, setAnimStage] = useState<'appear' | 'action' | 'verdict'>('appear');
   const onCompleteRef = React.useRef(onComplete);
   const soundPlayedRef = React.useRef(false);
@@ -160,32 +162,20 @@ export const CinematicEjectionOverlay: React.FC<Props> = ({
               {isSpy ? (
                 <>
                   <ShieldAlert className="w-6 h-6 text-rose-400 animate-bounce" />
-                  <span>
-                    {lang === 'ar'
-                      ? 'تم حبس الجاسوس في القفص! 🕵️🔒'
-                      : 'Spy Captured In Prison Cage! 🕵️🔒'}
-                  </span>
+                  <span>{t.spyCapturedTitle || 'Spy Captured In Prison Cage! 🕵️🔒'}</span>
                 </>
               ) : (
                 <>
                   <HeartCrack className="w-6 h-6 text-rose-400 animate-pulse" />
-                  <span>
-                    {lang === 'ar'
-                      ? 'ظُلم بريء! كان صادقاً 😭💔'
-                      : 'Innocent Was Accused! 😭💔'}
-                  </span>
+                  <span>{t.innocentAccusedTitle || 'Innocent Was Accused! 😭💔'}</span>
                 </>
               )}
             </div>
 
             <p className="text-xs font-bold opacity-85 mt-1.5">
               {isSpy
-                ? lang === 'ar'
-                  ? `أحسنت المحطة! تم كشف العميل المندس ${ejectedPlayerName} بنجاح.`
-                  : `Station secured! Undercover spy ${ejectedPlayerName} was locked up.`
-                : lang === 'ar'
-                  ? `للأسف ${ejectedPlayerName} لم يكن الجاسوس، والدموع تنهمر منه بحسرة!`
-                  : `Sadly ${ejectedPlayerName} was innocent and crying their eyes out!`
+                ? (t.spyCapturedMsg || 'Station secured! Spy {name} was locked up.').replace('{name}', ejectedPlayerName)
+                : (t.innocentAccusedMsg || 'Sadly {name} was innocent and crying!').replace('{name}', ejectedPlayerName)
               }
             </p>
           </div>

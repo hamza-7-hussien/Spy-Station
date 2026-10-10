@@ -552,12 +552,12 @@ export const GameScreen: React.FC<Props> = ({
 
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              {lang === 'ar' ? 'الدور الحالي لإعطاء التلميح' : 'Current Speaking Turn'}
+              {t.lblCurrentTurn || 'Current Speaking Turn'}
             </div>
             <div className="text-sm sm:text-base md:text-lg font-black text-white font-heading leading-tight break-words">
               {isMyTurn ? (
                 <span className="text-sky-300 flex flex-wrap items-center gap-1">
-                  <span>{lang === 'ar' ? '👉 دورك الآن! أعطِ تلميحك' : '👉 YOUR TURN! Give your clue'}</span>
+                  <span>{t.lblYourTurnGiveClue || '👉 YOUR TURN! Give your clue'}</span>
                 </span>
               ) : (
                 <span className="break-words">{currentSpeaker}</span>
@@ -744,9 +744,9 @@ export const GameScreen: React.FC<Props> = ({
       {/* ============================================================== */}
       <div className="p-4 sm:p-5 rounded-3xl bg-slate-900/85 border border-sky-500/25 backdrop-blur-xl shadow-xl space-y-3">
         <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-          <span>{lang === 'ar' ? 'طاقم المحطة الفضائية 🛸' : 'Space Crew Roster 🛸'}</span>
+          <span>{t.lblSpaceCrew || 'Space Crew Roster 🛸'}</span>
           <span className="text-[11px] text-sky-400 font-mono">
-            {activeUids.length} {lang === 'ar' ? 'رواد' : 'Astronauts'}
+            {activeUids.length} {t.lblAstronautsCount || 'Astronauts'}
           </span>
         </div>
 
@@ -820,7 +820,7 @@ export const GameScreen: React.FC<Props> = ({
                     {isBlackoutActive ? '██████' : (p?.name || 'Agent')}
                   </span>
                   {isFellowMoleSpy && !isBlackoutActive && (
-                    <span title={lang === 'ar' ? 'شريكك في التجسس' : 'Fellow Spy'} className="text-[10px]">
+                    <span title={t.lblFellowSpyBadge || 'Fellow Spy'} className="text-[10px]">
                       🕵️
                     </span>
                   )}
@@ -828,7 +828,7 @@ export const GameScreen: React.FC<Props> = ({
 
                 {isMe && (
                   <span className="text-[9px] font-bold text-sky-400">
-                    ({lang === 'ar' ? 'أنت' : 'You'})
+                    ({t.lblYou || 'You'})
                   </span>
                 )}
 
@@ -945,7 +945,7 @@ export const GameScreen: React.FC<Props> = ({
               <form onSubmit={handleClueSubmit} className="space-y-2">
                 <div className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
                   <Mic className="w-3.5 h-3.5 text-sky-400" />
-                  <span>{lang === 'ar' ? 'اكتب تلميحك الذكي (كلمة واحدة فقط):' : 'Enter your clue (one word only):'}</span>
+                  <span>{t.lblEnterClue || 'Enter your clue (one word only):'}</span>
                 </div>
 
                 <div className="flex gap-2">
@@ -969,7 +969,7 @@ export const GameScreen: React.FC<Props> = ({
                     className="px-4 sm:px-6 py-3 rounded-2xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 font-black text-xs uppercase tracking-wider hover:brightness-110 active:scale-95 transition shadow-lg shadow-sky-500/25 flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
                   >
                     <Send className="w-4 h-4" />
-                    <span>{lang === 'ar' ? 'إرسال' : 'Send'}</span>
+                    <span>{t.btnSend || 'Send'}</span>
                   </button>
                   {onSkipTurn && (
                     <button
@@ -980,10 +980,10 @@ export const GameScreen: React.FC<Props> = ({
                         onSkipTurn(currentRound, turnIndex);
                       }}
                       className="px-3 sm:px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-300 font-black text-xs tracking-wider transition border border-amber-400/40 flex items-center justify-center gap-1 cursor-pointer shrink-0 shadow-md"
-                      title={lang === 'ar' ? 'تفويت دورك في هذه الجولة' : 'Skip your turn this round'}
+                      title={t.skipTurnTooltip || 'Skip your turn this round'}
                     >
                       <FastForward className="w-3.5 h-3.5" />
-                      <span>{lang === 'ar' ? 'تفويت' : 'Pass'}</span>
+                      <span>{t.btnPass || 'Pass'}</span>
                     </button>
                   )}
                 </div>
@@ -1034,7 +1034,7 @@ export const GameScreen: React.FC<Props> = ({
                 className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:brightness-110 active:scale-95 text-white font-heading font-black text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(225,29,72,0.45)] transition cursor-pointer"
               >
                 <AlertTriangle className="w-4 h-4 text-white animate-pulse" />
-                <span>{lang === 'ar' ? '🚨 كشف الجاسوس / توجيه اتهام طارئ' : '🚨 Emergency Accusation Vote'}</span>
+                <span>{t.lblEmergencyVoteBtn || t.btnEmergencyVote}</span>
               </button>
             ) : (
               <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-2xl bg-slate-950/50 border border-slate-800 text-slate-500 text-xs font-bold">

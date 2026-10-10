@@ -5,7 +5,6 @@ import { CATEGORY_META } from '../words';
 import { sound } from '../audio';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { getRankInfo } from '../components/RankModal';
-import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
 import { LogIn, Sparkles, KeyRound, Zap, Radio } from 'lucide-react';
 
 interface Props {
@@ -17,7 +16,6 @@ interface Props {
   onOpenQuickMatch: () => void;
   onOpenCreateRoom: (cat: CategoryKey | 'random') => void;
   onJoinRoom: (code: string) => void;
-  onChangeLanguage?: (newLang: Language) => void;
 }
 
 export const HomeTab: React.FC<Props> = ({
@@ -28,8 +26,7 @@ export const HomeTab: React.FC<Props> = ({
   onOpenRank,
   onOpenQuickMatch,
   onOpenCreateRoom,
-  onJoinRoom,
-  onChangeLanguage
+  onJoinRoom
 }) => {
   const [roomCode, setRoomCode] = useState('');
   const t = dictionary[lang];
@@ -76,15 +73,6 @@ export const HomeTab: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Language Selector Bar (Label + Chosen Language Button) */}
-      {onChangeLanguage && (
-        <LanguageSelectorBar
-          lang={lang}
-          onChangeLanguage={onChangeLanguage}
-          variant="card"
-        />
-      )}
-
       {/* Categories Card */}
       <div className="p-5 rounded-3xl bg-slate-900/80 border border-sky-500/25 backdrop-blur-xl shadow-xl space-y-4">
         <div className="flex items-center justify-between">
@@ -93,7 +81,7 @@ export const HomeTab: React.FC<Props> = ({
             <span>{t.chooseCategory}</span>
           </h2>
           <span className="text-[11px] font-bold text-purple-400">
-            {lang === 'ar' ? '8 فئات + عشوائي' : '8 Categories + Random'}
+            {t.categoriesCount || (lang === 'ar' ? '8 فئات + عشوائي' : '8 Categories + Random')}
           </span>
         </div>
 
@@ -145,7 +133,7 @@ export const HomeTab: React.FC<Props> = ({
           className="w-full py-3.5 px-4 mt-1 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:brightness-110 active:scale-[0.98] text-slate-950 font-heading font-black text-base sm:text-lg flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(245,158,11,0.35)] transition cursor-pointer select-none border border-amber-300"
         >
           <Zap className="w-5 h-5 fill-slate-950 text-slate-950" />
-          <span>{lang === 'ar' ? 'انطلاق ⚡' : 'LAUNCH ⚡'}</span>
+          <span>{t.btnLaunchFast || (lang === 'ar' ? 'انطلاق ⚡' : 'LAUNCH ⚡')}</span>
         </button>
 
         <hr className="border-slate-800 my-4" />

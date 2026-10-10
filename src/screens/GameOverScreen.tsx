@@ -69,7 +69,7 @@ export const GameOverScreen: React.FC<Props> = ({
         {(room.word || room.wordAr) && (
           <div className="p-4 rounded-2xl bg-slate-950/70 border border-sky-500/30 flex flex-col items-center justify-center gap-1.5 shadow-inner text-center">
             <span className="text-[11px] uppercase tracking-widest text-sky-400 font-bold block">
-              {lang === 'ar' ? 'الكلمة السرية للمهمة كانت' : 'Mission secret word was'}
+              {t.secretWordWas || 'Mission secret word was:'}
             </span>
             <div className="flex items-center justify-center gap-2 flex-wrap">
               {room.wordCategory && (

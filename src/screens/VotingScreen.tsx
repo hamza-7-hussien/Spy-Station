@@ -113,7 +113,7 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
                     <span className="font-bold text-sm text-slate-100">{p.name || 'Player'}</span>
                     {isSelf && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-400/40 font-bold">
-                        {lang === 'ar' ? 'أنت' : 'You'}
+                        {t.lblYou || 'You'}
                       </span>
                     )}
                   </div>
@@ -139,9 +139,7 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
         {/* Disqualified notice if applicable */}
         {isDisqualified && (
           <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-300 font-bold">
-            {lang === 'ar'
-              ? '⚠️ تم سحب حق التصويت منك في هذه الجولة بسبب اتهام خاطئ بالرصاصة الفضية!'
-              : '⚠️ Your vote is disabled this round due to an incorrect Silver Bullet accusation!'}
+            {t.disqualifiedVoteNotice || '⚠️ Your vote is disabled this round!'}
           </div>
         )}
 

@@ -45,70 +45,64 @@ const homeMobileSvg = `
   <text x="130" y="96" fill="#94a3b8" font-family="'Cairo', sans-serif" font-weight="700" font-size="13">🚀 رائد فضاء • 2,450 XP</text>
   <text x="650" y="86" text-anchor="end" fill="#c084fc" font-family="'Chakra Petch', sans-serif" font-weight="900" font-size="20">SPY STATION</text>
 
-  <!-- Language Selector Bar -->
-  <rect x="40" y="138" width="640" height="54" rx="18" fill="rgba(15, 23, 42, 0.7)" stroke="rgba(51, 65, 85, 0.8)" stroke-width="1"/>
-  <text x="65" y="172" fill="#94a3b8" font-family="'Cairo', sans-serif" font-weight="700" font-size="14">🌐 اللغة / Language</text>
-  <rect x="520" y="146" width="145" height="38" rx="12" fill="rgba(56, 189, 248, 0.15)" stroke="#38bdf8" stroke-width="1"/>
-  <text x="592" y="171" text-anchor="middle" fill="#38bdf8" font-family="'Cairo', sans-serif" font-weight="800" font-size="13">🇸🇦 العربية (AR)</text>
-
-  <!-- Main Categories Container -->
-  <rect x="40" y="206" width="640" height="880" rx="32" fill="url(#neonCard)" stroke="rgba(56, 189, 248, 0.3)" stroke-width="2"/>
-  <text x="75" y="250" fill="#94a3b8" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">✨ إنشاء محطة جديدة:</text>
-  <text x="645" y="250" text-anchor="end" fill="#c084fc" font-family="'Cairo', sans-serif" font-weight="700" font-size="13">8 فئات + عشوائي</text>
+  <!-- Main Categories Container (Starts directly under profile bar) -->
+  <rect x="40" y="148" width="640" height="980" rx="32" fill="url(#neonCard)" stroke="rgba(56, 189, 248, 0.3)" stroke-width="2"/>
+  <text x="75" y="195" fill="#94a3b8" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">✨ إنشاء محطة جديدة:</text>
+  <text x="645" y="195" text-anchor="end" fill="#c084fc" font-family="'Cairo', sans-serif" font-weight="700" font-size="13">8 فئات + عشوائي</text>
 
   <!-- 3x3 Categories Grid -->
   <!-- Row 1 -->
-  <rect x="65" y="275" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="155" y="325" text-anchor="middle" font-size="30">⚽</text>
-  <text x="155" y="360" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">كرة القدم</text>
+  <rect x="65" y="225" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="155" y="278" text-anchor="middle" font-size="32">⚽</text>
+  <text x="155" y="315" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">كرة القدم</text>
 
-  <rect x="270" y="275" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="360" y="325" text-anchor="middle" font-size="30">🍕</text>
-  <text x="360" y="360" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">أكلات ومشروبات</text>
+  <rect x="270" y="225" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="360" y="278" text-anchor="middle" font-size="32">🍕</text>
+  <text x="360" y="315" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">أكلات ومشروبات</text>
 
-  <rect x="475" y="275" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="565" y="325" text-anchor="middle" font-size="30">🎬</text>
-  <text x="565" y="360" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">أفلام ومسلسلات</text>
+  <rect x="475" y="225" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="565" y="278" text-anchor="middle" font-size="32">🎬</text>
+  <text x="565" y="315" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">أفلام ومسلسلات</text>
 
   <!-- Row 2 -->
-  <rect x="65" y="395" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="155" y="445" text-anchor="middle" font-size="30">🌍</text>
-  <text x="155" y="480" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">أماكن ومعالم</text>
+  <rect x="65" y="355" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="155" y="408" text-anchor="middle" font-size="32">🌍</text>
+  <text x="155" y="445" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">أماكن ومعالم</text>
 
-  <rect x="270" y="395" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="360" y="445" text-anchor="middle" font-size="30">🎮</text>
-  <text x="360" y="480" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">ألعاب فيديو</text>
+  <rect x="270" y="355" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="360" y="408" text-anchor="middle" font-size="32">🎮</text>
+  <text x="360" y="445" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">ألعاب فيديو</text>
 
-  <rect x="475" y="395" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="565" y="445" text-anchor="middle" font-size="30">🦁</text>
-  <text x="565" y="480" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">حيوانات</text>
+  <rect x="475" y="355" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="565" y="408" text-anchor="middle" font-size="32">🦁</text>
+  <text x="565" y="445" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">حيوانات</text>
 
   <!-- Row 3 -->
-  <rect x="65" y="515" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="155" y="565" text-anchor="middle" font-size="30">💼</text>
-  <text x="155" y="600" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">وظائف</text>
+  <rect x="65" y="485" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="155" y="538" text-anchor="middle" font-size="32">💼</text>
+  <text x="155" y="575" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">وظائف</text>
 
-  <rect x="270" y="515" width="180" height="105" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
-  <text x="360" y="565" text-anchor="middle" font-size="30">🎤</text>
-  <text x="360" y="600" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">مطربين</text>
+  <rect x="270" y="485" width="180" height="110" rx="20" fill="rgba(2, 6, 23, 0.8)" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1"/>
+  <text x="360" y="538" text-anchor="middle" font-size="32">🎤</text>
+  <text x="360" y="575" text-anchor="middle" fill="#f8fafc" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">مطربين</text>
 
-  <rect x="475" y="515" width="180" height="105" rx="20" fill="rgba(88, 28, 135, 0.4)" stroke="#a855f7" stroke-width="1.5"/>
-  <text x="565" y="565" text-anchor="middle" font-size="30">🎲</text>
-  <text x="565" y="600" text-anchor="middle" fill="#d8b4fe" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">عشوائي</text>
+  <rect x="475" y="485" width="180" height="110" rx="20" fill="rgba(88, 28, 135, 0.4)" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="565" y="538" text-anchor="middle" font-size="32">🎲</text>
+  <text x="565" y="575" text-anchor="middle" fill="#d8b4fe" font-family="'Cairo', sans-serif" font-weight="800" font-size="15">عشوائي</text>
 
-  <!-- ⚡ Sleek Quick Match Launch Button directly under categories -->
-  <rect x="65" y="640" width="590" height="66" rx="22" fill="url(#amberLaunch)" stroke="#fcd34d" stroke-width="2"/>
-  <text x="360" y="682" text-anchor="middle" fill="#020617" font-family="'Cairo', sans-serif" font-weight="900" font-size="22">⚡ انطلاق (لعب سريع أونلاين)</text>
+  <!-- ⚡ Sleek & Clean Quick Match Launch Button directly under categories -->
+  <rect x="65" y="620" width="590" height="66" rx="22" fill="url(#amberLaunch)" stroke="#fcd34d" stroke-width="2"/>
+  <text x="360" y="662" text-anchor="middle" fill="#020617" font-family="'Cairo', sans-serif" font-weight="900" font-size="24">انطلاق ⚡</text>
 
   <!-- Divider -->
-  <line x1="65" y1="735" x2="655" y2="735" stroke="#1e293b" stroke-width="1.5"/>
+  <line x1="65" y1="715" x2="655" y2="715" stroke="#1e293b" stroke-width="1.5"/>
 
   <!-- Join Station by Code Section -->
-  <text x="75" y="775" fill="#94a3b8" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">🔑 الانضمام عبر كود مكون من 6 أرقام:</text>
-  <rect x="65" y="795" width="430" height="58" rx="18" fill="rgba(2, 6, 23, 0.9)" stroke="rgba(56, 189, 248, 0.4)" stroke-width="1.5"/>
-  <text x="280" y="832" text-anchor="middle" fill="#38bdf8" font-family="monospace" font-weight="900" font-size="20" letter-spacing="4">K5R0MY</text>
-  <rect x="510" y="795" width="145" height="58" rx="18" fill="#38bdf8"/>
-  <text x="582" y="832" text-anchor="middle" fill="#020617" font-family="'Cairo', sans-serif" font-weight="900" font-size="16">انضمام 🛰️</text>
+  <text x="75" y="755" fill="#94a3b8" font-family="'Cairo', sans-serif" font-weight="800" font-size="14">🔑 الانضمام عبر كود مكون من 6 أرقام:</text>
+  <rect x="65" y="775" width="430" height="58" rx="18" fill="rgba(2, 6, 23, 0.9)" stroke="rgba(56, 189, 248, 0.4)" stroke-width="1.5"/>
+  <text x="280" y="812" text-anchor="middle" fill="#38bdf8" font-family="monospace" font-weight="900" font-size="20" letter-spacing="4">K5R0MY</text>
+  <rect x="510" y="775" width="145" height="58" rx="18" fill="#38bdf8"/>
+  <text x="582" y="812" text-anchor="middle" fill="#020617" font-family="'Cairo', sans-serif" font-weight="900" font-size="16">انضمام 🛰️</text>
 
   <!-- Bottom Navigation -->
   <rect x="40" y="1170" width="640" height="74" rx="26" fill="rgba(15, 23, 42, 0.95)" stroke="rgba(56, 189, 248, 0.3)" stroke-width="1.5"/>
