@@ -42,12 +42,20 @@ import { QuickMatchModal } from './components/QuickMatchModal';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
 import { generateSmartBotClue, generateSmartBotVote, generateUniqueBotName } from './aiBot';
 import { useVoiceChat } from './hooks/useVoiceChat';
+import { MandatoryUpdateModal } from './components/MandatoryUpdateModal';
 
+const CURRENT_APP_VERSION = '2.5.0';
 const ROUND_ANNOUNCE_MS = 2800;
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => {
     return (localStorage.getItem('spy_station_lang') as Language) || 'ar';
+  });
+
+  // Mandatory update enforcement: requires tapping the update button to enter
+  const [mandatoryUpdateAvailable, setMandatoryUpdateAvailable] = useState<boolean>(() => {
+    const installed = localStorage.getItem('spy_station_installed_version');
+    return installed !== CURRENT_APP_VERSION;
   });
 
   const [loading, setLoading] = useState(true);
@@ -149,6 +157,27 @@ export default function App() {
     document.documentElement.dir = isRtl ? 'rtl' : 'ltr';
     localStorage.setItem('spy_station_lang', lang);
   }, [lang]);
+
+  // Periodic and on-mount check for remote app updates
+  useEffect(() => {
+    const checkUpdate = () => {
+      fetch(`./version.json?_t=${Date.now()}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.version) {
+            const installed = localStorage.getItem('spy_station_installed_version');
+            if (installed !== data.version) {
+              setMandatoryUpdateAvailable(true);
+            }
+          }
+        })
+        .catch(() => {});
+    };
+
+    checkUpdate();
+    const interval = setInterval(checkUpdate, 60000); // Check every 60s
+    return () => clearInterval(interval);
+  }, []);
 
   // Auth listener with persistent session maintenance
   useEffect(() => {
@@ -1507,7 +1536,7 @@ export default function App() {
       isSpectator: false,
       isBot: true
     });
-    showToast(lang === 'ar' ? `تمت إضافة رائد الفضاء ${name}! 🚀` : `Astronaut ${name} added! 🚀`, 'success');
+    showToast(t.toastBotAdded.replace('{name}', name), 'success');
   };
 
   const handleRemoveBots = async () => {
@@ -1521,7 +1550,7 @@ export default function App() {
     });
     sound.playClick();
     await db.ref().update(updates);
-    showToast(lang === 'ar' ? 'تمت إزالة رواد الفضاء التجريبيين 🧹' : 'Test bots removed 🧹', 'normal');
+    showToast(t.toastBotsRemoved, 'normal');
   };
 
   // Start game flow
@@ -1654,7 +1683,7 @@ export default function App() {
       broadcastAnnouncement(t.annMissionStarted, 'normal');
     } catch (err) {
       console.error('Failed to start mission:', err);
-      showToast(lang === 'ar' ? 'حدث خطأ أثناء بدء اللعبة، حاول مرة أخرى' : 'Failed to start game, try again', 'danger');
+      showToast(t.toastGameStartError, 'danger');
     }
   };
 
@@ -1930,7 +1959,7 @@ export default function App() {
             onMakeHost={uid => {
               const targetPlayer = roomData?.players?.[uid];
               if (targetPlayer?.isBot || uid.startsWith('bot_')) {
-                showToast(lang === 'ar' ? 'لا يمكن تعيين رائد فضاء تجريبي (Bot) كمضيف للروم!' : 'Cannot assign a bot as host!', 'danger');
+                showToast(t.toastCannotAssignBotHost, 'danger');
                 return;
               }
               db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(uid);
@@ -2217,6 +2246,15 @@ export default function App() {
         badgeCount={badgeCount}
         onSelectTab={setActiveTab}
       />
+
+      {/* 🚀 Mandatory Game Update Modal: Blocks app until user taps update & restarts */}
+      {mandatoryUpdateAvailable && (
+        <MandatoryUpdateModal
+          lang={lang}
+          targetVersion={CURRENT_APP_VERSION}
+          onUpdateCompleted={() => setMandatoryUpdateAvailable(false)}
+        />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { Language } from './types';
 import { fullLocalizedOverrides } from './localesData';
+import { deTranslations, frTranslations } from './localesAdditions';
 
 export interface LanguageMeta {
   code: Language;
@@ -762,8 +763,8 @@ const baseDictionary: Record<Language, typeof arDict> = {
   ar: arDict,
   en: enDict,
   es: { ...enDict, ...fullLocalizedOverrides.es } as typeof arDict,
-  fr: { ...enDict, ...fullLocalizedOverrides.fr } as typeof arDict,
-  de: { ...enDict, ...fullLocalizedOverrides.de } as typeof arDict
+  fr: { ...enDict, ...fullLocalizedOverrides.fr, ...frTranslations } as typeof arDict,
+  de: { ...enDict, ...fullLocalizedOverrides.de, ...deTranslations } as typeof arDict
 };
 
 // Export dictionary proxy that guarantees every key exists for every language

@@ -68,7 +68,15 @@ export const CluesHistoryModal: React.FC<Props> = ({
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                {lang === 'ar' ? 'سجل كافة التلميحات والمحادثات التي قيلت عبر الجولات' : 'Full chronological log of clues given across rounds'}
+                {lang === 'ar'
+                  ? 'سجل كافة التلميحات والمحادثات التي قيلت عبر الجولات'
+                  : lang === 'de'
+                  ? 'Vollständiges Protokoll aller Hinweise aus den Runden'
+                  : lang === 'fr'
+                  ? 'Journal complet de tous les indices partagés'
+                  : lang === 'es'
+                  ? 'Registro completo de todas las pistas compartidas'
+                  : 'Full chronological log of clues given across rounds'}
               </p>
             </div>
           </div>
@@ -95,7 +103,15 @@ export const CluesHistoryModal: React.FC<Props> = ({
                 {t.lblNoCluesYet}
               </div>
               <p className="text-[11px] text-slate-500 max-w-xs">
-                {lang === 'ar' ? 'عندما يقول أي لاعب تلميحه في دوره، سيظهر هنا فوراً بالترتيب الزمني.' : 'When any player provides a clue during their turn, it will be logged here.'}
+                {lang === 'ar'
+                  ? 'عندما يقول أي لاعب تلميحه في دوره، سيظهر هنا فوراً بالترتيب الزمني.'
+                  : lang === 'de'
+                  ? 'Wenn ein Astronaut einen Hinweis gibt, erscheint er hier chronologisch.'
+                  : lang === 'fr'
+                  ? 'Quand un joueur donne un indice, il apparaîtra ici par ordre chronologique.'
+                  : lang === 'es'
+                  ? 'Cuando un jugador dé una pista, aparecerá aquí en orden cronológico.'
+                  : 'When any player provides a clue during their turn, it will be logged here.'}
               </p>
             </div>
           ) : (
@@ -105,7 +121,15 @@ export const CluesHistoryModal: React.FC<Props> = ({
                 <div className="flex items-center gap-3">
                   <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
                   <span className="px-3 py-1 rounded-full bg-sky-950/80 border border-sky-400/40 text-sky-300 font-heading font-black text-xs uppercase tracking-wider shadow-sm">
-                    {lang === 'ar' ? `الجولة ${roundNum}` : `Round ${roundNum}`}
+                    {lang === 'ar'
+                      ? `الجولة ${roundNum}`
+                      : lang === 'de'
+                      ? `Runde ${roundNum}`
+                      : lang === 'fr'
+                      ? `Manche ${roundNum}`
+                      : lang === 'es'
+                      ? `Ronda ${roundNum}`
+                      : `Round ${roundNum}`}
                   </span>
                   <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
                 </div>
@@ -143,7 +167,7 @@ export const CluesHistoryModal: React.FC<Props> = ({
                               </span>
                               {isMe && (
                                 <span className="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-400 border border-sky-400/40 text-[9px] font-bold">
-                                  {lang === 'ar' ? 'أنت' : 'You'}
+                                  {lang === 'ar' ? 'أنت' : lang === 'de' ? 'Du' : lang === 'fr' ? 'Toi' : lang === 'es' ? 'Tú' : 'You'}
                                 </span>
                               )}
                             </div>
@@ -178,7 +202,7 @@ export const CluesHistoryModal: React.FC<Props> = ({
             }}
             className="py-2 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs transition cursor-pointer"
           >
-            {lang === 'ar' ? 'إغلاق السجل' : 'Close History'}
+            {lang === 'ar' ? 'إغلاق السجل' : lang === 'de' ? 'Verlauf schließen' : lang === 'fr' ? 'Fermer l\'historique' : lang === 'es' ? 'Cerrar historial' : 'Close History'}
           </button>
         </div>
       </div>

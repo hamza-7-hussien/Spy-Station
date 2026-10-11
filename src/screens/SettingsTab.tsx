@@ -432,20 +432,6 @@ export const SettingsTab: React.FC<Props> = ({
           </div>
         </form>
 
-        {/* Update Game */}
-        <button
-          onClick={() => {
-            sound.playTone(520, 'sine', 0.1);
-            onToast(t.updatingGameToast, 'normal');
-            setTimeout(() => {
-              window.location.reload();
-            }, 300);
-          }}
-          className="w-full py-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 text-sky-400 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>{t.updateGameBtn}</span>
-        </button>
 
         {/* Logout */}
         <button
