@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "app.vercel.spy_station_sand.twa",
+    "sha256_cert_fingerprints": ["8B:10:9D:23:73:8B:AB:55:BB:AE:84:E2:9E:62:3E:01:3F:DB:FD:66:A3:A2:6A:F8:6A:63:6E:84:B1:ED:9A:46"]
+  }
+}]
