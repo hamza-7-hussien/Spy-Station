@@ -2,6 +2,7 @@ import React from 'react';
 import { dictionary } from '../translations';
 import { Language, JoinRequest } from '../types';
 import { Globe, Check, X, Users } from 'lucide-react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface Props {
   lang: Language;
@@ -21,10 +22,20 @@ export const HostJoinApprovalModal: React.FC<Props> = ({
   onDecline
 }) => {
   const t = dictionary[lang];
+  useBodyScrollLock(true);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-sm rounded-3xl bg-slate-900 border-2 border-sky-400 p-6 text-center space-y-4 shadow-[0_0_40px_rgba(56,189,248,0.3)] animate-in zoom-in-95">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-in fade-in duration-200 overscroll-contain select-none"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+      }}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl bg-slate-900 border-2 border-sky-400 p-6 text-center space-y-4 shadow-[0_0_40px_rgba(56,189,248,0.3)] animate-in zoom-in-95 overscroll-contain"
+        onWheel={(e) => e.stopPropagation()}
+      >
         {/* Header / Queue status */}
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-1.5 text-xs font-bold text-sky-400 uppercase tracking-widest">

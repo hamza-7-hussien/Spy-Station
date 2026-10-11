@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { dictionary } from '../translations';
 import { Language, CategoryKey, GameMode } from '../types';
 import { CATEGORY_META } from '../words';
@@ -80,6 +81,9 @@ export const CreateRoomScreen: React.FC<Props> = ({
   const [spyCount, setSpyCount] = useState<number>(initialValues?.spyCount || 1);
   const [turnSeconds, setTurnSeconds] = useState<number>(initialValues?.turnSeconds || 20);
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+
+  // Lock background scroll completely when game modes modal is open
+  useBodyScrollLock(isModeModalOpen);
 
   const handleSelectMode = (selectedModeId: GameMode) => {
     sound.playTone(500, 'sine', 0.08);
@@ -593,10 +597,22 @@ export const CreateRoomScreen: React.FC<Props> = ({
       {/* 🎮 GAME MODES SELECTION MODAL (Elegant Cyberpunk Drawer/Popup) */}
       {/* ============================================================== */}
       {isModeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in-50 duration-200">
-          <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-sky-500/30 p-5 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in-50 duration-200 overscroll-contain select-none"
+          onWheel={(e) => e.stopPropagation()}
+          onTouchMove={(e) => {
+            if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsModeModalOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-3xl bg-slate-900 border border-sky-500/30 p-4 sm:p-5 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden overscroll-contain"
+            onWheel={(e) => e.stopPropagation()}
+          >
             {/* Modal Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
                   <Shield className="w-5 h-5" />
@@ -619,8 +635,12 @@ export const CreateRoomScreen: React.FC<Props> = ({
               </button>
             </div>
 
-            {/* Modes List */}
-            <div className="overflow-y-auto space-y-2.5 py-4 pr-1 flex-1">
+            {/* Modes List - Scrolls independently without moving background */}
+            <div
+              data-scrollable="true"
+              className="overflow-y-auto overscroll-contain space-y-2.5 py-3 pr-1 flex-1 touch-pan-y"
+              onWheel={(e) => e.stopPropagation()}
+            >
               {GAME_MODES.map(mode => {
                 const Icon = mode.icon;
                 const isSelected = gameMode === mode.id;
@@ -684,7 +704,7 @@ export const CreateRoomScreen: React.FC<Props> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="pt-3 border-t border-slate-800 flex justify-end">
+            <div className="pt-3 border-t border-slate-800 flex justify-end shrink-0">
               <button
                 type="button"
                 onClick={() => setIsModeModalOpen(false)}

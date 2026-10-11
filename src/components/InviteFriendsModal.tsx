@@ -4,6 +4,7 @@ import { Language, FriendEntry } from '../types';
 import { X, UserPlus, Check } from 'lucide-react';
 import { db, firebase } from '../firebase';
 import { sound } from '../audio';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface Props {
   lang: Language;
@@ -33,6 +34,10 @@ export const InviteFriendsModal: React.FC<Props> = ({
   onToast
 }) => {
   const [invited, setInvited] = useState<Record<string, boolean>>({});
+
+  // Lock background scroll when invite friends modal is open
+  useBodyScrollLock(isOpen);
+
   if (!isOpen) return null;
   const t = dictionary[lang];
 
@@ -59,8 +64,20 @@ export const InviteFriendsModal: React.FC<Props> = ({
   const friendUids = Object.keys(friends || {}).filter(uid => !currentRoomPlayers[uid]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in">
-      <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 shadow-2xl relative text-start">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in overscroll-contain select-none"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 shadow-2xl relative text-start overscroll-contain"
+        onWheel={(e) => e.stopPropagation()}
+      >
         <button
           onClick={onClose}
           className="absolute top-4 inset-inline-end-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
@@ -72,7 +89,11 @@ export const InviteFriendsModal: React.FC<Props> = ({
           {t.btnInviteFriends} 👥
         </h3>
 
-        <div className="max-h-[300px] overflow-y-auto space-y-2.5 my-3 pr-1">
+        <div
+          data-scrollable="true"
+          className="max-h-[300px] overflow-y-auto overscroll-contain touch-pan-y space-y-2.5 my-3 pr-1"
+          onWheel={(e) => e.stopPropagation()}
+        >
           {friendUids.length > 0 ? (
             friendUids.map(uid => {
               const friend = friends[uid];

@@ -2,6 +2,7 @@ import React from 'react';
 import { dictionary } from '../translations';
 import { Language } from '../types';
 import { Globe, X, Clock } from 'lucide-react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface Props {
   lang: Language;
@@ -19,10 +20,20 @@ export const ApplicantWaitingApprovalModal: React.FC<Props> = ({
   onCancel
 }) => {
   const t = dictionary[lang];
+  useBodyScrollLock(true);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/40 p-6 text-center space-y-5 shadow-[0_0_40px_rgba(56,189,248,0.25)] animate-in zoom-in-95">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-200 overscroll-contain select-none"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+      }}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/40 p-6 text-center space-y-5 shadow-[0_0_40px_rgba(56,189,248,0.25)] animate-in zoom-in-95 overscroll-contain"
+        onWheel={(e) => e.stopPropagation()}
+      >
         <div className="relative mx-auto w-16 h-16 flex items-center justify-center">
           <div className="absolute inset-0 rounded-full border-2 border-sky-400 border-t-transparent animate-spin"></div>
           <Globe className="w-8 h-8 text-sky-400 animate-pulse" />

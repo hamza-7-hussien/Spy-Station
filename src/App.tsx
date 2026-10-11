@@ -44,7 +44,7 @@ import { generateSmartBotClue, generateSmartBotVote, generateUniqueBotName } fro
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { MandatoryUpdateModal } from './components/MandatoryUpdateModal';
 
-const CURRENT_APP_VERSION = '2.5.0';
+const CURRENT_APP_VERSION = '2.5.1';
 const ROUND_ANNOUNCE_MS = 2800;
 
 export default function App() {
@@ -1712,6 +1712,13 @@ export default function App() {
           onChangeLanguage={l => setLang(l)}
           onToast={showToast}
         />
+        {mandatoryUpdateAvailable && (
+          <MandatoryUpdateModal
+            lang={lang}
+            targetVersion={CURRENT_APP_VERSION}
+            onUpdateCompleted={() => setMandatoryUpdateAvailable(false)}
+          />
+        )}
       </>
     );
   }

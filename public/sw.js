@@ -1,5 +1,5 @@
 // Spy Station Progressive Web App Service Worker (PWABuilder & App Store Compliant)
-const CACHE_NAME = 'spy-station-pwa-v2.5.0';
+const CACHE_NAME = 'spy-station-pwa-v2.5.1';
 const OFFLINE_URL = './offline.html';
 
 const PRECACHE_ASSETS = [

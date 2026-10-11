@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { dictionary } from '../translations';
+import { dictionary, SUPPORTED_LANGUAGES } from '../translations';
 import { Language } from '../types';
 import { storage, auth, firebase } from '../firebase';
 import { sound } from '../audio';
@@ -17,7 +17,8 @@ import {
   Sparkles,
   Lock,
   KeyRound,
-  Music
+  Music,
+  Check
 } from 'lucide-react';
 
 interface Props {
@@ -384,13 +385,44 @@ export const SettingsTab: React.FC<Props> = ({
           />
         </div>
 
-        {/* Language Selection: Label + Button beside it with selected language */}
-        <div className="space-y-1.5">
-          <LanguageSelectorBar
-            lang={lang}
-            onChangeLanguage={onChangeLanguage}
-            variant="card"
-          />
+        {/* Language Selection: All 5 supported languages directly accessible */}
+        <div className="space-y-2 pt-2 border-t border-slate-800/60">
+          <label className="text-xs font-bold text-slate-400 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <Globe className="w-3.5 h-3.5 text-sky-400" />
+              <span>{t.lblLang || 'Language / اللغة:'}</span>
+            </span>
+            <span className="text-[10px] text-sky-400/80 font-mono font-bold uppercase">
+              {SUPPORTED_LANGUAGES.find(l => l.code === lang)?.name}
+            </span>
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {SUPPORTED_LANGUAGES.map(item => {
+              const isSelected = item.code === lang;
+              return (
+                <button
+                  key={item.code}
+                  type="button"
+                  onClick={() => {
+                    sound.playTone(520, 'sine', 0.1);
+                    sound.triggerHaptic('light');
+                    onChangeLanguage(item.code);
+                  }}
+                  className={`py-2 px-2.5 rounded-xl border text-xs font-bold transition flex items-center justify-between gap-1.5 cursor-pointer ${
+                    isSelected
+                      ? 'bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 border-sky-300 shadow-md shadow-sky-500/20 font-black'
+                      : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-900'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 truncate">
+                    <span className="text-base leading-none">{item.flag}</span>
+                    <span className="truncate">{item.nativeName}</span>
+                  </span>
+                  {isSelected && <Check className="w-3.5 h-3.5 shrink-0 stroke-[3]" />}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* App Installation Banner - only shown when not installed */}

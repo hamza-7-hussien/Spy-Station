@@ -3,6 +3,7 @@ import { dictionary } from '../translations';
 import { Language, FriendEntry, FriendRequest, RoomInvite } from '../types';
 import { Copy, UserPlus, Trash2, Check, X, Users, Inbox, Gamepad2 } from 'lucide-react';
 import { sound } from '../audio';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface Props {
   lang: Language;
@@ -38,6 +39,10 @@ export const FriendsTab: React.FC<Props> = ({
   const [subtab, setSubtab] = useState<'myFriends' | 'requests' | 'invites'>('myFriends');
   const [targetId, setTargetId] = useState('');
   const [deleteConfirmFriend, setDeleteConfirmFriend] = useState<{ uid: string; name: string; avatar: string } | null>(null);
+
+  // Lock background scroll when delete modal is open
+  useBodyScrollLock(!!deleteConfirmFriend);
+
   const t = dictionary[lang];
 
   const reqCount = Object.keys(friendRequests || {}).length;
@@ -56,8 +61,20 @@ export const FriendsTab: React.FC<Props> = ({
     <div className="w-full max-w-xl mx-auto space-y-4 pb-24">
       {/* Custom Delete Friend Modal */}
       {deleteConfirmFriend && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-xs rounded-3xl bg-slate-900 border border-rose-500/40 p-6 shadow-2xl text-center space-y-4 relative">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-150 overscroll-contain select-none"
+          onWheel={(e) => e.stopPropagation()}
+          onTouchMove={(e) => {
+            if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteConfirmFriend(null);
+          }}
+        >
+          <div
+            className="w-full max-w-xs rounded-3xl bg-slate-900 border border-rose-500/40 p-6 shadow-2xl text-center space-y-4 relative overscroll-contain"
+            onWheel={(e) => e.stopPropagation()}
+          >
             <div className="relative mx-auto w-16 h-16">
               <img
                 src={deleteConfirmFriend.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${deleteConfirmFriend.uid}`}

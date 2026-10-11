@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Language } from '../types';
 import { sound } from '../audio';
-import { Sparkles, RefreshCw, Rocket, ShieldCheck, Zap } from 'lucide-react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import { Sparkles, RefreshCw, Rocket, Zap } from 'lucide-react';
 
 interface Props {
   lang: Language;
@@ -13,71 +14,46 @@ const UPDATE_STRINGS = {
   ar: {
     title: 'تحديث جديد للمحطة متوفر! 🚀',
     badge: 'إصدار جديد',
-    sub: 'تم إطلاق تحديث جديد للعبة يتضمن تحسينات شاملة في اللغات وإصلاحات مهمة.',
-    reqNotice: '⚠️ تحديث إلزامي: يجب تحديث اللعبة الآن للتمكن من الدخول وبدء المهمات.',
-    features: [
-      'تعريب وترجمة كاملة لجميع اللغات (الألمانية، الفرنسية، الإسبانية، الإنجليزية، العربية)',
-      'تحسين الواجهات وتنسيق واختيار اللغات بانسيابية وسرعة',
-      'تحديث استقرار المحطة ومزامنة الفلك المباشر'
-    ],
+    sub: 'يتوفر إصدار جديد من اللعبة. يجب التحديث للمتابعة.',
+    reqNotice: '⚠️ تحديث إلزامي: اضغط على الزر أدناه لتحديث اللعبة وإعادة تشغيلها مباشرة.',
     btnUpdate: 'تحديث اللعبة الآن وإعادة التشغيل 🚀',
-    updating: 'جاري تثبيت التحديث وتحديث الذاكرة المؤقتة... ⚡',
+    updating: 'جاري تثبيت التحديث... ⚡',
     tip: 'سيتم إعادة تشغيل اللعبة فوراً بأحدث إصدار.'
   },
   en: {
     title: 'New Station Update Available! 🚀',
     badge: 'New Release',
-    sub: 'A mandatory galactic update is ready with comprehensive multi-language support and stability fixes.',
-    reqNotice: '⚠️ Mandatory Update: You must update the station now to enter and participate in missions.',
-    features: [
-      'Complete, fluent translations across German, French, Spanish, Arabic & English',
-      'Refined, compact language selector without excessive spacing',
-      'Enhanced network stability & realtime synchronization'
-    ],
+    sub: 'A new game version is ready. Please update to proceed.',
+    reqNotice: '⚠️ Mandatory Update: Tap the button below to update and restart the station.',
     btnUpdate: 'Update & Restart Station 🚀',
-    updating: 'Installing update & flushing orbital cache... ⚡',
+    updating: 'Installing update... ⚡',
     tip: 'The station will automatically restart into the latest release.'
   },
   de: {
     title: 'Neues Stations-Update Verfügbar! 🚀',
     badge: 'Neue Version',
-    sub: 'Ein neues galaktisches Update steht bereit mit vollständiger deutscher Übersetzung und Systemoptimierungen.',
-    reqNotice: '⚠️ Pflicht-Update: Du musst die Station jetzt aktualisieren, um beizutreten und Missionen zu starten.',
-    features: [
-      '100% vollständige deutsche Sprachunterstützung in allen Menüs und Funkprotokollen',
-      'Kompakter, schlanker Sprachwechsler ohne unnötige Abstände',
-      'Verbesserte Netzwerkstabilität & Echtzeit-Synchronisation'
-    ],
+    sub: 'Eine neue Version des Spiels ist verfügbar. Bitte aktualisieren, um fortzufahren.',
+    reqNotice: '⚠️ Pflicht-Update: Klicke unten, um die Station zu aktualisieren und neu zu starten.',
     btnUpdate: 'Station Jetzt Aktualisieren & Neustarten 🚀',
-    updating: 'Update wird installiert & Cache bereinigt... ⚡',
+    updating: 'Update wird installiert... ⚡',
     tip: 'Die Station startet sofort mit der neuesten Version neu.'
   },
   fr: {
     title: 'Nouvelle Mise à Jour Disponible ! 🚀',
     badge: 'Nouvelle Version',
-    sub: 'Une mise à jour galactique obligatoire est prête avec prise en charge intégrale du français et correctifs.',
-    reqNotice: '⚠️ Mise à jour obligatoire : vous devez mettre à jour la station maintenant pour entrer.',
-    features: [
-      'Traduction française complète de tous les onglets, menus et journaux de bord',
-      'Sélecteur de langue compact et épuré sans espaces superflus',
-      'Stabilité réseau améliorée & synchronisation en temps réel'
-    ],
+    sub: 'Une nouvelle version du jeu est prête. Veuillez mettre à jour pour continuer.',
+    reqNotice: '⚠️ Mise à jour obligatoire : appuyez sur le bouton ci-dessous pour mettre à jour et redémarrer.',
     btnUpdate: 'Mettre à Jour & Redémarrer la Station 🚀',
-    updating: 'Installation de la mise à jour & purge du cache... ⚡',
+    updating: 'Installation de la mise à jour... ⚡',
     tip: 'La station redémarrera automatiquement avec la dernière version.'
   },
   es: {
-    title: '¡Nueva Actualización de la Estación! 🚀',
+    title: '¡Nueva Actualización Disponible! 🚀',
     badge: 'Nueva Versión',
-    sub: 'Una actualización obligatoria está lista con soporte multilingüe completo y mejoras de estabilidad.',
-    reqNotice: '⚠️ Actualización obligatoria: debes actualizar la estación ahora para ingresar y jugar.',
-    features: [
-      'Traducciones completas y pulidas en todos los idiomas',
-      'Selector de idioma compacto y elegante sin espacios vacíos',
-      'Mayor estabilidad de red y sincronización en tiempo real'
-    ],
+    sub: 'Una nueva versión del juego está lista. Por favor actualiza para continuar.',
+    reqNotice: '⚠️ Actualización obligatoria: toca el botón abajo para actualizar y reiniciar la estación.',
     btnUpdate: 'Actualizar y Reiniciar la Estación 🚀',
-    updating: 'Instalando actualización y limpiando caché... ⚡',
+    updating: 'Instalando actualización... ⚡',
     tip: 'La estación se reiniciará automáticamente con la última versión.'
   }
 };
@@ -89,6 +65,9 @@ export const MandatoryUpdateModal: React.FC<Props> = ({
 }) => {
   const [isUpdating, setIsUpdating] = useState(false);
   const strings = UPDATE_STRINGS[lang] || UPDATE_STRINGS.en;
+
+  // Lock background scroll completely during mandatory update screen
+  useBodyScrollLock(true);
 
   const handleApplyUpdate = async () => {
     if (isUpdating) return;
@@ -140,12 +119,21 @@ export const MandatoryUpdateModal: React.FC<Props> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-200 select-none">
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-200 select-none overscroll-contain"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+      }}
+    >
       {/* Background glow effects */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-sky-500/15 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="relative w-full max-w-md rounded-[32px] bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 border-2 border-sky-400/50 shadow-[0_0_60px_rgba(56,189,248,0.25)] p-6 sm:p-7 text-center overflow-hidden">
+      <div
+        className="relative w-full max-w-md rounded-[32px] bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 border-2 border-sky-400/50 shadow-[0_0_60px_rgba(56,189,248,0.25)] p-6 sm:p-7 text-center overflow-hidden overscroll-contain"
+        onWheel={(e) => e.stopPropagation()}
+      >
         {/* Animated Badge & Icon */}
         <div className="relative w-20 h-20 mx-auto mb-4 flex items-center justify-center rounded-3xl bg-slate-950 border-2 border-sky-400 shadow-[0_0_30px_rgba(56,189,248,0.4)]">
           <div className="absolute inset-[-4px] rounded-3xl border border-dashed border-sky-400/60 animate-spin-slow pointer-events-none" />
@@ -163,25 +151,15 @@ export const MandatoryUpdateModal: React.FC<Props> = ({
           {strings.title}
         </h2>
 
-        {/* Subtitle */}
+        {/* Subtitle - Clean, without detailing specific update features */}
         <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-4">
           {strings.sub}
         </p>
 
         {/* Mandatory warning notice box */}
-        <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-400/40 text-amber-200 text-xs font-bold mb-4 text-start flex items-center gap-2">
+        <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-400/40 text-amber-200 text-xs font-bold mb-5 text-start flex items-center gap-2">
           <Zap className="w-4 h-4 text-amber-400 shrink-0" />
           <span>{strings.reqNotice}</span>
-        </div>
-
-        {/* Highlights List */}
-        <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-start space-y-2 mb-5">
-          {strings.features.map((feat, i) => (
-            <div key={i} className="flex items-start gap-2 text-[11px] sm:text-xs text-slate-300">
-              <ShieldCheck className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
-              <span>{feat}</span>
-            </div>
-          ))}
         </div>
 
         {/* Big Update Button - Only way into the game */}

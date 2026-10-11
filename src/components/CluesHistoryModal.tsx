@@ -3,6 +3,7 @@ import { dictionary } from '../translations';
 import { Language } from '../types';
 import { MessageSquare, X, Clock, User, ShieldAlert, Sparkles } from 'lucide-react';
 import { sound } from '../audio';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface ClueEntry {
   uid?: string;
@@ -28,6 +29,9 @@ export const CluesHistoryModal: React.FC<Props> = ({
   gameChat = {},
   currentUserUid
 }) => {
+  // Lock background scroll when history modal is open
+  useBodyScrollLock(isOpen);
+
   if (!isOpen) return null;
 
   const t = dictionary[lang];
@@ -52,8 +56,20 @@ export const CluesHistoryModal: React.FC<Props> = ({
     .sort((a, b) => a - b);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-lg max-h-[85vh] flex flex-col rounded-3xl bg-gradient-to-b from-slate-900 via-[#0b1329] to-[#040817] border-2 border-sky-500/40 shadow-[0_0_50px_rgba(56,189,248,0.25)] overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200 overscroll-contain select-none"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="relative w-full max-w-lg max-h-[85vh] flex flex-col rounded-3xl bg-gradient-to-b from-slate-900 via-[#0b1329] to-[#040817] border-2 border-sky-500/40 shadow-[0_0_50px_rgba(56,189,248,0.25)] overflow-hidden overscroll-contain"
+        onWheel={(e) => e.stopPropagation()}
+      >
         {/* Modal Header */}
         <div className="flex items-center justify-between p-4 sm:p-5 border-b border-sky-500/20 bg-slate-950/60">
           <div className="flex items-center gap-2.5">
@@ -93,7 +109,11 @@ export const CluesHistoryModal: React.FC<Props> = ({
         </div>
 
         {/* Clues List Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 text-start">
+        <div
+          data-scrollable="true"
+          className="flex-1 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-5 space-y-4 text-start"
+          onWheel={(e) => e.stopPropagation()}
+        >
           {rounds.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center space-y-3 text-slate-500">
               <div className="p-4 rounded-full bg-slate-800/50 border border-slate-700/60">

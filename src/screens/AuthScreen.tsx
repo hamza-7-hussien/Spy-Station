@@ -5,6 +5,7 @@ import { auth, db, firebase } from '../firebase';
 import { sound } from '../audio';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { Globe, Mail, Lock, User as UserIcon, Sparkles, KeyRound, X, CheckCircle2 } from 'lucide-react';
 
 interface Props {
@@ -31,6 +32,8 @@ export const AuthScreen: React.FC<Props> = ({
   const [resetEmail, setResetEmail] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+
+  useBodyScrollLock(resetModalOpen);
 
   const t = dictionary[lang];
 
@@ -344,8 +347,20 @@ export const AuthScreen: React.FC<Props> = ({
 
       {/* Password Reset Modal */}
       {resetModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 shadow-2xl relative text-start">
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in overscroll-contain select-none"
+          onWheel={(e) => e.stopPropagation()}
+          onTouchMove={(e) => {
+            if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setResetModalOpen(false);
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 shadow-2xl relative text-start overscroll-contain"
+            onWheel={(e) => e.stopPropagation()}
+          >
             <button
               onClick={() => setResetModalOpen(false)}
               className="absolute top-4 inset-inline-end-4 w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition"

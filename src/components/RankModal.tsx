@@ -2,6 +2,7 @@ import React from 'react';
 import { dictionary } from '../translations';
 import { Language, RankTier } from '../types';
 import { X, Trophy, Zap } from 'lucide-react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 export const RANK_TIERS: RankTier[] = [
   { min: 0, icon: '🥉', key: 'rankCadet' },
@@ -30,6 +31,9 @@ interface Props {
 }
 
 export const RankModal: React.FC<Props> = ({ lang, xp, isOpen, onClose }) => {
+  // Lock background scroll when rank modal is open
+  useBodyScrollLock(isOpen);
+
   if (!isOpen) return null;
   const t = dictionary[lang];
   const { current, next } = getRankInfo(xp);
@@ -45,8 +49,20 @@ export const RankModal: React.FC<Props> = ({ lang, xp, isOpen, onClose }) => {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in">
-      <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 text-center shadow-2xl relative">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in overscroll-contain select-none"
+      onWheel={(e) => e.stopPropagation()}
+      onTouchMove={(e) => {
+        if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 text-center shadow-2xl relative overscroll-contain"
+        onWheel={(e) => e.stopPropagation()}
+      >
         <button
           onClick={onClose}
           className="absolute top-4 inset-inline-end-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
