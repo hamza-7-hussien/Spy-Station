@@ -52,7 +52,7 @@ export const VoiceChatBar: React.FC<Props> = ({
               <span>{t.voiceChat}</span>
               {activeCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[10px] font-mono">
-                  {activeCount} {t.online || 'online'}
+                  {activeCount} {t.lblOnline || 'online'}
                 </span>
               )}
             </div>

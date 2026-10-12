@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { dictionary } from '../translations';
-import { Language, RoomData, PlayerData } from '../types';
+import { Language, RoomData, PlayerData, CategoryKey } from '../types';
 import { sound } from '../audio';
 import { db } from '../firebase';
 import firebase from 'firebase/compat/app';
-import { getSecretWordDisplay } from '../words';
+import { getSecretWordDisplay, CATEGORY_META } from '../words';
 import { CATEGORY_STYLES } from '../wordVisuals';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
 import { QuickVoiceControls } from '../components/QuickVoiceControls';
@@ -154,16 +154,16 @@ export const GameScreen: React.FC<Props> = ({
       sound.playGlitchStatic();
       sound.triggerHaptic('heavy');
 
-      // The split-second flash occurs after the sudden darkness starts
+      // The split-second intel flash triggers with dramatic tension
       const flashTimer = setTimeout(() => {
         setShowBlackoutFlash(true);
         sound.triggerHaptic('light');
-        // Split-second flash disappears very quickly (approx 380ms)
+        // Split-second flash visible for 700ms - ultra fast, rewarding sharp focus!
         const hideTimer = setTimeout(() => {
           setShowBlackoutFlash(false);
-        }, 380);
+        }, 700);
         return () => clearTimeout(hideTimer);
-      }, 900);
+      }, 750);
 
       return () => clearTimeout(flashTimer);
     } else {
@@ -345,52 +345,73 @@ export const GameScreen: React.FC<Props> = ({
       {/* ============================================================== */}
       {/* 🚨 BLACKOUT PROTOCOL EMERGENCY OVERLAY */}
       {/* ============================================================== */}
+      {/* ============================================================== */}
+      {/* 🚨 BLACKOUT PROTOCOL EMERGENCY OVERLAY */}
+      {/* ============================================================== */}
       {isBlackoutActive && (
-        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-between p-6 bg-red-950/40 mix-blend-color-burn border-8 border-rose-600/40 animate-pulse">
+        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-between p-4 sm:p-6 bg-red-950/60 border-4 border-rose-500/60 animate-pulse shadow-[inset_0_0_120px_rgba(244,63,94,0.6)] backdrop-blur-[2px]">
           {/* Top Warning Banner with Tactical Emergency Timer HUD */}
-          <div className="w-full flex items-center justify-between px-4 py-2.5 rounded-2xl bg-black/85 border border-rose-500 text-rose-400 shadow-[0_0_35px_rgba(244,63,94,0.7)] backdrop-blur-md">
+          <div className="w-full max-w-xl flex items-center justify-between px-4 py-2.5 rounded-2xl bg-black/95 border-2 border-rose-500 text-rose-300 shadow-[0_0_40px_rgba(244,63,94,0.8)] backdrop-blur-md">
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-rose-500 animate-bounce" />
-              <span className="font-heading font-black text-xs sm:text-sm tracking-wider uppercase">
-                {t.blackoutAlert}
+              <span className="font-heading font-black text-xs sm:text-sm tracking-wider uppercase text-rose-200">
+                {lang === 'ar' ? '🚨 بروتوكول التعتيم: انقطاع كهرباء وتشويش طارئ! ⚡' : '🚨 BLACKOUT PROTOCOL: EMERGENCY COMMS GLITCH ⚡'}
               </span>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-400/50 text-rose-300 text-xs font-mono font-black shadow-[0_0_15px_rgba(244,63,94,0.4)]">
-              <Clock className="w-3.5 h-3.5 animate-spin text-rose-400" style={{ animationDuration: '4s' }} />
-              <span>EMERGENCY</span>
+              <Clock className="w-3.5 h-3.5 animate-spin text-rose-400" style={{ animationDuration: '3s' }} />
+              <span>BLACKOUT</span>
             </div>
           </div>
 
-          {/* Central Split-Second Intel Flash: PURE GLOWING TEXT WITHOUT ANY RECTANGLE/BOX */}
-          {showBlackoutFlash && (
-            <div className="my-auto text-center animate-in zoom-in-90 duration-75 pointer-events-none select-none px-4 max-w-xl">
-              {isSpy ? (
-                // For Spies: Split-second flash of the Secret Word (Clean typography without card/rectangle)
-                <div className="space-y-2">
-                  <div className="text-xs sm:text-sm font-mono font-black text-rose-400 tracking-widest uppercase drop-shadow-[0_0_12px_rgba(244,63,94,0.9)]">
-                    ⚡ {t.intelSecretWord} ⚡
-                  </div>
-                  <div className="text-4xl sm:text-6xl md:text-7xl font-black font-heading tracking-wider text-white drop-shadow-[0_0_35px_rgba(244,63,94,1)] animate-pulse">
-                    {displayWord || t.secretWordLabel}
-                  </div>
+          {/* Central Tactical Glitch Intel */}
+          <div className="my-auto text-center pointer-events-none select-none px-4 max-w-xl w-full">
+            {showBlackoutFlash ? (
+              /* Ultra-fast split-second Intel Flash */
+              <div className="animate-in zoom-in-95 duration-100 p-6 rounded-3xl bg-black/95 border-2 border-rose-500 shadow-[0_0_60px_rgba(244,63,94,0.9)] backdrop-blur-2xl space-y-3">
+                <div className="text-xs sm:text-sm font-mono font-black text-rose-400 tracking-widest uppercase drop-shadow-[0_0_10px_rgba(244,63,94,0.8)] flex items-center justify-center gap-2">
+                  <Zap className="w-4 h-4 text-rose-400 animate-bounce" />
+                  <span>
+                    {isSpy
+                      ? (lang === 'ar' ? 'رصد استخباري فائق السرعة للكلمة السرية!' : 'ULTRA-FAST INTEL FLASH: SECRET WORD!')
+                      : (lang === 'ar' ? 'رصد رادار خاطف لأسماء الجواسيس!' : 'ULTRA-FAST INTEL FLASH: IDENTIFIED SPIES!')}
+                  </span>
+                  <Zap className="w-4 h-4 text-rose-400 animate-bounce" />
                 </div>
-              ) : (
-                // For Non-Spies: Split-second flash of Spy Names (Clean typography without card/rectangle)
-                <div className="space-y-2">
-                  <div className="text-xs sm:text-sm font-mono font-black text-rose-400 tracking-widest uppercase drop-shadow-[0_0_12px_rgba(244,63,94,0.9)]">
-                    ⚡ {t.intelSpies} ⚡
+                {isSpy ? (
+                  <div className="text-4xl sm:text-6xl font-black font-heading tracking-wider text-white drop-shadow-[0_0_30px_rgba(244,63,94,1)] animate-pulse">
+                    {displayWord || (lang === 'ar' ? 'الكلمة السرية' : 'Secret Word')}
                   </div>
-                  <div className="text-3xl sm:text-5xl md:text-6xl font-black font-heading tracking-wider text-rose-300 drop-shadow-[0_0_35px_rgba(244,63,94,1)] animate-pulse">
+                ) : (
+                  <div className="text-3xl sm:text-5xl font-black font-heading tracking-wider text-rose-300 drop-shadow-[0_0_30px_rgba(244,63,94,1)] animate-pulse">
                     {(room.spies || []).map(sUid => playersObj[sUid]?.name || 'Agent').join(' ، ')}
                   </div>
+                )}
+                <div className="text-[11px] font-bold text-rose-300">
+                  {lang === 'ar' ? '⚡ رصد خاطف لجزء من الثانية فقط!' : '⚡ Split-second glimpse only!'}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            ) : (
+              /* Atmospheric alert during the remaining blackout seconds */
+              <div className="p-5 rounded-3xl bg-black/90 border border-rose-500/60 shadow-[0_0_40px_rgba(244,63,94,0.5)] backdrop-blur-xl space-y-2">
+                <div className="text-xs font-mono font-black text-rose-400 tracking-widest uppercase">
+                  ⚡ {lang === 'ar' ? 'انقطاع تام للاتصالات والكهرباء' : 'TOTAL COMMS & POWER BLACKOUT'} ⚡
+                </div>
+                <div className="text-lg sm:text-xl font-black font-heading text-rose-200">
+                  {lang === 'ar' ? '⚠️ رادار المحطة يرصد تشويشاً عالي التردد' : '⚠️ Station radar detects high-frequency jamming!'}
+                </div>
+                <p className="text-[12px] text-slate-300">
+                  {lang === 'ar' ? 'انتبه للتلميحات.. الكاميرات والرادار تعود للعمل بعد لحظات!' : 'Stay focused.. Station feeds and radars restoring shortly!'}
+                </p>
+              </div>
+            )}
+          </div>
 
           {/* Bottom Alert */}
-          <div className="text-center text-[11px] font-bold text-rose-300/80 bg-black/70 px-4 py-1.5 rounded-full border border-rose-500/30">
-            {t.intelGlitchNotice}
+          <div className="text-center text-[11px] font-bold text-rose-300 bg-black/85 px-4 py-1.5 rounded-full border border-rose-500/40 shadow-lg">
+            {lang === 'ar'
+              ? '⚡ تستأنف اتصالات ورادار المحطة خلال ثوانٍ معدودة... ⚡'
+              : '⚡ Comms and radar restoring in moments... ⚡'}
           </div>
         </div>
       )}
@@ -699,8 +720,8 @@ export const GameScreen: React.FC<Props> = ({
                     <div className="text-xs font-bold text-sky-400 flex items-center justify-center gap-1.5">
                       <span>{CATEGORY_STYLES[room.wordCategory]?.icon}</span>
                       <span>
-                        {(CATEGORY_META[room.wordCategory as CategoryKey]?.key && t[CATEGORY_META[room.wordCategory as CategoryKey].key as keyof typeof t])
-                          || (lang === 'ar' ? CATEGORY_STYLES[room.wordCategory]?.titleAr : CATEGORY_STYLES[room.wordCategory]?.titleEn)}
+                        {(room.wordCategory && (CATEGORY_META as Record<string, { icon: string; key: string }>)[room.wordCategory]?.key && (t as Record<string, string>)[(CATEGORY_META as Record<string, { icon: string; key: string }>)[room.wordCategory].key])
+                          || (lang === 'ar' ? (CATEGORY_STYLES as Record<string, { titleAr: string; titleEn: string }>)[room.wordCategory]?.titleAr : (CATEGORY_STYLES as Record<string, { titleAr: string; titleEn: string }>)[room.wordCategory]?.titleEn)}
                       </span>
                     </div>
                   )}

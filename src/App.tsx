@@ -491,31 +491,22 @@ export default function App() {
           const left = room.turnTimeLeft != null ? room.turnTimeLeft : defaultTurnSeconds;
 
           // Blackout Protocol Trigger Engine (Host Authoritative)
-          // Starts from Round 3+, unpredictable intervals, requires at least 3 rounds gap (e.g. after Rd 6 next is Rd 10+)
-          // Can occur near round start, middle, or near end. Lasts 3.5 seconds.
+          // Triggers reliably once in every round at a dramatic moment with adequate turn time
           if (room.gameMode === 'blackout' && !room.blackoutActive) {
             const currentRound = room.round || 1;
             const lastBO = room.lastBlackoutRound || 0;
-            // Must be at least round 3 and at least 3 full rounds elapsed since last blackout (gap >= 3)
-            const gap = currentRound - lastBO;
-            if (currentRound >= 3 && (lastBO === 0 || gap >= 4)) {
-              // Trigger chance during turn: start (left near max), middle (halfway), or end (left <= 4)
-              const isStartMoment = left === defaultTurnSeconds - 2;
-              const isMidMoment = left === Math.floor(defaultTurnSeconds / 2);
-              const isEndMoment = left === 3;
-              if (isStartMoment || isMidMoment || isEndMoment) {
-                // Random roll: 40% probability when moment strikes
-                if (Math.random() < 0.4) {
+            if (lastBO !== currentRound && left >= 6) {
+              const halfTurn = Math.max(6, Math.floor(defaultTurnSeconds / 2));
+              if (left === halfTurn) {
+                db.ref(`spy_rooms/${currentRoomCode}`).update({
+                  blackoutActive: true,
+                  lastBlackoutRound: currentRound
+                });
+                setTimeout(() => {
                   db.ref(`spy_rooms/${currentRoomCode}`).update({
-                    blackoutActive: true,
-                    lastBlackoutRound: currentRound
-                  });
-                  setTimeout(() => {
-                    db.ref(`spy_rooms/${currentRoomCode}`).update({
-                      blackoutActive: false
-                    }).catch(() => {});
-                  }, 3500);
-                }
+                    blackoutActive: false
+                  }).catch(() => {});
+                }, 3500);
               }
             }
           }
