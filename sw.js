@@ -77,6 +77,9 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
+    "url": "version.json",
+    "revision": "1e28be9492ca033bdbcf62129b71593d"
+  }, {
     "url": "screenshot-voting.png",
     "revision": "0776f49b4b46c85998afc50d645381b2"
   }, {
@@ -120,10 +123,13 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "3651b8cf26a7b67afff0b30c18200931"
   }, {
     "url": "offline.html",
-    "revision": "48a1ea533e54985fb4cc796bf80c5d22"
+    "revision": "8bbf085f5c86af131e82313573e80702"
+  }, {
+    "url": "manifest.json",
+    "revision": "b9ddc1ff747fd5d0f0601f323b690073"
   }, {
     "url": "index.html",
-    "revision": "1daddc37980f495e51a238c91ba8e6c6"
+    "revision": "4b471ad79cec2ffd1f611ce14b51dc2b"
   }, {
     "url": "icon.svg",
     "revision": "640a3e60ff4ebb85968e33b7cc594fce"
@@ -137,10 +143,10 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "url": "apple-touch-icon.png",
     "revision": "da82ba2cb3f8ae58320e0b8b80786aa6"
   }, {
-    "url": "assets/index-D-0OFqXd.css",
+    "url": "assets/index-DwnMpzvG.js",
     "revision": null
   }, {
-    "url": "assets/index-BlYAS6WO.js",
+    "url": "assets/index-DMzn4etu.css",
     "revision": null
   }, {
     "url": "apple-touch-icon.png",
@@ -171,10 +177,12 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "14f5506264b2cab88f7b6175d88f544a"
   }, {
     "url": "manifest.webmanifest",
-    "revision": "ea66918131f6128468f2318d1b55714f"
+    "revision": "d49ef17c967bcc26e34c465aef370abf"
   }], {});
   workbox.cleanupOutdatedCaches();
-  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html")));
+  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
+    denylist: [/^\/__.*$/, /^\/api\/.*$/]
+  }));
   workbox.registerRoute(/^https:\/\/fonts\.googleapis\.com\/.*/i, new workbox.CacheFirst({
     "cacheName": "google-fonts-cache",
     plugins: [new workbox.ExpirationPlugin({
