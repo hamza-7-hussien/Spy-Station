@@ -95,6 +95,8 @@ export const AuthScreen: React.FC<Props> = ({
       return onToast(t.errFillFields, 'danger');
     }
 
+    const isGoogleEmail = cleanEmail.endsWith('@gmail.com') || cleanEmail.endsWith('@googlemail.com');
+
     setLoading(true);
 
     try {
@@ -112,32 +114,102 @@ export const AuthScreen: React.FC<Props> = ({
           return onToast(t.errUsernameTaken, 'danger');
         }
 
-        const res = await auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword);
-        const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`;
-        await db.ref('usernames/' + cleanUsername.toLowerCase()).set(true);
-        if (res.user) {
-          await res.user.updateProfile({ displayName: cleanUsername, photoURL: avatar });
-          await db.ref(`users/${res.user.uid}`).update({
+        if (isGoogleEmail) {
+          // Verify with Google authentication that user owns this Google account
+          const provider = new firebase.auth.GoogleAuthProvider();
+          provider.setCustomParameters({ login_hint: cleanEmail, prompt: 'select_account' });
+          const result = await auth.signInWithPopup(provider);
+
+          if (!result.user || result.user.email?.toLowerCase() !== cleanEmail) {
+            await auth.signOut();
+            setLoading(false);
+            return onToast(
+              lang === 'ar'
+                ? 'فشل التحقق: حساب Google لا يطابق البريد المدخل!'
+                : 'Verification failed: Google account does not match entered email.',
+              'danger'
+            );
+          }
+
+          if (cleanPassword.length >= 6) {
+            try {
+              const cred = firebase.auth.EmailAuthProvider.credential(cleanEmail, cleanPassword);
+              await result.user.linkWithCredential(cred);
+            } catch (linkErr) {
+              try {
+                await result.user.updatePassword(cleanPassword);
+              } catch (_) {}
+            }
+          }
+
+          const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`;
+          await db.ref('usernames/' + cleanUsername.toLowerCase()).set(true);
+          await result.user.updateProfile({ displayName: cleanUsername, photoURL: avatar });
+          await db.ref(`users/${result.user.uid}`).update({
             name: cleanUsername,
             avatar,
             createdAt: firebase.database.ServerValue.TIMESTAMP
           });
+        } else {
+          const res = await auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword);
+          const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`;
+          await db.ref('usernames/' + cleanUsername.toLowerCase()).set(true);
+          if (res.user) {
+            await res.user.updateProfile({ displayName: cleanUsername, photoURL: avatar });
+            await db.ref(`users/${res.user.uid}`).update({
+              name: cleanUsername,
+              avatar,
+              createdAt: firebase.database.ServerValue.TIMESTAMP
+            });
+          }
         }
       } else {
+        // Sign-in mode
         try {
           await auth.signInWithEmailAndPassword(cleanEmail, cleanPassword);
         } catch (signInErr: unknown) {
           const sErr = signInErr as { code?: string; message?: string };
-          // Check if user originally signed up with Google
+
+          // If Google email, conduct Google account verification
+          if (
+            isGoogleEmail &&
+            (sErr.code === 'auth/user-not-found' ||
+             sErr.code === 'auth/wrong-password' ||
+             sErr.code === 'auth/invalid-credential' ||
+             sErr.code === 'auth/account-exists-with-different-credential')
+          ) {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            provider.setCustomParameters({ login_hint: cleanEmail, prompt: 'select_account' });
+            const result = await auth.signInWithPopup(provider);
+
+            if (!result.user || result.user.email?.toLowerCase() !== cleanEmail) {
+              await auth.signOut();
+              setLoading(false);
+              return onToast(
+                lang === 'ar'
+                  ? 'فشل التحقق: حساب Google لا يطابق البريد المدخل!'
+                  : 'Verification failed: Google account does not match entered email.',
+                'danger'
+              );
+            }
+
+            if (cleanPassword.length >= 6) {
+              try {
+                const cred = firebase.auth.EmailAuthProvider.credential(cleanEmail, cleanPassword);
+                await result.user.linkWithCredential(cred);
+              } catch (linkErr) {
+                try {
+                  await result.user.updatePassword(cleanPassword);
+                } catch (_) {}
+              }
+            }
+            return;
+          }
+
+          // Fallback check if user originally registered via Google
           try {
             const methods = await auth.fetchSignInMethodsForEmail(cleanEmail);
             if (methods && methods.includes('google.com') && !methods.includes('password')) {
-              onToast(
-                lang === 'ar'
-                  ? 'هذا الحساب مسجل عبر Google! جاري فتح Google للتحقق وربط كلمة المرور هذه بحسابك لتسجيل دخولك بها دائماً...'
-                  : 'Account registered with Google! Verifying with Google to link this password for future direct logins...',
-                'normal'
-              );
               const provider = new firebase.auth.GoogleAuthProvider();
               provider.setCustomParameters({ login_hint: cleanEmail });
               const result = await auth.signInWithPopup(provider);
@@ -145,21 +217,12 @@ export const AuthScreen: React.FC<Props> = ({
                 try {
                   const cred = firebase.auth.EmailAuthProvider.credential(cleanEmail, cleanPassword);
                   await result.user.linkWithCredential(cred);
-                  onToast(
-                    lang === 'ar'
-                      ? 'تم ربط كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول بها مباشرة في أي وقت.'
-                      : 'Password linked successfully! You can now sign in with your email & password.',
-                    'success'
-                  );
-                } catch (linkErr) {
-                  console.warn('Could not auto-link password credential:', linkErr);
-                }
+                } catch (_) {}
               }
               return;
             }
-          } catch (checkErr) {
-            console.warn('fetchSignInMethods error:', checkErr);
-          }
+          } catch (_) {}
+
           throw sErr;
         }
       }
@@ -246,31 +309,6 @@ export const AuthScreen: React.FC<Props> = ({
           {t.appSub}
         </p>
 
-        {/* Google Sign In */}
-        <button
-          onClick={handleGoogleSignIn}
-          disabled={loading}
-          className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm flex items-center justify-center gap-3 shadow-lg shadow-white/10 hover:-translate-y-0.5 active:translate-y-0 transition cursor-pointer mb-2"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
-            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.15C3.26 21.36 7.35 24 12 24z"/>
-            <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.15 0 9.99 0 12s.45 3.85 1.24 5.42l4.04-3.15z"/>
-            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-          </svg>
-          <span>{t.googleAuth}</span>
-        </button>
-
-        <p className="text-[10px] text-slate-400 mb-4 font-semibold">
-          {t.googleInstantAccessHint}
-        </p>
-
-        <div className="flex items-center gap-3 my-3 text-xs font-bold text-slate-500">
-          <div className="flex-1 h-px bg-slate-800" />
-          <span>{t.orWithPassword}</span>
-          <div className="flex-1 h-px bg-slate-800" />
-        </div>
-
         <form onSubmit={handleSubmit} className="space-y-3 text-start">
           <div className="relative">
             <Mail className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 inset-inline-start-3.5 pointer-events-none" />
@@ -336,6 +374,29 @@ export const AuthScreen: React.FC<Props> = ({
             <span>{isSignUp ? t.signup : t.loginBtn}</span>
           </button>
         </form>
+
+        {/* Divider */}
+        <div className="flex items-center gap-3 my-4 text-xs font-bold text-slate-500">
+          <div className="flex-1 h-px bg-slate-800" />
+          <span>{lang === 'ar' ? 'أو الدخول عبر Google' : 'Or with Google'}</span>
+          <div className="flex-1 h-px bg-slate-800" />
+        </div>
+
+        {/* Google Sign In */}
+        <button
+          type="button"
+          onClick={handleGoogleSignIn}
+          disabled={loading}
+          className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm flex items-center justify-center gap-3 shadow-lg shadow-white/10 hover:-translate-y-0.5 active:translate-y-0 transition cursor-pointer"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.15C3.26 21.36 7.35 24 12 24z"/>
+            <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.15 0 9.99 0 12s.45 3.85 1.24 5.42l4.04-3.15z"/>
+            <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.35 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+          </svg>
+          <span>{t.googleAuth}</span>
+        </button>
 
         <div
           onClick={() => setIsSignUp(!isSignUp)}

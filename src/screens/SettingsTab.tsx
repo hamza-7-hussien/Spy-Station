@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { dictionary, SUPPORTED_LANGUAGES } from '../translations';
 import { Language } from '../types';
-import { storage, auth, firebase } from '../firebase';
+import { storage } from '../firebase';
 import { sound } from '../audio';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
@@ -15,8 +15,6 @@ import {
   Smartphone,
   User as UserIcon,
   Sparkles,
-  Lock,
-  KeyRound,
   Music,
   Check
 } from 'lucide-react';
@@ -96,8 +94,6 @@ export const SettingsTab: React.FC<Props> = ({
   const [bgmVolume, setBgmVolume] = useState(sound.getBgmVolume());
   const [isBgmMuted, setIsBgmMuted] = useState(sound.isBgmMuted());
   const [uploading, setUploading] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
   const t = dictionary[lang];
 
   // Sync state whenever props change
@@ -168,48 +164,6 @@ export const SettingsTab: React.FC<Props> = ({
     sound.setVolume(val);
   };
 
-  const handleSetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = newPassword.trim();
-    if (!clean || clean.length < 6) {
-      return onToast(t.errWeakPassword, 'danger');
-    }
-
-    setPasswordLoading(true);
-    sound.triggerHaptic('light');
-
-    try {
-      const user = auth.currentUser;
-      if (!user) throw new Error(t.notLoggedIn);
-      const email = user.email;
-      if (!email) throw new Error(t.noEmailLinked);
-
-      try {
-        const cred = firebase.auth.EmailAuthProvider.credential(email, clean);
-        await user.linkWithCredential(cred);
-      } catch (linkErr: unknown) {
-        const lErr = linkErr as { code?: string };
-        if (lErr.code === 'auth/provider-already-linked') {
-          await user.updatePassword(clean);
-        } else {
-          await user.updatePassword(clean);
-        }
-      }
-
-      setNewPassword('');
-      onToast(
-        lang === 'ar'
-          ? 'تم تفعيل كلمة المرور لحسابك بنجاح! يمكنك الآن تسجيل الدخول بالإيميل والباسورد مباشرة دون الحاجة لجوجل.'
-          : 'Password saved! You can now log in directly with your email & password without needing Google.',
-        'success'
-      );
-    } catch (err: unknown) {
-      const error = err as { message?: string };
-      onToast(error.message || t.errActionFailed, 'danger');
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-24">
@@ -435,34 +389,6 @@ export const SettingsTab: React.FC<Props> = ({
             <PWAInstallButton lang={lang} variant="prominent" className="w-full" />
           </div>
         )}
-
-        {/* Password setup / update card for email login */}
-        <form onSubmit={handleSetPassword} className="p-4 rounded-2xl bg-slate-950/70 border border-sky-500/25 space-y-2.5">
-          <div className="flex items-center gap-2 text-xs font-bold text-sky-400">
-            <Lock className="w-3.5 h-3.5" />
-            <span>{t.passwordSectionTitle}</span>
-          </div>
-          <p className="text-[11px] text-slate-400 leading-relaxed">
-            {t.passwordSectionHint}
-          </p>
-          <div className="flex gap-2 pt-1">
-            <input
-              type="password"
-              value={newPassword}
-              onChange={e => setNewPassword(e.target.value)}
-              placeholder={t.newPasswordPlaceholder}
-              className="flex-1 py-2.5 px-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs outline-none focus:border-sky-400 transition"
-            />
-            <button
-              type="submit"
-              disabled={passwordLoading || !newPassword.trim()}
-              className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 font-bold text-xs hover:brightness-110 active:scale-95 disabled:opacity-40 transition cursor-pointer flex items-center gap-1.5"
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>{passwordLoading ? '...' : t.savePasswordBtn}</span>
-            </button>
-          </div>
-        </form>
 
 
         {/* Logout */}
