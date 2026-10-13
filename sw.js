@@ -129,7 +129,7 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "b9ddc1ff747fd5d0f0601f323b690073"
   }, {
     "url": "index.html",
-    "revision": "4b471ad79cec2ffd1f611ce14b51dc2b"
+    "revision": "9b6bc60a4c0ed023675f6c7e3dd754f1"
   }, {
     "url": "icon.svg",
     "revision": "640a3e60ff4ebb85968e33b7cc594fce"
@@ -143,10 +143,22 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "url": "apple-touch-icon.png",
     "revision": "da82ba2cb3f8ae58320e0b8b80786aa6"
   }, {
-    "url": "assets/index-DwnMpzvG.js",
+    "url": "assets/pwa-192x192-Cc_ANcVe.png",
     "revision": null
   }, {
-    "url": "assets/index-DMzn4etu.css",
+    "url": "assets/manifest-D2My12ke.json",
+    "revision": null
+  }, {
+    "url": "assets/index-DkrvM-eJ.js",
+    "revision": null
+  }, {
+    "url": "assets/index-CLw2A713.css",
+    "revision": null
+  }, {
+    "url": "assets/icon-DpEGKqdl.svg",
+    "revision": null
+  }, {
+    "url": "assets/apple-touch-icon-Bu-S7RJf.png",
     "revision": null
   }, {
     "url": "apple-touch-icon.png",
