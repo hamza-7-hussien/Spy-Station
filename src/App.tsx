@@ -30,6 +30,7 @@ import { GameScreen } from './screens/GameScreen';
 import { VotingScreen } from './screens/VotingScreen';
 import { GameOverScreen } from './screens/GameOverScreen';
 import { RoundAnnounceModal } from './screens/RoundAnnounceModal';
+import { SciFiAirlockDoors } from './components/SciFiAirlockDoors';
 import { BottomNav } from './components/BottomNav';
 import { TopNotification } from './components/TopNotification';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -96,6 +97,51 @@ export default function App() {
   const [rankModalOpen, setRankModalOpen] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [quickMatchModalOpen, setQuickMatchModalOpen] = useState(false);
+  const [airlockOpen, setAirlockOpen] = useState(true);
+  const wasPlayingRef = useRef(false);
+
+  // Dynamic Adaptive Espionage Background Music (Ambient vs Suspense)
+  useEffect(() => {
+    if (!roomData) {
+      sound.setBgmMode('ambient');
+      return;
+    }
+    if (roomData.status === 'playing' || roomData.status === 'voting') {
+      sound.setBgmMode('suspense');
+    } else {
+      sound.setBgmMode('ambient');
+    }
+  }, [roomData?.status]);
+
+  // Screen Transition: Airlock Doors Opening on Game Start
+  useEffect(() => {
+    const isPlaying = roomData?.status === 'playing';
+    if (isPlaying && !wasPlayingRef.current) {
+      setAirlockOpen(false);
+      const timer = window.setTimeout(() => {
+        setAirlockOpen(true);
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+    wasPlayingRef.current = isPlaying;
+  }, [roomData?.status]);
+
+  // Global Tactile Button Click Audio Feedback
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const interactive = target.closest('button, [role="button"], a, input[type="checkbox"], input[type="radio"]');
+      if (interactive) {
+        sound.playTactileClick();
+      }
+    };
+    window.addEventListener('click', handleGlobalClick, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener('click', handleGlobalClick, { capture: true });
+    };
+  }, []);
+
   const [activeEjection, setActiveEjection] = useState<{
     uid: string;
     name: string;
@@ -1779,6 +1825,11 @@ export default function App() {
         {announcedRound !== null && (
           <RoundAnnounceModal lang={lang} round={announcedRound} />
         )}
+        <SciFiAirlockDoors
+          isOpen={airlockOpen}
+          label={lang === 'ar' ? 'بوابة المحطة 07 // بدء الجولة' : 'STATION AIRLOCK // MISSION START'}
+          sublabel={lang === 'ar' ? 'تم تأكيد الهوية والتصريح الأمني' : 'SECURITY CLEARANCE CONFIRMED'}
+        />
 
         {/* Room Screens */}
         {isPlaying ? (

@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { dictionary } from '../translations';
 import { Language, RoomData, PlayerData, CategoryKey } from '../types';
 import { sound } from '../audio';
+import { RoleDossierCard } from '../components/RoleDossierCard';
+
 import { db } from '../firebase';
 import firebase from 'firebase/compat/app';
 import { getSecretWordDisplay, CATEGORY_META } from '../words';
@@ -87,8 +89,6 @@ export const GameScreen: React.FC<Props> = ({
 }) => {
   const [clueInput, setClueInput] = useState('');
   const [spyInput, setSpyInput] = useState('');
-  const [isCardFlipped, setIsCardFlipped] = useState(false);
-  const [isHoldingScanner, setIsHoldingScanner] = useState(false);
   const [isMuted, setIsMuted] = useState(sound.isMuted());
   const [isBgmMuted, setIsBgmMuted] = useState(sound.isBgmMuted());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -171,14 +171,14 @@ export const GameScreen: React.FC<Props> = ({
     }
   }, [isBlackoutActive]);
 
-  // Audio timer pulse
+  // Audio timer countdown pulse (High-tension ticking in final seconds)
   useEffect(() => {
     if (timeLeft !== lastPulseSecondRef.current) {
       lastPulseSecondRef.current = timeLeft;
-      if (timeLeft <= 5 && timeLeft > 0) {
-        sound.playTimerPulse(true);
-      } else if (timeLeft > 5 && timeLeft % 4 === 0) {
-        sound.playTimerPulse(false);
+      if (timeLeft <= 10 && timeLeft > 0) {
+        sound.playCountdownTick(timeLeft);
+      } else if (timeLeft === 0) {
+        sound.playTimeoutBuzzer();
       }
     }
   }, [timeLeft]);
@@ -620,133 +620,21 @@ export const GameScreen: React.FC<Props> = ({
       </div>
 
       {/* ============================================================== */}
-      {/* 🪪 BIOMETRIC SCI-FI SECRET CLEARANCE (Hold Fingerprint to Reveal) */}
+      {/* 🪪 3D ROLE DOSSIER CARD (Tactile Card Flip & Thematic Reveal) */}
       {/* ============================================================== */}
-      {(() => {
-        const isRevealed = isHoldingScanner || isCardFlipped;
-        return (
-          <div
-            onPointerDown={() => {
-              if (!isCardFlipped) {
-                setIsHoldingScanner(true);
-                sound.playBiometricScan();
-              }
-            }}
-            onPointerUp={() => {
-              if (!isCardFlipped) {
-                setIsHoldingScanner(false);
-                sound.triggerHaptic('light');
-              }
-            }}
-            onPointerLeave={() => {
-              if (!isCardFlipped) setIsHoldingScanner(false);
-            }}
-            onPointerCancel={() => {
-              if (!isCardFlipped) setIsHoldingScanner(false);
-            }}
-            className={`relative overflow-hidden p-4 rounded-3xl border-2 transition-all duration-300 select-none shadow-xl cursor-pointer ${
-              isRevealed
-                ? isSpy && !isChameleonSpy
-                  ? 'bg-rose-950/85 border-rose-500 shadow-[0_0_30px_rgba(244,63,94,0.4)]'
-                  : 'bg-gradient-to-r from-sky-950/95 via-slate-900 to-indigo-950/95 border-sky-400 shadow-[0_0_30px_rgba(56,189,248,0.35)]'
-                : 'bg-slate-950/90 border-slate-800 hover:border-sky-500/60 active:scale-[0.99]'
-            }`}
-          >
-            {/* Laser Scanning Animation Bar when holding */}
-            {isHoldingScanner && !isCardFlipped && (
-              <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-sky-400 to-transparent shadow-[0_0_12px_rgba(56,189,248,1)] animate-bounce duration-700 pointer-events-none" />
-            )}
-
-            {/* Header / Pin Controls */}
-            <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 mb-2">
-              <span className="flex items-center gap-1.5">
-                <Fingerprint className={`w-4 h-4 ${isRevealed ? 'text-sky-400 animate-pulse' : 'text-slate-400'}`} />
-                <span className="font-mono tracking-wider uppercase">
-                  {t.lblBiometric}
-                </span>
-              </span>
-
-              {/* Pin / Lock Button to freeze open */}
-              <button
-                type="button"
-                onClick={e => {
-                  e.stopPropagation();
-                  sound.playClick();
-                  sound.triggerHaptic('medium');
-                  setIsCardFlipped(prev => !prev);
-                }}
-                className={`px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
-                  isCardFlipped
-                    ? 'bg-sky-500/20 text-sky-300 border-sky-400/40 shadow-sm'
-                    : 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 border-slate-700'
-                }`}
-                title={isCardFlipped ? t.lblPinned : t.lblPin}
-              >
-                <Pin className={`w-3 h-3 ${isCardFlipped ? 'rotate-45 text-sky-400' : ''}`} />
-                <span>{isCardFlipped ? t.lblPinned : t.lblPin}</span>
-              </button>
-            </div>
-
-            {/* Content Area */}
-            {isRevealed ? (
-              amSpectator ? (
-                <div className="py-2 text-xs font-bold text-slate-400 text-center animate-in zoom-in-95 duration-150">
-                  {t.lblSpectatorTag}
-                </div>
-              ) : isSpy && !isChameleonSpy ? (
-                <div className="py-1 text-center animate-in zoom-in-95 duration-150">
-                  <div className="text-xl sm:text-2xl font-black text-rose-400 font-heading tracking-wide flex items-center justify-center gap-2">
-                    <span>{t.youAreSpy}</span>
-                    <span>🕵️</span>
-                  </div>
-                  <p className="text-xs font-bold text-rose-300/80 mt-0.5">
-                    {t.lblBlendInHint}
-                  </p>
-                  {room.gameMode === 'mole' && (room.spies || []).length > 1 && (
-                    <div className="mt-2 p-2 rounded-xl bg-purple-950/70 border border-purple-500/40 text-xs text-purple-200">
-                      <span className="font-bold text-purple-300">{t.lblFellowSpies}</span>
-                      <span>
-                        {(room.spies || [])
-                          .filter(sUid => sUid !== currentUserUid)
-                          .map(sUid => playersObj[sUid]?.name || 'Agent')
-                          .join('، ')}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-1.5 py-2 animate-in zoom-in-95 duration-150 text-center">
-                  {room.wordCategory && (
-                    <div className="text-xs font-bold text-sky-400 flex items-center justify-center gap-1.5">
-                      <span>{CATEGORY_STYLES[room.wordCategory]?.icon}</span>
-                      <span>
-                        {(room.wordCategory && (CATEGORY_META as Record<string, { icon: string; key: string }>)[room.wordCategory]?.key && (t as Record<string, string>)[(CATEGORY_META as Record<string, { icon: string; key: string }>)[room.wordCategory].key])
-                          || (lang === 'ar' ? (CATEGORY_STYLES as Record<string, { titleAr: string; titleEn: string }>)[room.wordCategory]?.titleAr : (CATEGORY_STYLES as Record<string, { titleAr: string; titleEn: string }>)[room.wordCategory]?.titleEn)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="text-xl sm:text-3xl md:text-4xl font-black text-white font-heading tracking-wide break-words max-w-full text-center leading-tight drop-shadow-[0_0_15px_rgba(255,255,255,0.4)]">
-                    {displayWord || t.secretWordLabel}
-                  </div>
-                </div>
-              )
-            ) : (
-              <div className="py-3 flex flex-col items-center justify-center gap-2 text-center">
-                <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-400/30 flex items-center justify-center text-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.25)] animate-pulse">
-                  <Fingerprint className="w-7 h-7" />
-                </div>
-                <div className="text-xs sm:text-sm font-black text-sky-300 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                  <span>{t.lblHoldScanner}</span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-500">
-                  {t.lblReleaseScanner}
-                </span>
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      <RoleDossierCard
+        lang={lang}
+        isSpy={isSpy}
+        isChameleonSpy={isChameleonSpy}
+        amSpectator={amSpectator}
+        displayWord={displayWord || ''}
+        wordCategory={room.wordCategory}
+        roomGameMode={room.gameMode}
+        fellowSpiesNames={(room.spies || [])
+          .filter(sUid => sUid !== currentUserUid)
+          .map(sUid => playersObj[sUid]?.name || 'Agent')}
+        t={t as unknown as Record<string, string>}
+      />
 
       {/* ============================================================== */}
       {/* 👥 ASTRONAUT CREW ROSTER (Clean, comfortable grid) */}

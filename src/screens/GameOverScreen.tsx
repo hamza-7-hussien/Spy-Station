@@ -39,20 +39,23 @@ export const GameOverScreen: React.FC<Props> = ({
   const spyUids = room.finalSpies || room.spies || [];
 
   useEffect(() => {
-    // Fire celebratory confetti & chime
-    sound.playChime([[523, 0, 0.15], [659, 120, 0.15], [784, 240, 0.35]], 'sine');
-    sound.triggerHaptic('heavy');
+    // Distinct thematic audio: Victory fanfare for crew vs dramatic sting for spies
+    if (isCrewWinner) {
+      sound.playVictoryCelebration();
+    } else {
+      sound.playSpyRevealSting();
+    }
 
     try {
       confetti({
-        particleCount: 80,
+        particleCount: isCrewWinner ? 100 : 50,
         spread: 70,
         origin: { y: 0.6 }
       });
     } catch {
       // ignore
     }
-  }, []);
+  }, [isCrewWinner]);
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-20 pt-4 text-start">

@@ -1,4 +1,7 @@
-// Hi-Fi Sci-Fi Audio Synthesizer (Gentle, Non-Intrusive, Futuristic)
+// Hi-Fi Sci-Fi Audio Synthesizer (Gentle, Non-Intrusive, Futuristic & Espionage)
+
+export type BgmMode = 'ambient' | 'suspense';
+
 class AudioManager {
   private ctx: AudioContext | null = null;
   private volume: number = 0.45;
@@ -9,6 +12,7 @@ class AudioManager {
   private isBgmPlaying: boolean = false;
   private bgmTimer: number | null = null;
   private bgmStep: number = 0;
+  private currentBgmMode: BgmMode = 'ambient';
 
   constructor() {
     const savedVol = localStorage.getItem('spy_station_vol');
@@ -24,7 +28,6 @@ class AudioManager {
     if (savedBgmMute !== null) {
       this.bgmMuted = savedBgmMute === 'true';
     } else {
-      // Default to music enabled
       this.bgmMuted = false;
     }
 
@@ -67,7 +70,7 @@ class AudioManager {
     this.muted = !this.muted;
     localStorage.setItem('spy_station_muted', String(this.muted));
     if (!this.muted) {
-      this.playTone(520, 'sine', 0.08, 0.3);
+      this.playTactileClick();
     }
     return this.muted;
   }
@@ -99,12 +102,28 @@ class AudioManager {
     }
   }
 
+  public getBgmMode(): BgmMode {
+    return this.currentBgmMode;
+  }
+
+  public setBgmMode(mode: BgmMode) {
+    if (this.currentBgmMode === mode) return;
+    this.currentBgmMode = mode;
+    this.bgmStep = 0;
+    if (this.isBgmPlaying && !this.bgmMuted) {
+      if (this.bgmTimer) {
+        window.clearTimeout(this.bgmTimer);
+        this.bgmTimer = null;
+      }
+      this.scheduleBgmLoop();
+    }
+  }
+
   // Start procedural atmospheric cyber/spy music
   public startBgm() {
     if (this.bgmMuted || this.isBgmPlaying) return;
     this.initCtx();
     if (!this.ctx) return;
-
     this.isBgmPlaying = true;
     if (!this.bgmGain) {
       this.bgmGain = this.ctx.createGain();
@@ -113,7 +132,6 @@ class AudioManager {
     const now = this.ctx.currentTime;
     this.bgmGain.gain.setValueAtTime(0.001, now);
     this.bgmGain.gain.linearRampToValueAtTime(this.bgmVolume, now + 1.2);
-
     this.scheduleBgmLoop();
   }
 
@@ -130,14 +148,24 @@ class AudioManager {
     }
   }
 
-  // Procedural Suspense Spy Loop (BPM 84, D minor / mysterious spy progression)
+  // Procedural Suspense / Ambient Spy Music Engine
   private scheduleBgmLoop() {
     if (!this.isBgmPlaying || this.bgmMuted || !this.ctx || !this.bgmGain) return;
 
-    const bpm = 84;
-    const stepDuration = 60 / bpm / 2; // eighth notes (~0.357s)
+    if (this.currentBgmMode === 'suspense') {
+      this.playSuspenseBgmStep();
+    } else {
+      this.playAmbientBgmStep();
+    }
+  }
 
-    // Cinematic Spy Chord Progressions (Root, Third, Fifth, Seventh/Ninth)
+  // MODE 1: Ambient Espionage (Chill, Mystical Space Deck / Lobby)
+  private playAmbientBgmStep() {
+    if (!this.ctx || !this.bgmGain) return;
+    const bpm = 74;
+    const stepDuration = 60 / bpm / 2; // eighth notes (~0.405s)
+
+    // Ethereal Espionage Minor Progressions
     const chords = [
       [73.42, 146.83, 220.0, 261.63, 329.63], // Dm9
       [65.41, 130.81, 196.0, 246.94, 311.13], // C minor / diminished touch
@@ -147,7 +175,6 @@ class AudioManager {
 
     const currentChordIdx = Math.floor((this.bgmStep % 32) / 8);
     const chordNotes = chords[currentChordIdx];
-
     const now = this.ctx.currentTime;
 
     try {
@@ -156,21 +183,16 @@ class AudioManager {
         const bassOsc = this.ctx.createOscillator();
         const bassGain = this.ctx.createGain();
         const bassFilter = this.ctx.createBiquadFilter();
-
         bassOsc.type = 'triangle';
         bassOsc.frequency.setValueAtTime(chordNotes[0], now);
-
         bassFilter.type = 'lowpass';
         bassFilter.frequency.setValueAtTime(140, now);
-
         bassGain.gain.setValueAtTime(0.001, now);
-        bassGain.gain.linearRampToValueAtTime(0.35, now + 0.05);
+        bassGain.gain.linearRampToValueAtTime(0.3, now + 0.05);
         bassGain.gain.exponentialRampToValueAtTime(0.001, now + stepDuration * 2.5);
-
         bassOsc.connect(bassFilter);
         bassFilter.connect(bassGain);
         bassGain.connect(this.bgmGain);
-
         bassOsc.start(now);
         bassOsc.stop(now + stepDuration * 2.6);
       }
@@ -182,23 +204,18 @@ class AudioManager {
           const padOsc = this.ctx.createOscillator();
           const padGain = this.ctx.createGain();
           const padFilter = this.ctx.createBiquadFilter();
-
           padOsc.type = 'sawtooth';
           padOsc.frequency.setValueAtTime(freq * (1 + (idx === 0 ? 0.002 : -0.002)), now);
-
           padFilter.type = 'lowpass';
           padFilter.frequency.setValueAtTime(320, now);
           padFilter.Q.setValueAtTime(2, now);
-
           const padLen = stepDuration * 7.5;
           padGain.gain.setValueAtTime(0.001, now);
-          padGain.gain.linearRampToValueAtTime(0.09, now + 0.8);
+          padGain.gain.linearRampToValueAtTime(0.08, now + 0.8);
           padGain.gain.exponentialRampToValueAtTime(0.001, now + padLen);
-
           padOsc.connect(padFilter);
           padFilter.connect(padGain);
           padGain.connect(this.bgmGain);
-
           padOsc.start(now);
           padOsc.stop(now + padLen + 0.1);
         });
@@ -207,41 +224,100 @@ class AudioManager {
       // 3. Spy Bell Arpeggiator Motif (soft, subtle espionage notes)
       const arpPattern = [0, 2, 4, 3, 1, 3, 2, 4];
       const noteOffset = arpPattern[this.bgmStep % 8];
-      if (this.bgmStep % 2 === 0 && Math.random() > 0.25) {
+      if (this.bgmStep % 2 === 0 && Math.random() > 0.3) {
         const leadFreq = chordNotes[noteOffset % chordNotes.length] * 2;
         const arpOsc = this.ctx.createOscillator();
         const arpGain = this.ctx.createGain();
-
         arpOsc.type = 'sine';
         arpOsc.frequency.setValueAtTime(leadFreq, now);
-
         arpGain.gain.setValueAtTime(0.001, now);
-        arpGain.gain.linearRampToValueAtTime(0.12, now + 0.02);
+        arpGain.gain.linearRampToValueAtTime(0.1, now + 0.02);
         arpGain.gain.exponentialRampToValueAtTime(0.0001, now + stepDuration * 0.9);
-
         arpOsc.connect(arpGain);
         arpGain.connect(this.bgmGain);
-
         arpOsc.start(now);
         arpOsc.stop(now + stepDuration);
       }
+    } catch {
+      // ignore
+    }
 
-      // 4. Subtle Cyber Tick / Rhythm Heartbeat (tactical suspense click)
-      if (this.bgmStep % 2 === 1) {
-        const tickOsc = this.ctx.createOscillator();
-        const tickGain = this.ctx.createGain();
-        tickOsc.type = 'sine';
-        tickOsc.frequency.setValueAtTime(1200, now);
-        tickOsc.frequency.exponentialRampToValueAtTime(200, now + 0.03);
+    this.bgmStep = (this.bgmStep + 1) % 64;
+    this.bgmTimer = window.setTimeout(() => {
+      this.scheduleBgmLoop();
+    }, stepDuration * 1000);
+  }
 
-        tickGain.gain.setValueAtTime(0.02, now);
-        tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
+  // MODE 2: Tense Espionage Discussion (Dark, Heartbeat, Clock, Suspense)
+  private playSuspenseBgmStep() {
+    if (!this.ctx || !this.bgmGain) return;
+    const bpm = 94; // slightly faster and tense
+    const stepDuration = 60 / bpm / 2; // eighth notes (~0.319s)
 
-        tickOsc.connect(tickGain);
-        tickGain.connect(this.bgmGain);
+    // Menacing chromatic progressions (D minor - Eb diminished - D minor - C# diminished)
+    const chords = [
+      [73.42, 146.83, 220.0, 261.63], // Dm
+      [77.78, 155.56, 233.08, 311.13], // Eb dim
+      [73.42, 146.83, 220.0, 293.66], // Dm maj7 feel
+      [69.30, 138.59, 207.65, 277.18]  // C# dim (extreme tension)
+    ];
 
-        tickOsc.start(now);
-        tickOsc.stop(now + 0.04);
+    const currentChordIdx = Math.floor((this.bgmStep % 32) / 8);
+    const chordNotes = chords[currentChordIdx];
+    const now = this.ctx.currentTime;
+
+    try {
+      // 1. Tense Ostinato Bass Pulse on every quarter beat (0, 2, 4, 6...)
+      if (this.bgmStep % 2 === 0) {
+        const bassOsc = this.ctx.createOscillator();
+        const bassGain = this.ctx.createGain();
+        const bassFilter = this.ctx.createBiquadFilter();
+        bassOsc.type = 'sawtooth';
+        bassOsc.frequency.setValueAtTime(chordNotes[0], now);
+        bassFilter.type = 'lowpass';
+        bassFilter.frequency.setValueAtTime(110, now);
+        bassGain.gain.setValueAtTime(0.001, now);
+        bassGain.gain.linearRampToValueAtTime(0.28, now + 0.02);
+        bassGain.gain.exponentialRampToValueAtTime(0.001, now + stepDuration * 1.2);
+        bassOsc.connect(bassFilter);
+        bassFilter.connect(bassGain);
+        bassGain.connect(this.bgmGain);
+        bassOsc.start(now);
+        bassOsc.stop(now + stepDuration * 1.3);
+      }
+
+      // 2. High-tension Clock Tick-Tock on every step (syncopated cyber tick)
+      const tickOsc = this.ctx.createOscillator();
+      const tickGain = this.ctx.createGain();
+      tickOsc.type = 'sine';
+      const tickFreq = (this.bgmStep % 2 === 0) ? 1400 : 900;
+      tickOsc.frequency.setValueAtTime(tickFreq, now);
+      tickOsc.frequency.exponentialRampToValueAtTime(240, now + 0.025);
+      tickGain.gain.setValueAtTime(0.035, now);
+      tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+      tickOsc.connect(tickGain);
+      tickGain.connect(this.bgmGain);
+      tickOsc.start(now);
+      tickOsc.stop(now + 0.035);
+
+      // 3. Dark cinematic drone / tension sting on chord changes
+      if (this.bgmStep % 8 === 0) {
+        const droneOsc = this.ctx.createOscillator();
+        const droneGain = this.ctx.createGain();
+        const droneFilter = this.ctx.createBiquadFilter();
+        droneOsc.type = 'sawtooth';
+        droneOsc.frequency.setValueAtTime(chordNotes[1], now);
+        droneFilter.type = 'lowpass';
+        droneFilter.frequency.setValueAtTime(260, now);
+        droneFilter.Q.setValueAtTime(3, now);
+        droneGain.gain.setValueAtTime(0.001, now);
+        droneGain.gain.linearRampToValueAtTime(0.12, now + 0.2);
+        droneGain.gain.exponentialRampToValueAtTime(0.001, now + stepDuration * 7.5);
+        droneOsc.connect(droneFilter);
+        droneFilter.connect(droneGain);
+        droneGain.connect(this.bgmGain);
+        droneOsc.start(now);
+        droneOsc.stop(now + stepDuration * 7.8);
       }
     } catch {
       // ignore
@@ -286,9 +362,369 @@ class AudioManager {
     }
   }
 
-  // Soft futuristic UI click / tap
+  // ==========================================
+  // 🎯 JUICY TACTILE CLICK FEEDBACK FOR BUTTONS
+  // ==========================================
   public playClick() {
-    this.playTone(750, 'sine', 0.04, 0.25);
+    this.playTactileClick();
+  }
+
+  public playTactileClick() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Transient 1: High crisp pop (mechanical tactile switch)
+      const osc1 = this.ctx.createOscillator();
+      const gain1 = this.ctx.createGain();
+      osc1.type = 'triangle';
+      osc1.frequency.setValueAtTime(1450, now);
+      osc1.frequency.exponentialRampToValueAtTime(320, now + 0.028);
+
+      gain1.gain.setValueAtTime(this.volume * 0.3, now);
+      gain1.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+
+      osc1.connect(gain1);
+      gain1.connect(this.ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.035);
+
+      // Transient 2: Warm body tap
+      const osc2 = this.ctx.createOscillator();
+      const gain2 = this.ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(190, now);
+      osc2.frequency.exponentialRampToValueAtTime(80, now + 0.025);
+
+      gain2.gain.setValueAtTime(this.volume * 0.22, now);
+      gain2.gain.exponentialRampToValueAtTime(0.0001, now + 0.03);
+
+      osc2.connect(gain2);
+      gain2.connect(this.ctx.destination);
+      osc2.start(now);
+      osc2.stop(now + 0.035);
+
+      this.triggerHaptic('light');
+    } catch {
+      // ignore
+    }
+  }
+
+  // Card Flip 3D Whoosh & Mechanical Snap
+  public playCardFlip() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Air whoosh sweep
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      const filter = this.ctx.createBiquadFilter();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(260, now);
+      osc.frequency.exponentialRampToValueAtTime(850, now + 0.08);
+      osc.frequency.exponentialRampToValueAtTime(350, now + 0.16);
+
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(650, now);
+      filter.Q.setValueAtTime(2.5, now);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(this.volume * 0.28, now + 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+
+      this.triggerHaptic('medium');
+    } catch {
+      // ignore
+    }
+  }
+
+  // ==========================================
+  // ⏱️ TIMER SFX: REAL TENSION COUNTDOWN TICKS
+  // ==========================================
+  public playCountdownTick(secondsLeft: number) {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      if (secondsLeft <= 5 && secondsLeft > 0) {
+        // High Urgency: Escalating Pitch & Double Stroke
+        const pitchMap: Record<number, number> = {
+          5: 680,
+          4: 820,
+          3: 990,
+          2: 1220,
+          1: 1550
+        };
+        const freq = pitchMap[secondsLeft] || 900;
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, now);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.6, now + 0.06);
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(2400, now);
+
+        gain.gain.setValueAtTime(this.volume * 0.45, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.08);
+
+        this.triggerHaptic('heavy');
+      } else if (secondsLeft <= 10 && secondsLeft > 5) {
+        // Medium Urgency: Alternating Tick-Tock
+        const isTick = secondsLeft % 2 === 0;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(isTick ? 850 : 620, now);
+        osc.frequency.exponentialRampToValueAtTime(isTick ? 320 : 250, now + 0.04);
+
+        gain.gain.setValueAtTime(this.volume * 0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.05);
+
+        this.triggerHaptic('light');
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Timer run out buzzer / alarm
+  public playTimeoutBuzzer() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      [0, 0.16].forEach(offset => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(240, now + offset);
+        gain.gain.setValueAtTime(this.volume * 0.4, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.14);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.15);
+      });
+      this.triggerHaptic('heavy');
+    } catch {
+      // ignore
+    }
+  }
+
+  // ==========================================
+  // 🏆 VICTORY & REVEAL INTERACTIVE AUDIO
+  // ==========================================
+  // Epic Multi-layered Victory Fanfare
+  public playVictoryCelebration() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+
+      // Major Triad Arpeggio Fanfare (C5 -> E5 -> G5 -> C6 -> High G6 shimmer)
+      const notes = [
+        { f: 523.25, delay: 0, d: 0.18 },
+        { f: 659.25, delay: 110, d: 0.18 },
+        { f: 783.99, delay: 220, d: 0.22 },
+        { f: 1046.50, delay: 330, d: 0.45 },
+        { f: 1567.98, delay: 480, d: 0.6 }
+      ];
+
+      notes.forEach(n => {
+        setTimeout(() => this.playTone(n.f, 'sine', n.d, 0.48), n.delay);
+      });
+
+      // Warm background brass chord
+      setTimeout(() => {
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime;
+        [261.63, 329.63, 392.00].forEach(freq => {
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, now);
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.linearRampToValueAtTime(this.volume * 0.25, now + 0.1);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now);
+          osc.stop(now + 0.85);
+        });
+      }, 340);
+
+      if ('vibrate' in navigator) {
+        try {
+          navigator.vibrate([60, 40, 100, 50, 180]);
+        } catch {}
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Cinematic Dark Spy Reveal / Catching Sting
+  public playSpyRevealSting() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // 1. Deep Sub-Bass Impact
+      const bassOsc = this.ctx.createOscillator();
+      const bassGain = this.ctx.createGain();
+      bassOsc.type = 'sawtooth';
+      bassOsc.frequency.setValueAtTime(95, now);
+      bassOsc.frequency.exponentialRampToValueAtTime(32, now + 0.8);
+      bassGain.gain.setValueAtTime(this.volume * 0.5, now);
+      bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+      bassOsc.connect(bassGain);
+      bassGain.connect(this.ctx.destination);
+      bassOsc.start(now);
+      bassOsc.stop(now + 0.9);
+
+      // 2. Diminished Suspense Stabs (Eb4 - A4 tritone espionage signature)
+      const stabs = [
+        { f: 311.13, delay: 0 },
+        { f: 440.00, delay: 60 },
+        { f: 293.66, delay: 140 },
+        { f: 415.30, delay: 210 }
+      ];
+
+      stabs.forEach(s => {
+        setTimeout(() => {
+          this.playTone(s.f, 'sawtooth', 0.6, 0.35);
+        }, s.delay);
+      });
+
+      // 3. Cyber Static Glitch Sweep
+      this.playGlitchStatic();
+
+      if ('vibrate' in navigator) {
+        try {
+          navigator.vibrate([100, 50, 220]);
+        } catch {}
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Space-Fleet Crew Authorization Chime
+  public playCrewRevealChirp() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Ascending telemetry harmonics
+      const freqs = [587.33, 880.00, 1174.66]; // D5, A5, D6
+      freqs.forEach((f, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now + idx * 0.07);
+        gain.gain.setValueAtTime(0.001, now + idx * 0.07);
+        gain.gain.linearRampToValueAtTime(this.volume * 0.35, now + idx * 0.07 + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.07 + 0.25);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + idx * 0.07);
+        osc.stop(now + idx * 0.07 + 0.27);
+      });
+
+      this.triggerHaptic('light');
+    } catch {
+      // ignore
+    }
+  }
+
+  // Airlock Door Slide & Pneumatic Release Sound
+  public playAirlockDoor() {
+    if (this.muted || this.volume <= 0) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Pneumatic hiss (filtered noise)
+      const bufferSize = this.ctx.sampleRate * 0.35;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1200, now);
+      filter.frequency.exponentialRampToValueAtTime(300, now + 0.35);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(this.volume * 0.32, now + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.ctx.destination);
+      noise.start(now);
+
+      // Low mechanical motor rumble
+      const osc = this.ctx.createOscillator();
+      const oscGain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(110, now);
+      osc.frequency.linearRampToValueAtTime(65, now + 0.4);
+      oscGain.gain.setValueAtTime(this.volume * 0.25, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+      osc.connect(oscGain);
+      oscGain.connect(this.ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.45);
+
+      this.triggerHaptic('medium');
+    } catch {
+      // ignore
+    }
   }
 
   // Playful, soft bubble pop for speech bubbles
@@ -315,57 +751,8 @@ class AudioManager {
     }
   }
 
-  // Gentle, soothing heartbeat/digital pulse for timer
   public playTimerPulse(isUrgent: boolean = false) {
-    if (this.muted || this.volume <= 0) return;
-    try {
-      this.initCtx();
-      if (!this.ctx) return;
-      const now = this.ctx.currentTime;
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(isUrgent ? 280 : 180, now);
-      osc.frequency.exponentialRampToValueAtTime(isUrgent ? 140 : 90, now + 0.1);
-      const vol = this.volume * (isUrgent ? 0.35 : 0.18);
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.linearRampToValueAtTime(vol, now + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + (isUrgent ? 0.14 : 0.18));
-      osc.connect(gain);
-      gain.connect(this.ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.2);
-    } catch {
-      // ignore
-    }
-  }
-
-  // Cinematic sci-fi spy reveal chord
-  public playSpyChord() {
-    if (this.muted || this.volume <= 0) return;
-    const chords = [
-      { f: 146.83, delay: 0, d: 0.8 }, // D3
-      { f: 220.00, delay: 60, d: 0.7 }, // A3
-      { f: 261.63, delay: 120, d: 0.9 }, // C4
-      { f: 311.13, delay: 180, d: 1.1 }  // Eb4 (Diminished suspense)
-    ];
-    chords.forEach(c => {
-      setTimeout(() => this.playTone(c.f, 'triangle', c.d, 0.4), c.delay);
-    });
-  }
-
-  // Celestial cosmic victory chime
-  public playVictoryChime() {
-    if (this.muted || this.volume <= 0) return;
-    const notes = [
-      { f: 523.25, delay: 0 },   // C5
-      { f: 659.25, delay: 90 },  // E5
-      { f: 783.99, delay: 180 }, // G5
-      { f: 1046.50, delay: 270 } // C6
-    ];
-    notes.forEach(n => {
-      setTimeout(() => this.playTone(n.f, 'sine', 0.35, 0.45), n.delay);
-    });
+    this.playCountdownTick(isUrgent ? 3 : 8);
   }
 
   // Sabotage scan sweep sound
@@ -399,7 +786,6 @@ class AudioManager {
       this.initCtx();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      // High-low alarm sweep
       [0, 0.4, 0.8].forEach(offset => {
         if (!this.ctx) return;
         const osc = this.ctx.createOscillator();
@@ -464,15 +850,12 @@ class AudioManager {
     }
   }
 
-  // Realistic double-pulse heartbeat (Lub-Dub) with haptic feedback for tense moments
   public playHeartbeat(isUrgent: boolean = false) {
     if (this.muted || this.volume <= 0) return;
     try {
       this.initCtx();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-
-      // Pulse 1: "Lub"
       const osc1 = this.ctx.createOscillator();
       const gain1 = this.ctx.createGain();
       osc1.type = 'sine';
@@ -487,7 +870,6 @@ class AudioManager {
       osc1.start(now);
       osc1.stop(now + 0.11);
 
-      // Pulse 2: "Dub" (slightly softer, 110ms later)
       const osc2 = this.ctx.createOscillator();
       const gain2 = this.ctx.createGain();
       osc2.type = 'sine';
@@ -514,7 +896,6 @@ class AudioManager {
     }
   }
 
-  // Futuristic biometric fingerprint decryption chirp
   public playBiometricScan() {
     if (this.muted || this.volume <= 0) return;
     try {
@@ -539,15 +920,12 @@ class AudioManager {
     }
   }
 
-  // Cinematic space airlock depressurization & ejection sound
   public playAirlockEjection() {
     if (this.muted || this.volume <= 0) return;
     try {
       this.initCtx();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-
-      // Deep rumble tone dropping into void
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sawtooth';
@@ -560,7 +938,6 @@ class AudioManager {
       gain.connect(this.ctx.destination);
       osc.start(now);
       osc.stop(now + 1.35);
-
       if ('vibrate' in navigator) {
         try {
           navigator.vibrate([120, 60, 180]);
@@ -573,14 +950,13 @@ class AudioManager {
     }
   }
 
-  // Heroic match found fanfare (PUBG style)
   public playMatchFound() {
     if (this.muted || this.volume <= 0) return;
     const fanfare: [number, number, number][] = [
-      [440, 0, 0.12],   // A4
-      [554, 110, 0.12], // C#5
-      [659, 220, 0.14], // E5
-      [880, 360, 0.35]  // A5
+      [440, 0, 0.12],
+      [554, 110, 0.12],
+      [659, 220, 0.14],
+      [880, 360, 0.35]
     ];
     this.playChime(fanfare, 'triangle');
     if ('vibrate' in navigator) {
@@ -592,15 +968,12 @@ class AudioManager {
     }
   }
 
-  // Laser prison cage slam down over the spy
   public playCageSlam() {
     if (this.muted || this.volume <= 0) return;
     try {
       this.initCtx();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-
-      // Laser zap descending
       const osc1 = this.ctx.createOscillator();
       const gain1 = this.ctx.createGain();
       osc1.type = 'sawtooth';
@@ -613,7 +986,6 @@ class AudioManager {
       osc1.start(now);
       osc1.stop(now + 0.17);
 
-      // Heavy metal cage crash impact
       const osc2 = this.ctx.createOscillator();
       const gain2 = this.ctx.createGain();
       osc2.type = 'square';
@@ -639,14 +1011,13 @@ class AudioManager {
     }
   }
 
-  // Goofy sad crying / weeping chime for wrongly accused innocent
   public playSadTearsSound() {
     if (this.muted || this.volume <= 0) return;
     const sadNotes: [number, number, number][] = [
-      [493.88, 0, 0.22],   // B4
-      [440.00, 160, 0.25], // A4
-      [392.00, 320, 0.3],  // G4
-      [329.63, 480, 0.5]   // E4 (sad resolution)
+      [493.88, 0, 0.22],
+      [440.00, 160, 0.25],
+      [392.00, 320, 0.3],
+      [329.63, 480, 0.5]
     ];
     this.playChime(sadNotes, 'sine');
     if ('vibrate' in navigator) {

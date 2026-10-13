@@ -122,3 +122,41 @@
   animation: scanlineSweep 4s linear infinite;
 }
 
+
+/* 3D Card Flip & Juice Animations */
+.perspective-1000 {
+  perspective: 1000px;
+}
+.transform-style-preserve-3d {
+  transform-style: preserve-3d;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+@keyframes glitchFlicker {
+  0% { transform: translate(0) scale(1); filter: hue-rotate(0deg); }
+  20% { transform: translate(-2px, 1px) scale(1.01); filter: hue-rotate(15deg); }
+  40% { transform: translate(2px, -1px) scale(0.99); filter: hue-rotate(-15deg); }
+  60% { transform: translate(-1px, 2px) scale(1.02); filter: hue-rotate(30deg); }
+  80% { transform: translate(1px, -2px) scale(1); filter: hue-rotate(0deg); }
+  100% { transform: translate(0) scale(1); }
+}
+
+.animate-glitch {
+  animation: glitchFlicker 1.8s infinite ease-in-out;
+}
+
+@keyframes redLaserSweep {
+  0% { top: 0%; opacity: 0.8; }
+  50% { top: 96%; opacity: 1; }
+  100% { top: 0%; opacity: 0.8; }
+}
+
+.animate-laser-sweep {
+  animation: redLaserSweep 1.8s infinite ease-in-out;
+}

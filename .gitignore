@@ -7,3 +7,4 @@ coverage/
 *.log
 .env*
 !.env.example
+src_backup_audio_polish_checkpoint/
