@@ -197,12 +197,15 @@ jobs:
             --latest
 
       - name: Optional upload to itch.io via Butler
-        if: ${{ secrets.BUTLER_API_KEY != '' && secrets.ITCH_TARGET != '' }}
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
           ITCH_TARGET: ${{ secrets.ITCH_TARGET }}
         run: |
-          curl -L -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
-          unzip -q butler.zip -d butler-bin
-          chmod +x butler-bin/butler
-          ./butler-bin/butler push "release-apk/SpyStation.apk" "$ITCH_TARGET" --userversion "$APP_VERSION"
+          if [ -n "$BUTLER_API_KEY" ] && [ -n "$ITCH_TARGET" ]; then
+            curl -L -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+            unzip -q butler.zip -d butler-bin
+            chmod +x butler-bin/butler
+            ./butler-bin/butler push "release-apk/SpyStation.apk" "$ITCH_TARGET" --userversion "$APP_VERSION"
+          else
+            echo "Skipping itch.io butler upload (BUTLER_API_KEY / ITCH_TARGET secrets not configured)."
+          fi
