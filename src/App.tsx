@@ -41,9 +41,36 @@ import { HostJoinApprovalModal } from './components/HostJoinApprovalModal';
 import { ApplicantWaitingApprovalModal } from './components/ApplicantWaitingApprovalModal';
 import { QuickMatchModal } from './components/QuickMatchModal';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
-import { generateSmartBotClue, generateSmartBotVote, generateUniqueBotName } from './aiBot';
+import {
+  generateBotSilentDrawing,
+  generateSmartBotClue,
+  generateSmartBotVote,
+  generateUniqueBotName
+} from './aiBot';
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { MandatoryUpdateModal } from './components/MandatoryUpdateModal';
+import {
+  BLACKOUT_DURATION_MS,
+  DEFAULT_VOTE_SECONDS,
+  areAllEligibleVotesSubmitted,
+  computeInitialGameSetup,
+  computeNextTurnState,
+  getEffectiveTurnSeconds,
+  getEligibleVoters,
+  isBotPlayer,
+  resolveVoteOutcome,
+  shouldResetGameOverToLobby,
+  shouldTriggerBlackout,
+  validateGameStart
+} from './gameEngine';
+
+function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  Object.entries(obj).forEach(([key, val]) => {
+    out[key] = val === undefined ? null : val;
+  });
+  return out;
+}
 
 const CURRENT_APP_VERSION = '2.5.1';
 const ROUND_ANNOUNCE_MS = 2800;
@@ -162,17 +189,28 @@ export default function App() {
     type: 'normal' | 'danger' | 'success';
   } | null>(null);
 
-  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roundAnnounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomListenerRef = useRef<(() => void) | null>(null);
   const annListenerRef = useRef<(() => void) | null>(null);
-  const turnIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const voteIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const watchdogIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const turnIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voteIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isTurnTickRunningRef = useRef(false);
+  const isVoteTickRunningRef = useRef(false);
+  const purgedRoomsRef = useRef<Map<string, number>>(new Map());
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const lastRoomSnapshotRef = useRef<RoomData | null>(null);
   const pendingReqCleanupsRef = useRef<(() => void) | null>(null);
   const activeFriendListenersRef = useRef<(() => void)[]>([]);
   const scheduledBotVotesRef = useRef<Set<string>>(new Set());
+  const profileNameRef = useRef(profileName);
+  const profileAvatarRef = useRef(profileAvatar);
+
+  useEffect(() => {
+    profileNameRef.current = profileName;
+    profileAvatarRef.current = profileAvatar;
+  }, [profileName, profileAvatar]);
 
   const t = dictionary[lang];
 
@@ -261,59 +299,82 @@ export default function App() {
     }
   };
 
-  // User Data & Presence
+  // User Data & Presence (with proper listener cleanup on logout/unmount)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setFriends({});
+      setFriendStatuses({});
+      setFriendRequests({});
+      setSentRequests({});
+      setRoomInvites({});
+      setPublicRooms({});
+      return;
+    }
+
+    let isCancelled = false;
 
     // Realtime Profile Sync
     const profileRef = db.ref(`users/${currentUser.uid}`);
-    profileRef.on('value', snap => {
+    const onProfileChange = (snap: firebase.database.DataSnapshot) => {
       const data = snap.val();
       if (data) {
         if (data.name) setProfileName(data.name);
         if (data.avatar) setProfileAvatar(data.avatar);
       }
-    });
+    };
+    profileRef.on('value', onProfileChange);
 
     // Presence
     const statusRef = db.ref(`status/${currentUser.uid}`);
-    db.ref('.info/connected').on('value', snap => {
+    const connectedRef = db.ref('.info/connected');
+    const onConnectedChange = (snap: firebase.database.DataSnapshot) => {
       if (snap.val() === true) {
-        statusRef.onDisconnect().set({
-          state: 'offline',
-          last_changed: firebase.database.ServerValue.TIMESTAMP
-        }).then(() => {
-          statusRef.set({
-            state: 'online',
+        statusRef
+          .onDisconnect()
+          .set({
+            state: 'offline',
             last_changed: firebase.database.ServerValue.TIMESTAMP
-          });
-        });
+          })
+          .then(() => {
+            if (!isCancelled) {
+              statusRef.set({
+                state: 'online',
+                last_changed: firebase.database.ServerValue.TIMESTAMP
+              });
+            }
+          })
+          .catch(() => {});
       }
-    });
+    };
+    connectedRef.on('value', onConnectedChange);
 
     // Score / XP
     const scoreRef = db.ref(`users/${currentUser.uid}/score`);
-    scoreRef.on('value', snap => {
+    const onScoreChange = (snap: firebase.database.DataSnapshot) => {
       setUserXp(snap.val() || 0);
-    });
+    };
+    scoreRef.on('value', onScoreChange);
 
     // Friend code lookup & migration
     const codeRef = db.ref(`users/${currentUser.uid}/friendCode`);
     codeRef.once('value').then(async snap => {
-      let code = snap.val();
+      if (isCancelled) return;
+      const code = snap.val();
       if (!code || code.length !== 8) {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         let candidate = '';
         let claimed = false;
         let tries = 0;
-        while (!claimed && tries < 25) {
+        while (!claimed && tries < 25 && !isCancelled) {
           tries++;
           candidate = '';
           for (let i = 0; i < 8; i++) candidate += chars.charAt(Math.floor(Math.random() * chars.length));
-          const res = await db.ref(`friendCodes/${candidate}`).transaction(cur => (cur === null ? currentUser.uid : undefined));
+          const res = await db
+            .ref(`friendCodes/${candidate}`)
+            .transaction(cur => (cur === null ? currentUser.uid : undefined));
           if (res.committed) claimed = true;
         }
-        if (claimed) {
+        if (claimed && !isCancelled) {
           await db.ref(`users/${currentUser.uid}/friendCode`).set(candidate);
           if (code) await db.ref(`friendCodes/${code}`).remove();
           setMyFriendCode(candidate);
@@ -321,19 +382,17 @@ export default function App() {
       } else {
         setMyFriendCode(code);
       }
-    });
+    }).catch(() => {});
 
     // Friends list
     const friendsRef = db.ref(`users/${currentUser.uid}/friends`);
-    friendsRef.on('value', snap => {
+    const onFriendsChange = (snap: firebase.database.DataSnapshot) => {
       const f = snap.val() || {};
       setFriends(f);
 
-      // Clean up previous child listeners to prevent memory leaks
       activeFriendListenersRef.current.forEach(cleanup => cleanup());
       activeFriendListenersRef.current = [];
 
-      // Listen to friends' presence statuses and real-time profile updates
       Object.keys(f).forEach(fUid => {
         const sRef = db.ref(`status/${fUid}`);
         const onStatus = (s: firebase.database.DataSnapshot) => {
@@ -346,7 +405,6 @@ export default function App() {
         sRef.on('value', onStatus);
         activeFriendListenersRef.current.push(() => sRef.off('value', onStatus));
 
-        // Real-time friend profile sync (name/avatar updates automatically for everyone)
         const uRef = db.ref(`users/${fUid}`);
         const onProfile = (uSnap: firebase.database.DataSnapshot) => {
           const uData = uSnap.val();
@@ -368,25 +426,65 @@ export default function App() {
         uRef.on('value', onProfile);
         activeFriendListenersRef.current.push(() => uRef.off('value', onProfile));
       });
-    });
+    };
+    friendsRef.on('value', onFriendsChange);
 
     // Sent requests
-    db.ref(`users/${currentUser.uid}/sentRequests`).on('value', snap => {
+    const sentReqRef = db.ref(`users/${currentUser.uid}/sentRequests`);
+    const onSentReq = (snap: firebase.database.DataSnapshot) => {
       setSentRequests(snap.val() || {});
-    });
+    };
+    sentReqRef.on('value', onSentReq);
 
     // Incoming friend requests
-    db.ref(`users/${currentUser.uid}/friendRequests`).on('value', snap => {
+    const friendReqRef = db.ref(`users/${currentUser.uid}/friendRequests`);
+    const onFriendReq = (snap: firebase.database.DataSnapshot) => {
       setFriendRequests(snap.val() || {});
-    });
+    };
+    friendReqRef.on('value', onFriendReq);
 
     // Room invites
-    db.ref(`users/${currentUser.uid}/roomInvites`).on('value', snap => {
+    const invitesRef = db.ref(`users/${currentUser.uid}/roomInvites`);
+    const onInvites = (snap: firebase.database.DataSnapshot) => {
       setRoomInvites(snap.val() || {});
-    });
+    };
+    invitesRef.on('value', onInvites);
 
-    // Public rooms & Bot Host Auto-Purge
-    db.ref('spy_rooms').on('value', snap => {
+    // Check saved room code on initial auth restore
+    const saved = localStorage.getItem('spy_station_room');
+    if (saved) {
+      db.ref(`spy_rooms/${saved}`).once('value', s => {
+        if (isCancelled) return;
+        if (s.exists()) {
+          joinRoom(saved);
+        } else {
+          localStorage.removeItem('spy_station_room');
+        }
+      });
+    }
+
+    return () => {
+      isCancelled = true;
+      profileRef.off('value', onProfileChange);
+      connectedRef.off('value', onConnectedChange);
+      scoreRef.off('value', onScoreChange);
+      friendsRef.off('value', onFriendsChange);
+      sentReqRef.off('value', onSentReq);
+      friendReqRef.off('value', onFriendReq);
+      invitesRef.off('value', onInvites);
+      activeFriendListenersRef.current.forEach(cleanup => cleanup());
+      activeFriendListenersRef.current = [];
+    };
+  }, [currentUser]);
+
+  // Scoped Public Stations listener: only active while browsing Stations tab (not in-game)
+  useEffect(() => {
+    if (!currentUser || currentRoomCode || activeTab !== 'stations') {
+      return;
+    }
+
+    const roomsRef = db.ref('spy_rooms');
+    const onRoomsChange = (snap: firebase.database.DataSnapshot) => {
       const all = snap.val() || {};
       const validRooms: Record<string, RoomData> = {};
       const now = Date.now();
@@ -396,7 +494,7 @@ export default function App() {
         if (!r) return;
         const players = r.players || {};
         const pList = Object.values(players) as PlayerData[];
-        const humanList = pList.filter(p => !p.isBot && !p.uid.startsWith('bot_'));
+        const humanList = pList.filter(p => !isBotPlayer(p));
         const hostUid = r.hostUid || '';
         const hostPlayer = hostUid ? players[hostUid] : null;
         const isBotHost = hostUid.startsWith('bot_') || hostPlayer?.isBot === true;
@@ -404,15 +502,22 @@ export default function App() {
         const createdAt = typeof r.createdAt === 'number' ? r.createdAt : now;
         const ageMs = now - createdAt;
 
-        // If a bot is the host, purge it permanently
+        const lastPurge = purgedRoomsRef.current.get(code) || 0;
+        const canAttemptPurge = now - lastPurge > 10000;
+
         if (isBotHost) {
-          db.ref(`spy_rooms/${code}`).remove().catch(() => {});
+          if (canAttemptPurge) {
+            purgedRoomsRef.current.set(code, now);
+            db.ref(`spy_rooms/${code}`).remove().catch(() => {});
+          }
           return;
         }
 
-        // If no humans exist in the room and it's older than 25 seconds, clean it up
         if (humanList.length === 0 && ageMs > 25000) {
-          db.ref(`spy_rooms/${code}`).remove().catch(() => {});
+          if (canAttemptPurge) {
+            purgedRoomsRef.current.set(code, now);
+            db.ref(`spy_rooms/${code}`).remove().catch(() => {});
+          }
           return;
         }
 
@@ -420,21 +525,15 @@ export default function App() {
           validRooms[code] = r;
         }
       });
-      setPublicRooms(validRooms);
-    });
 
-    // Check saved room code
-    const saved = localStorage.getItem('spy_station_room');
-    if (saved) {
-      db.ref(`spy_rooms/${saved}`).once('value', s => {
-        if (s.exists()) {
-          joinRoom(saved);
-        } else {
-          localStorage.removeItem('spy_station_room');
-        }
-      });
-    }
-  }, [currentUser]);
+      setPublicRooms(validRooms);
+    };
+
+    roomsRef.on('value', onRoomsChange);
+    return () => {
+      roomsRef.off('value', onRoomsChange);
+    };
+  }, [currentUser, currentRoomCode, activeTab]);
 
   // Handle Host watchdog
   const isHost = !!(roomData && currentUser && roomData.hostUid === currentUser.uid);
@@ -514,11 +613,19 @@ export default function App() {
     };
   }, [currentRoomCode, currentUser]);
 
-  // Timer sync for Host
+  // Timer sync for Host (re-entrancy guarded, pauses during ejection cinematic)
   useEffect(() => {
     if (!isHost || !currentRoomCode || !roomData) {
-      if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
-      if (voteIntervalRef.current) clearInterval(voteIntervalRef.current);
+      if (turnIntervalRef.current) {
+        clearInterval(turnIntervalRef.current);
+        turnIntervalRef.current = null;
+      }
+      if (voteIntervalRef.current) {
+        clearInterval(voteIntervalRef.current);
+        voteIntervalRef.current = null;
+      }
+      isTurnTickRunningRef.current = false;
+      isVoteTickRunningRef.current = false;
       return;
     }
 
@@ -526,41 +633,57 @@ export default function App() {
     if (roomData.status === 'playing') {
       if (!turnIntervalRef.current) {
         turnIntervalRef.current = setInterval(async () => {
-          const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-          const room = snap.val();
-          if (!room || room.status !== 'playing') {
-            if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
-            turnIntervalRef.current = null;
-            return;
-          }
-          const defaultTurnSeconds = room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20);
-          const left = room.turnTimeLeft != null ? room.turnTimeLeft : defaultTurnSeconds;
-
-          // Blackout Protocol Trigger Engine (Host Authoritative)
-          // Triggers reliably once in every round at a dramatic moment with adequate turn time
-          if (room.gameMode === 'blackout' && !room.blackoutActive) {
-            const currentRound = room.round || 1;
-            const lastBO = room.lastBlackoutRound || 0;
-            if (lastBO !== currentRound && left >= 6) {
-              const halfTurn = Math.max(6, Math.floor(defaultTurnSeconds / 2));
-              if (left === halfTurn) {
-                db.ref(`spy_rooms/${currentRoomCode}`).update({
-                  blackoutActive: true,
-                  lastBlackoutRound: currentRound
-                });
-                setTimeout(() => {
-                  db.ref(`spy_rooms/${currentRoomCode}`).update({
-                    blackoutActive: false
-                  }).catch(() => {});
-                }, 3500);
+          if (isTurnTickRunningRef.current) return;
+          isTurnTickRunningRef.current = true;
+          try {
+            const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
+            const room = snap.val() as RoomData | null;
+            if (!room || room.status !== 'playing') {
+              if (turnIntervalRef.current) {
+                clearInterval(turnIntervalRef.current);
+                turnIntervalRef.current = null;
               }
+              return;
             }
-          }
 
-          if (left <= 1) {
-            advanceTurn(room.turnIndex, true);
-          } else {
-            db.ref(`spy_rooms/${currentRoomCode}/turnTimeLeft`).set(left - 1);
+            const now = Date.now();
+
+            // Clear blackout cleanly when duration expires
+            if (room.blackoutActive && (!room.blackoutEndsAt || now >= room.blackoutEndsAt)) {
+              await db.ref(`spy_rooms/${currentRoomCode}`).update({
+                blackoutActive: false,
+                blackoutEndsAt: null
+              });
+            }
+
+            // Pause turn countdown while cinematic ejection overlay is playing
+            if (room.ejectionEndsAt && now < room.ejectionEndsAt) {
+              return;
+            } else if (room.ejectionEndsAt && now >= room.ejectionEndsAt) {
+              await db.ref(`spy_rooms/${currentRoomCode}/ejectionEndsAt`).set(null);
+            }
+
+            const defaultTurnSeconds = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
+            const left = room.turnTimeLeft != null ? room.turnTimeLeft : defaultTurnSeconds;
+
+            // Host-authoritative Blackout Protocol Trigger
+            if (shouldTriggerBlackout(room, left)) {
+              await db.ref(`spy_rooms/${currentRoomCode}`).update({
+                blackoutActive: true,
+                blackoutEndsAt: now + BLACKOUT_DURATION_MS,
+                lastBlackoutRound: room.round || 1
+              });
+            }
+
+            if (left <= 1) {
+              await advanceTurn(room.turnIndex, true);
+            } else {
+              await db.ref(`spy_rooms/${currentRoomCode}/turnTimeLeft`).set(left - 1);
+            }
+          } catch {
+            // ignore transient read/write errors
+          } finally {
+            isTurnTickRunningRef.current = false;
           }
         }, 1000);
       }
@@ -569,56 +692,65 @@ export default function App() {
         clearInterval(turnIntervalRef.current);
         turnIntervalRef.current = null;
       }
+      isTurnTickRunningRef.current = false;
     }
 
     // Voting timer
     if (roomData.status === 'voting') {
       if (!voteIntervalRef.current) {
         voteIntervalRef.current = setInterval(async () => {
-          const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-          const room = snap.val();
-          if (!room || room.status !== 'voting') {
-            if (voteIntervalRef.current) clearInterval(voteIntervalRef.current);
-            voteIntervalRef.current = null;
-            return;
-          }
+          if (isVoteTickRunningRef.current) return;
+          isVoteTickRunningRef.current = true;
+          try {
+            const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
+            const room = snap.val() as RoomData | null;
+            if (!room || room.status !== 'voting') {
+              if (voteIntervalRef.current) {
+                clearInterval(voteIntervalRef.current);
+                voteIntervalRef.current = null;
+              }
+              return;
+            }
 
-          const activePlayersList = room.players ? Object.values(room.players).filter((p: unknown) => !(p as PlayerData).isSpectator) as PlayerData[] : [];
-          const activeCount = activePlayersList.length;
-          const votesCount = room.votes ? Object.keys(room.votes).length : 0;
+            const eligibleVoters = getEligibleVoters(room.players);
+            const unvotedBots = eligibleVoters.filter(p => isBotPlayer(p) && !room.votes?.[p.uid]);
+            const unvotedHumansCount = eligibleVoters.filter(p => !isBotPlayer(p) && !room.votes?.[p.uid]).length;
+            const currentVoteTimeLeft = room.voteTimeLeft ?? DEFAULT_VOTE_SECONDS;
 
-          // Auto-commit votes for any remaining bots if time is running out (<= 2 seconds) or if all humans already voted
-          const unvotedBots = activePlayersList.filter(
-            p => (p.isBot || p.uid.startsWith('bot_')) && !room.votes?.[p.uid]
-          );
-
-          if (unvotedBots.length > 0 && (room.voteTimeLeft <= 2 || votesCount + unvotedBots.length >= activeCount)) {
-            const spies = room.spies || [];
-            const botVoteUpdates: Record<string, string> = {};
-            unvotedBots.forEach(bot => {
-              const isBotSpy = spies.includes(bot.uid);
-              const target = generateSmartBotVote({
-                botUid: bot.uid,
-                isSpy: isBotSpy,
-                activePlayers: activePlayersList,
-                spies,
-                gameChat: room.gameChat
+            // Commit bot votes once all eligible humans voted or timer <= 2s
+            if (unvotedBots.length > 0 && (currentVoteTimeLeft <= 2 || unvotedHumansCount === 0)) {
+              const spies = room.spies || [];
+              const botVoteUpdates: Record<string, string> = {};
+              const nextVotes = { ...(room.votes || {}) };
+              unvotedBots.forEach(bot => {
+                const isBotSpy = spies.includes(bot.uid);
+                const target = generateSmartBotVote({
+                  botUid: bot.uid,
+                  isSpy: isBotSpy,
+                  activePlayers: Object.values(room.players || {}).filter(p => !p.isSpectator),
+                  spies,
+                  gameChat: room.gameChat
+                });
+                botVoteUpdates[`spy_rooms/${currentRoomCode}/votes/${bot.uid}`] = target;
+                nextVotes[bot.uid] = target;
               });
-              botVoteUpdates[`spy_rooms/${currentRoomCode}/votes/${bot.uid}`] = target;
-              if (!room.votes) room.votes = {};
-              room.votes[bot.uid] = target;
-            });
-            await db.ref().update(botVoteUpdates);
-          }
+              room.votes = nextVotes;
+              await db.ref().update(botVoteUpdates);
+            }
 
-          const updatedVotesCount = room.votes ? Object.keys(room.votes).length : 0;
-
-          if (room.voteTimeLeft <= 1 || (activeCount > 0 && updatedVotesCount >= activeCount)) {
-            if (voteIntervalRef.current) clearInterval(voteIntervalRef.current);
-            voteIntervalRef.current = null;
-            processVoteResults(room);
-          } else {
-            db.ref(`spy_rooms/${currentRoomCode}/voteTimeLeft`).set(room.voteTimeLeft - 1);
+            if (currentVoteTimeLeft <= 1 || areAllEligibleVotesSubmitted(room)) {
+              if (voteIntervalRef.current) {
+                clearInterval(voteIntervalRef.current);
+                voteIntervalRef.current = null;
+              }
+              await processVoteResults(room);
+            } else {
+              await db.ref(`spy_rooms/${currentRoomCode}/voteTimeLeft`).set(currentVoteTimeLeft - 1);
+            }
+          } catch {
+            // ignore transient read/write errors
+          } finally {
+            isVoteTickRunningRef.current = false;
           }
         }, 1000);
       }
@@ -627,11 +759,20 @@ export default function App() {
         clearInterval(voteIntervalRef.current);
         voteIntervalRef.current = null;
       }
+      isVoteTickRunningRef.current = false;
     }
 
     return () => {
-      if (turnIntervalRef.current) clearInterval(turnIntervalRef.current);
-      if (voteIntervalRef.current) clearInterval(voteIntervalRef.current);
+      if (turnIntervalRef.current) {
+        clearInterval(turnIntervalRef.current);
+        turnIntervalRef.current = null;
+      }
+      if (voteIntervalRef.current) {
+        clearInterval(voteIntervalRef.current);
+        voteIntervalRef.current = null;
+      }
+      isTurnTickRunningRef.current = false;
+      isVoteTickRunningRef.current = false;
     };
   }, [isHost, currentRoomCode, roomData?.status]);
 
@@ -662,9 +803,9 @@ export default function App() {
       const players = roomData.players || {};
       const hostUid = roomData.hostUid;
       const hostPlayer = hostUid ? players[hostUid] : null;
-      const isHostBot = !hostPlayer || hostPlayer.isBot || hostUid?.startsWith('bot_');
+      const isHostBot = !hostPlayer || isBotPlayer(hostPlayer, hostUid);
       if (isHostBot) {
-        const firstHuman = Object.values(players).find(p => !p.isBot && !p.uid.startsWith('bot_'));
+        const firstHuman = Object.values(players).find(p => !isBotPlayer(p));
         if (firstHuman) {
           db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(firstHuman.uid);
         }
@@ -673,6 +814,9 @@ export default function App() {
 
     if (!isHost || !currentRoomCode || !roomData) return;
 
+    let botTimer: ReturnType<typeof setTimeout> | null = null;
+    let advanceTimer: ReturnType<typeof setTimeout> | null = null;
+
     // 1. Bot Turns during Gameplay
     if (roomData.status === 'playing') {
       const turnOrder = roomData.turnOrder || [];
@@ -680,15 +824,21 @@ export default function App() {
       const currentSpeakerUid = turnOrder[turnIndex];
       const speaker = currentSpeakerUid ? roomData.players?.[currentSpeakerUid] : null;
 
-      if (currentSpeakerUid && (currentSpeakerUid.startsWith('bot_') || speaker?.isBot)) {
+      if (currentSpeakerUid && isBotPlayer(speaker, currentSpeakerUid)) {
         if (roomData.completedTurnsThisRound?.[currentSpeakerUid]) {
           advanceTurn(turnIndex);
           return;
         }
 
-        const botTimer = setTimeout(async () => {
+        const ejectionRemaining =
+          roomData.ejectionEndsAt && roomData.ejectionEndsAt > Date.now()
+            ? roomData.ejectionEndsAt - Date.now()
+            : 0;
+        const botThinkDelay = Math.max(2000, ejectionRemaining + 1200);
+
+        botTimer = setTimeout(async () => {
           const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-          const latest = snap.val();
+          const latest = snap.val() as RoomData | null;
           if (
             latest?.status === 'playing' &&
             latest?.turnOrder?.[latest?.turnIndex || 0] === currentSpeakerUid
@@ -697,23 +847,39 @@ export default function App() {
               advanceTurn(latest?.turnIndex);
               return;
             }
+            const latestSpeaker = latest?.players?.[currentSpeakerUid];
             const isBotSpy = (latest?.spies || []).includes(currentSpeakerUid);
-            const prevClues = Object.values(latest?.gameChat || {}).map((c: unknown) => ((c as { text?: string }).text || ''));
+
+            if (latest.gameMode === 'silent') {
+              // Silent Radar Mode: bots draw strokes on the canvas without text clues
+              const strokes = generateBotSilentDrawing(latest?.wordCategory || 'players', isBotSpy);
+              await db.ref(`spy_rooms/${currentRoomCode}/currentDrawing`).set(strokes);
+              advanceTimer = setTimeout(() => {
+                advanceTurn(latest?.turnIndex);
+              }, 1800);
+              return;
+            }
+
+            const prevClues = Object.values(latest?.gameChat || {}).map(c => c.text || '');
             const smartClue = generateSmartBotClue({
               isSpy: isBotSpy,
               word: latest?.word || '',
               wordAr: latest?.wordAr || '',
               category: latest?.wordCategory || 'places',
               language: lang,
-              previousClues: prevClues
+              previousClues: prevClues,
+              gameMode: latest?.gameMode,
+              chameleonWord: latestSpeaker?.chameleonWord,
+              chameleonWordAr: latestSpeaker?.chameleonWordAr
             });
 
             // STRICT CONSTRAINT: Bots can ONLY say a single word (no spaces, no punctuation)
-            const singleWordClue = (smartClue || '')
-              .trim()
-              .split(/\s+/)[0]
-              .replace(/[،,.:;!?"'()[\]{}<>\\/]/g, '')
-              .trim() || (lang === 'ar' ? 'معروف' : 'known');
+            const singleWordClue =
+              (smartClue || '')
+                .trim()
+                .split(/\s+/)[0]
+                .replace(/[،,.:;!?"'()[\]{}<>\\/]/g, '')
+                .trim() || (lang === 'ar' ? 'معروف' : 'known');
 
             await db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).set({
               text: singleWordClue,
@@ -721,8 +887,11 @@ export default function App() {
             });
             await db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
               uid: currentSpeakerUid,
-              sender: speaker?.name || 'Bot Agent',
-              avatar: speaker?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentSpeakerUid}`,
+              sender: latestSpeaker?.name || speaker?.name || 'Bot Agent',
+              avatar:
+                latestSpeaker?.avatar ||
+                speaker?.avatar ||
+                `https://api.dicebear.com/7.x/bottts/svg?seed=${currentSpeakerUid}`,
               text: singleWordClue,
               round: latest?.round || 1,
               timestamp: firebase.database.ServerValue.TIMESTAMP
@@ -731,33 +900,35 @@ export default function App() {
               db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).remove().catch(() => {});
             }, 6000);
 
-            setTimeout(() => {
+            advanceTimer = setTimeout(() => {
               advanceTurn(latest?.turnIndex);
             }, 1200);
           }
-        }, 2200);
+        }, botThinkDelay);
 
-        return () => clearTimeout(botTimer);
+        return () => {
+          if (botTimer) clearTimeout(botTimer);
+          if (advanceTimer) clearTimeout(advanceTimer);
+        };
       }
     }
 
-    // 2. Bot Votes during Voting (Staggered and never canceled)
+    // 2. Bot Votes during Voting (Staggered and respecting disqualifiedVote)
     if (roomData.status === 'voting') {
       const botsWithoutVotes = Object.values(roomData.players || {}).filter(
-        p => (p.isBot || p.uid.startsWith('bot_')) && !p.isSpectator && !roomData.votes?.[p.uid]
+        p => isBotPlayer(p) && !p.isSpectator && !p.disqualifiedVote && !roomData.votes?.[p.uid]
       );
       botsWithoutVotes.forEach((bot, botIdx) => {
         if (scheduledBotVotesRef.current.has(bot.uid)) return;
         scheduledBotVotesRef.current.add(bot.uid);
 
-        // Stagger bot votes naturally between 1.8s and 5s
-        const delay = 1800 + (botIdx * 1200) + Math.random() * 800;
+        const delay = 1800 + botIdx * 1200 + Math.random() * 800;
         setTimeout(async () => {
           if (!currentRoomCode) return;
           const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-          const latest = snap.val();
-          if (latest?.status === 'voting' && !latest?.votes?.[bot.uid]) {
-            const activePlayers = Object.values(latest.players || {}).filter(p => !(p as PlayerData).isSpectator) as PlayerData[];
+          const latest = snap.val() as RoomData | null;
+          if (latest?.status === 'voting' && !latest?.votes?.[bot.uid] && !latest?.players?.[bot.uid]?.disqualifiedVote) {
+            const activePlayers = Object.values(latest.players || {}).filter(p => !p.isSpectator);
             const spies = latest.spies || [];
             const isBotSpy = spies.includes(bot.uid);
             const chosenTarget = generateSmartBotVote({
@@ -774,7 +945,20 @@ export default function App() {
     } else {
       scheduledBotVotesRef.current.clear();
     }
-  }, [isHost, currentRoomCode, roomData?.status, roomData?.turnIndex]);
+
+    return () => {
+      if (botTimer) clearTimeout(botTimer);
+      if (advanceTimer) clearTimeout(advanceTimer);
+    };
+  }, [
+    isHost,
+    currentRoomCode,
+    roomData?.status,
+    roomData?.turnIndex,
+    roomData?.round,
+    roomData?.turnOrder?.[roomData?.turnIndex || 0],
+    roomData?.ejectionEndsAt
+  ]);
 
   // Advance Turn logic (Guarded to guarantee at most ONE turn per player/bot per round)
   const advanceTurn = async (expectedTurnIndex?: number, wasTimeout: boolean = false) => {
@@ -782,106 +966,19 @@ export default function App() {
     try {
       let afkKickedName: string | null = null;
       await db.ref(`spy_rooms/${currentRoomCode}`).transaction(room => {
-        if (!room || room.status !== 'playing' || !room.turnOrder) return room;
-        // If an expected turn index is specified, ensure turn hasn't already advanced
-        if (expectedTurnIndex !== undefined && room.turnIndex !== expectedTurnIndex) {
-          return room;
-        }
+        if (!room) return room;
+        const result = computeNextTurnState(room as RoomData, {
+          expectedTurnIndex,
+          wasTimeout
+        });
+        if (!result.changed) return room;
+        afkKickedName = result.afkKickedName;
 
-        const playersObj = room.players || {};
-        const currentSpeakerUid = room.turnOrder[room.turnIndex || 0];
-
-        // Track inactivity: if player timed out without writing a clue
-        if (wasTimeout && currentSpeakerUid && playersObj[currentSpeakerUid]) {
-          const missed = (playersObj[currentSpeakerUid].missedTurns || 0) + 1;
-          playersObj[currentSpeakerUid].missedTurns = missed;
-          // Auto-kick if missed 3 consecutive turns without sending a clue
-          if (missed >= 3 && !playersObj[currentSpeakerUid].isSpectator) {
-            playersObj[currentSpeakerUid].isSpectator = true;
-            afkKickedName = playersObj[currentSpeakerUid].name || 'Agent';
-          }
-        }
-
-        // STRICT RULE: Record that current speaker has completed their turn for this round
-        if (currentSpeakerUid) {
-          room.completedTurnsThisRound = room.completedTurnsThisRound || {};
-          room.completedTurnsThisRound[currentSpeakerUid] = true;
-        }
-
-        const isRapid = room.gameMode === 'rapid';
-        const defaultTurnSeconds = isRapid ? 7 : (room.turnSeconds || 20);
-
-        // Calculate all active non-spectator players
-        const activeUids: string[] = Array.from(
-          new Set(
-            Object.values(playersObj)
-              .filter((p: unknown) => !(p as PlayerData).isSpectator)
-              .map((p: unknown) => (p as PlayerData).uid)
-          )
-        );
-
-        // Find which active players have NOT yet taken a turn in this round
-        const unplayedUids = activeUids.filter(
-          uid => !room.completedTurnsThisRound?.[uid]
-        );
-
-        if (unplayedUids.length === 0) {
-          // ALL active players have completed their turn (or skipped) in this round!
-          // Advance to the NEXT round!
-          const currentRoundNum = room.round || 1;
-          room.round = currentRoundNum + 1;
-          room.completedTurnsThisRound = {}; // Reset for the new round
-
-          // Circular rotation: ensure starting player of the new round is not the last speaker
-          let nextTurnOrder = Array.from(new Set(activeUids));
-          if (nextTurnOrder.length > 1 && currentSpeakerUid) {
-            const others = nextTurnOrder.filter((u: string) => u !== currentSpeakerUid);
-            nextTurnOrder = [...others, currentSpeakerUid];
-          }
-          room.turnOrder = nextTurnOrder;
-          room.turnIndex = 0;
-          room.turnTimeLeft = defaultTurnSeconds;
-          room.votes = null;
-        } else {
-          // Find the next unplayed player in turnOrder
-          const currentIdx = room.turnIndex || 0;
-          let nextFoundIndex = -1;
-
-          // Check forwards
-          for (let i = currentIdx + 1; i < room.turnOrder.length; i++) {
-            const cand = room.turnOrder[i];
-            if (unplayedUids.includes(cand) && playersObj[cand] && !playersObj[cand].isSpectator) {
-              nextFoundIndex = i;
-              break;
-            }
-          }
-
-          // If not found ahead, check from beginning
-          if (nextFoundIndex === -1) {
-            for (let i = 0; i <= currentIdx; i++) {
-              const cand = room.turnOrder[i];
-              if (unplayedUids.includes(cand) && playersObj[cand] && !playersObj[cand].isSpectator) {
-                nextFoundIndex = i;
-                break;
-              }
-            }
-          }
-
-          // If unplayed player is not in turnOrder (e.g. joined during round), add them
-          if (nextFoundIndex === -1) {
-            const targetUid = unplayedUids[0];
-            const cleanOrder = room.turnOrder.filter((u: string) => activeUids.includes(u));
-            if (!cleanOrder.includes(targetUid)) cleanOrder.push(targetUid);
-            room.turnOrder = cleanOrder;
-            nextFoundIndex = room.turnOrder.indexOf(targetUid);
-          }
-
-          room.turnIndex = Math.max(0, nextFoundIndex);
-          room.turnTimeLeft = defaultTurnSeconds;
-        }
-
-        room.currentDrawing = null;
-        return room;
+        const cleanRoom = { ...result.room } as Record<string, unknown>;
+        Object.keys(cleanRoom).forEach(k => {
+          if (cleanRoom[k] === undefined) delete cleanRoom[k];
+        });
+        return cleanRoom;
       });
 
       if (afkKickedName) {
@@ -897,7 +994,7 @@ export default function App() {
     }
   };
 
-  // Process Vote Results
+  // Process Vote Results (Atomic transition via resolveVoteOutcome)
   const processVoteResults = async (room: RoomData) => {
     if (!currentRoomCode || !isHost) return;
 
@@ -908,154 +1005,29 @@ export default function App() {
       });
       if (!claim.committed) return;
 
-      const votes = room.votes || {};
-      const counts: Record<string, number> = {};
-      Object.values(votes).forEach(tgt => {
-        const key = tgt || 'SKIP';
-        counts[key] = (counts[key] || 0) + 1;
-      });
+      const resolution = resolveVoteOutcome(room, Date.now());
+      await db
+        .ref(`spy_rooms/${currentRoomCode}`)
+        .update(toFirebaseUpdatePayload(resolution.nextRoomFields as Record<string, unknown>));
 
-      let maxVotes = 0;
-      let topCandidates: string[] = [];
-      for (const key in counts) {
-        if (counts[key] > maxVotes) {
-          maxVotes = counts[key];
-          topCandidates = [key];
-        } else if (counts[key] === maxVotes) {
-          topCandidates.push(key);
-        }
-      }
+      const playersObj = (resolution.nextRoomFields.players as Record<string, PlayerData>) || room.players || {};
+      const ejectedName = resolution.ejectedName || '?';
 
-      const rawEjectedUid =
-        maxVotes > 0 && topCandidates.length === 1 && topCandidates[0] !== 'SKIP'
-          ? topCandidates[0]
-          : null;
-
-      const currentSpies = room.spies || [];
-      const playersObj = { ...(room.players || {}) };
-      const nextRound = (room.round || 1) + 1;
-
-      // Reset disqualified votes and silences for the next round
-      Object.keys(playersObj).forEach(uid => {
-        playersObj[uid] = {
-          ...playersObj[uid],
-          disqualifiedVote: false,
-          isSilenced: false
-        };
-      });
-
-      const ejectedUid = rawEjectedUid;
-
-      if (!ejectedUid) {
-        const safeActiveUids = Array.from(new Set(Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid)));
-        await db.ref(`spy_rooms/${currentRoomCode}`).update({
-          status: 'playing',
-          round: nextRound,
-          turnOrder: safeActiveUids,
-          turnIndex: 0,
-          completedTurnsThisRound: null,
-          turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
-          votes: null,
-          currentDrawing: null,
-          players: playersObj
-        });
+      if (resolution.outcome === 'nobody_ejected') {
         broadcastAnnouncement(t.annNobodyEjected, 'normal');
-        return;
-      }
-
-      const ejectedName = playersObj[ejectedUid]?.name || '?';
-      const isEjectedSpy = currentSpies.includes(ejectedUid);
-      const ejectionPayload = {
-        uid: ejectedUid,
-        name: ejectedName,
-        avatar: playersObj[ejectedUid]?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${ejectedUid}`,
-        isSpy: isEjectedSpy,
-        timestamp: Date.now()
-      };
-
-      if (playersObj[ejectedUid]) {
-        playersObj[ejectedUid] = { ...playersObj[ejectedUid], isSpectator: true };
-      }
-
-      if (currentSpies.includes(ejectedUid)) {
-        const updatedSpies = currentSpies.filter(s => s !== ejectedUid);
-        if (updatedSpies.length === 0) {
-          await db.ref(`spy_rooms/${currentRoomCode}`).update({
-            status: 'gameover',
-            winnerTeam: 'crew',
-            finalSpies: room.spies,
-            finalPlayers: playersObj,
-            players: playersObj,
-            spies: updatedSpies,
-            votes: null,
-            ejectionEvent: ejectionPayload
-          });
-          broadcastAnnouncement(t.annCrewWins.replace('{name}', ejectedName), 'success');
-          awardXP(playersObj, room.spies || [], 'crew');
-          return;
-        }
-
-        await db.ref(`spy_rooms/${currentRoomCode}/players`).set(playersObj);
-        await db.ref(`spy_rooms/${currentRoomCode}/spies`).set(updatedSpies);
+      } else if (resolution.outcome === 'crew_win') {
+        broadcastAnnouncement(t.annCrewWins.replace('{name}', ejectedName), 'success');
+        awardXP(playersObj, room.spies || [], 'crew');
+      } else if (resolution.outcome === 'spy_ejected_continue') {
         broadcastAnnouncement(t.annSpyEjectedMoreRemain.replace('{name}', ejectedName), 'danger');
-
-        const safeActiveUids = Array.from(new Set(Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid)));
-        await db.ref(`spy_rooms/${currentRoomCode}`).update({
-          status: 'playing',
-          round: nextRound,
-          turnOrder: safeActiveUids,
-          turnIndex: 0,
-          completedTurnsThisRound: null,
-          turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
-          votes: null,
-          currentDrawing: null,
-          ejectionEvent: ejectionPayload
-        });
-        return;
-      }
-
-      await db.ref(`spy_rooms/${currentRoomCode}/players`).set(playersObj);
-      const remainingActiveUids = Array.from(new Set(Object.values(playersObj).filter(p => !p.isSpectator).map(p => p.uid)));
-      const remainingSpiesCount = currentSpies.filter(uid => remainingActiveUids.includes(uid)).length;
-      const remainingInnocentCount = remainingActiveUids.length - remainingSpiesCount;
-
-      // Win Condition Logic:
-      // In 'mole' mode (Mole Network), spies know each other, so parity (remainingSpiesCount >= remainingInnocentCount) means spies win!
-      // In all other modes where spies don't know each other, equality (remainingSpiesCount === remainingInnocentCount) allows the game to continue!
-      // Spies only win if innocents reach 0 or spies strictly outnumber innocents (remainingSpiesCount > remainingInnocentCount).
-      const isMoleMode = room.gameMode === 'mole';
-      const spiesWin = isMoleMode
-        ? remainingSpiesCount >= remainingInnocentCount
-        : (remainingInnocentCount === 0 || remainingSpiesCount > remainingInnocentCount);
-
-      if (spiesWin) {
-        await db.ref(`spy_rooms/${currentRoomCode}`).update({
-          status: 'gameover',
-          winnerTeam: 'spies',
-          finalSpies: room.spies,
-          finalPlayers: playersObj,
-          votes: null,
-          ejectionEvent: ejectionPayload
-        });
+      } else if (resolution.outcome === 'spies_win') {
         broadcastAnnouncement(t.annSpiesWin.replace('{name}', ejectedName), 'danger');
         awardXP(playersObj, room.spies || [], 'spies');
-        return;
+      } else if (resolution.outcome === 'innocent_ejected_continue') {
+        broadcastAnnouncement(t.annInnocentEjected.replace('{name}', ejectedName), 'danger');
       }
-
-      broadcastAnnouncement(t.annInnocentEjected.replace('{name}', ejectedName), 'danger');
-      await db.ref(`spy_rooms/${currentRoomCode}`).update({
-        status: 'playing',
-        round: nextRound,
-        turnOrder: remainingActiveUids,
-        turnIndex: 0,
-        completedTurnsThisRound: null,
-        turnTimeLeft: room.gameMode === 'rapid' ? 7 : (room.turnSeconds || 20),
-        votes: null,
-        currentDrawing: null,
-        ejectionEvent: ejectionPayload
-      });
     } catch {
-      await db.ref(`spy_rooms/${currentRoomCode}/status`).set('voting');
+      await db.ref(`spy_rooms/${currentRoomCode}/status`).set('voting').catch(() => {});
     }
   };
 
@@ -1221,6 +1193,8 @@ export default function App() {
     requestWakeLock();
 
     const playerRef = db.ref(`spy_rooms/${cleanCode}/players/${currentUser.uid}`);
+    await playerRef.onDisconnect().cancel().catch(() => {});
+
     const existing = await playerRef.once('value');
     if (!existing.exists()) {
       const roomSnap = await db.ref(`spy_rooms/${cleanCode}`).once('value');
@@ -1246,8 +1220,11 @@ export default function App() {
       const roomStatus = rData.status;
       await playerRef.set({
         uid: currentUser.uid,
-        name: profileName || currentUser.displayName || 'Agent',
-        avatar: profileAvatar || currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
+        name: profileNameRef.current || currentUser.displayName || 'Agent',
+        avatar:
+          profileAvatarRef.current ||
+          currentUser.photoURL ||
+          `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
         joinedAt: firebase.database.ServerValue.TIMESTAMP,
         isSpectator: !!(roomStatus === 'playing' || roomStatus === 'voting')
       });
@@ -1271,7 +1248,7 @@ export default function App() {
     if (roomListenerRef.current) roomListenerRef.current();
     const rRef = db.ref(`spy_rooms/${cleanCode}`);
     rRef.on('value', snap => {
-      const data = snap.val();
+      const data = snap.val() as RoomData | null;
       if (!data) {
         leaveRoom();
         return;
@@ -1290,17 +1267,43 @@ export default function App() {
         db.ref(`spy_rooms/${cleanCode}/players/${currentUser.uid}/isSpectator`).set(false).catch(() => {});
       }
 
+      // If gameover and all remaining humans have returned to lobby, reset room back to waiting
+      if (data.status === 'gameover' && currentUser.uid === data.hostUid && shouldResetGameOverToLobby(data.players)) {
+        const resetPlayers: Record<string, PlayerData> = {};
+        Object.entries(data.players || {}).forEach(([pUid, pl]) => {
+          resetPlayers[pUid] = { ...pl, isSpectator: false, postGame: null };
+        });
+        db.ref(`spy_rooms/${cleanCode}`).update({
+          status: 'waiting',
+          winnerTeam: null,
+          votes: null,
+          spies: null,
+          word: null,
+          wordAr: null,
+          round: null,
+          turnOrder: null,
+          turnIndex: null,
+          turnTimeLeft: null,
+          ejectionEvent: null,
+          ejectionEndsAt: null,
+          blackoutActive: false,
+          blackoutEndsAt: null,
+          completedTurnsThisRound: null,
+          players: resetPlayers
+        }).catch(() => {});
+        return;
+      }
+
       // Instant Host Migration: Check if host left or disconnected
       const playersObj = data.players || {};
-      const activePlayers = Object.values(playersObj)
-        .filter((p: unknown) => !(p as PlayerData).isSpectator) as PlayerData[];
+      const activePlayers = Object.values(playersObj).filter(p => !p.isSpectator);
       const isGameActive = data.status === 'playing' || data.status === 'voting' || data.status === 'resolving';
 
       const currentHostUid = data.hostUid;
       const hostPlayer = currentHostUid ? playersObj[currentHostUid] : null;
 
       if ((!hostPlayer || hostPlayer.isSpectator) && activePlayers.length > 0) {
-        const sortedActive = [...activePlayers].sort((a, b) => ((a.joinedAt || 0) - (b.joinedAt || 0)));
+        const sortedActive = [...activePlayers].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
         const nextHostUid = sortedActive[0].uid;
         if (currentUser.uid === nextHostUid && currentHostUid !== nextHostUid) {
           db.ref(`spy_rooms/${cleanCode}/hostUid`).set(nextHostUid);
@@ -1308,11 +1311,12 @@ export default function App() {
         }
       }
 
-      // CRITICAL GAME RULE: If game is active and active players drop below 3 (minimum required for Spy Game)
+      // CRITICAL GAME RULE: If game is active and active players drop below 3
       if (isGameActive && activePlayers.length < 3) {
-        const effectiveHostUid = data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
-          ? data.hostUid
-          : activePlayers[0]?.uid;
+        const effectiveHostUid =
+          data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
+            ? data.hostUid
+            : activePlayers[0]?.uid;
 
         if (currentUser.uid === effectiveHostUid) {
           db.ref(`spy_rooms/${cleanCode}`).update({
@@ -1327,6 +1331,11 @@ export default function App() {
             voteTimeLeft: null,
             votes: null,
             currentDrawing: null,
+            ejectionEvent: null,
+            ejectionEndsAt: null,
+            blackoutActive: false,
+            blackoutEndsAt: null,
+            completedTurnsThisRound: null,
             winnerTeam: null,
             announcement: {
               msg: t.gameAbortedNotEnoughPlayers,
@@ -1340,11 +1349,12 @@ export default function App() {
 
       // If playing: Check if all spies left -> crew wins immediately
       if (data.status === 'playing' && data.spies && data.spies.length > 0) {
-        const activeSpies = data.spies.filter((uid: string) => playersObj[uid] && !playersObj[uid].isSpectator);
+        const activeSpies = data.spies.filter(uid => playersObj[uid] && !playersObj[uid].isSpectator);
         if (activeSpies.length === 0) {
-          const effectiveHostUid = data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
-            ? data.hostUid
-            : activePlayers[0]?.uid;
+          const effectiveHostUid =
+            data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
+              ? data.hostUid
+              : activePlayers[0]?.uid;
           if (currentUser.uid === effectiveHostUid) {
             db.ref(`spy_rooms/${cleanCode}`).update({
               status: 'gameover',
@@ -1366,11 +1376,12 @@ export default function App() {
 
       // If playing: Sanitize turnOrder if someone left
       if (data.status === 'playing' && data.turnOrder && data.turnOrder.length > 0) {
-        const cleanedTurnOrder = data.turnOrder.filter((uid: string) => playersObj[uid] && !playersObj[uid].isSpectator);
+        const cleanedTurnOrder = data.turnOrder.filter(uid => playersObj[uid] && !playersObj[uid].isSpectator);
         if (cleanedTurnOrder.length > 0 && cleanedTurnOrder.length !== data.turnOrder.length) {
-          const effectiveHostUid = data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
-            ? data.hostUid
-            : activePlayers[0]?.uid;
+          const effectiveHostUid =
+            data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
+              ? data.hostUid
+              : activePlayers[0]?.uid;
           if (currentUser.uid === effectiveHostUid) {
             let nextIndex = data.turnIndex || 0;
             if (nextIndex >= cleanedTurnOrder.length) {
@@ -1379,7 +1390,7 @@ export default function App() {
             db.ref(`spy_rooms/${cleanCode}`).update({
               turnOrder: cleanedTurnOrder,
               turnIndex: nextIndex,
-              turnTimeLeft: data.turnSeconds || 20
+              turnTimeLeft: getEffectiveTurnSeconds(data.gameMode, data.turnSeconds)
             });
           }
         }
@@ -1396,7 +1407,10 @@ export default function App() {
         lastAnnouncedRoundRef.current = data.round;
         setAnnouncedRound(data.round);
         sound.playChime([[523, 0, 0.15], [659, 120, 0.15], [784, 240, 0.3]], 'sine');
-        setTimeout(() => {
+        if (roundAnnounceTimerRef.current) {
+          clearTimeout(roundAnnounceTimerRef.current);
+        }
+        roundAnnounceTimerRef.current = setTimeout(() => {
           setAnnouncedRound(null);
         }, ROUND_ANNOUNCE_MS);
       }
@@ -1410,6 +1424,10 @@ export default function App() {
     releaseWakeLock();
     lastAnnouncedRoundRef.current = 0;
     setAnnouncedRound(null);
+    if (roundAnnounceTimerRef.current) {
+      clearTimeout(roundAnnounceTimerRef.current);
+      roundAnnounceTimerRef.current = null;
+    }
 
     const code = currentRoomCode;
     const uid = currentUser?.uid;
@@ -1437,31 +1455,56 @@ export default function App() {
         const wasHost = !!(currentRoomSnapshot && currentRoomSnapshot.hostUid === uid);
         const playersObj = currentRoomSnapshot?.players || {};
         const remainingHumans = Object.values(playersObj)
-          .filter((p: unknown) => {
-            const pl = p as PlayerData;
-            return pl.uid !== uid && !pl.isSpectator && !pl.isBot && !pl.uid.startsWith('bot_');
-          })
-          .sort((a: unknown, b: unknown) => ((a as PlayerData).joinedAt || 0) - ((b as PlayerData).joinedAt || 0));
+          .filter(pl => pl.uid !== uid && !pl.isSpectator && !isBotPlayer(pl))
+          .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
 
         if (remainingHumans.length === 0) {
-          // If NO real human players left in the room (e.g. only bots or empty), delete room completely!
           await db.ref(`spy_rooms/${code}`).remove();
         } else {
-          // Remove departing player's record
           await db.ref(`spy_rooms/${code}/players/${uid}`).remove();
 
-          // Migrate host if departing player was host, ONLY to a real human player!
           if (wasHost && remainingHumans[0]) {
-            await db.ref(`spy_rooms/${code}/hostUid`).set((remainingHumans[0] as PlayerData).uid);
+            await db.ref(`spy_rooms/${code}/hostUid`).set(remainingHumans[0].uid);
           }
 
-          // If game was active and remaining players drop below minimum 3
-          const remainingAll = Object.values(playersObj).filter(
-            (p: unknown) => (p as PlayerData).uid !== uid && !(p as PlayerData).isSpectator
-          );
-          const isGameActive = currentRoomSnapshot?.status === 'playing' ||
-                               currentRoomSnapshot?.status === 'voting' ||
-                               currentRoomSnapshot?.status === 'resolving';
+          // If room was on gameover and remaining human players are all inLobby, reset room to waiting
+          if (currentRoomSnapshot?.status === 'gameover') {
+            const remainingPlayersMap: Record<string, PlayerData> = {};
+            Object.entries(playersObj).forEach(([pUid, pl]) => {
+              if (pUid !== uid) remainingPlayersMap[pUid] = pl;
+            });
+            if (shouldResetGameOverToLobby(remainingPlayersMap)) {
+              const resetPlayers: Record<string, PlayerData> = {};
+              Object.entries(remainingPlayersMap).forEach(([pUid, pl]) => {
+                resetPlayers[pUid] = { ...pl, isSpectator: false, postGame: null };
+              });
+              await db.ref(`spy_rooms/${code}`).update({
+                status: 'waiting',
+                winnerTeam: null,
+                votes: null,
+                spies: null,
+                word: null,
+                wordAr: null,
+                round: null,
+                turnOrder: null,
+                turnIndex: null,
+                turnTimeLeft: null,
+                ejectionEvent: null,
+                ejectionEndsAt: null,
+                blackoutActive: false,
+                blackoutEndsAt: null,
+                completedTurnsThisRound: null,
+                players: resetPlayers
+              });
+            }
+            return;
+          }
+
+          const remainingAll = Object.values(playersObj).filter(p => p.uid !== uid && !p.isSpectator);
+          const isGameActive =
+            currentRoomSnapshot?.status === 'playing' ||
+            currentRoomSnapshot?.status === 'voting' ||
+            currentRoomSnapshot?.status === 'resolving';
 
           if (isGameActive && remainingAll.length < 3) {
             await db.ref(`spy_rooms/${code}`).update({
@@ -1478,6 +1521,11 @@ export default function App() {
               voteTimeLeft: null,
               votes: null,
               currentDrawing: null,
+              ejectionEvent: null,
+              ejectionEndsAt: null,
+              blackoutActive: false,
+              blackoutEndsAt: null,
+              completedTurnsThisRound: null,
               winnerTeam: null,
               announcement: {
                 msg: t.gameAbortedNotEnoughPlayers,
@@ -1596,23 +1644,23 @@ export default function App() {
     sound.playClick();
 
     try {
-      const playersObj = { ...(roomData.players || {}) };
-      let playersArr = Object.values(playersObj);
-
-      // Validate player count against room rules & mode
-      const spyCount = roomData.spyCount || 1;
-      const isMole = roomData.gameMode === 'mole';
-      // In mole mode: 2 spies requires at least 5 players (cannot play 4 players with 2 spies!).
-      // In other modes where spies don't know each other: 2 spies can play with 4 players!
-      const minRequiredPlayers = isMole
-        ? Math.max(5, (spyCount * 2) + 1)
-        : Math.max(3, spyCount * 2);
-
-      if (playersArr.length < minRequiredPlayers) {
+      const validation = validateGameStart(roomData);
+      if (!validation.ok) {
+        if (validation.reason === 'players_not_in_lobby') {
+          showToast(
+            lang === 'ar'
+              ? 'لا يمكن بدء الجيم حتى يعود جميع اللاعبين إلى اللوبي!'
+              : 'Cannot start game until all players return to lobby!',
+            'danger'
+          );
+          return;
+        }
+        const spyCount = roomData.spyCount || 1;
+        const isMole = roomData.gameMode === 'mole';
         showToast(
           lang === 'ar'
-            ? `لا يمكن بدء اللعبة: إعدادات الروم تتطلب ${minRequiredPlayers} لاعبين على الأقل (${spyCount} ${spyCount === 1 ? 'جاسوس' : 'جواسيس'}${isMole ? ' • شبكة العملاء' : ''})! الموجود حالياً: ${playersArr.length}. يمكنك إضافة بوتات أو دعوة أصدقاء.`
-            : `Cannot start: Room settings require at least ${minRequiredPlayers} players (${spyCount} spies${isMole ? ' • Mole Network' : ''})! Currently: ${playersArr.length}.`,
+            ? `لا يمكن بدء اللعبة: إعدادات الروم تتطلب ${validation.minRequired} لاعبين على الأقل (${spyCount} ${spyCount === 1 ? 'جاسوس' : 'جواسيس'}${isMole ? ' • شبكة العملاء' : ''})! الموجود حالياً: ${validation.activeCount}. يمكنك إضافة بوتات أو دعوة أصدقاء.`
+            : `Cannot start: Room settings require at least ${validation.minRequired} players (${spyCount} spies${isMole ? ' • Mole Network' : ''})! Currently: ${validation.activeCount}.`,
           'danger'
         );
         return;
@@ -1625,71 +1673,16 @@ export default function App() {
       const chosenCat = cats[Math.floor(Math.random() * cats.length)];
       const wordList = wordsDB[chosenCat] || wordsDB.players;
       const selectedPair = wordList[Math.floor(Math.random() * wordList.length)];
-
-      const effectiveSpyCount = spyCount;
-      const spies: string[] = [];
-      while (spies.length < effectiveSpyCount) {
-        const randUid = playersArr[Math.floor(Math.random() * playersArr.length)].uid;
-        if (!spies.includes(randUid)) spies.push(randUid);
-      }
-      if (spies.length === 0 && playersArr.length > 0) {
-        spies.push(playersArr[0].uid);
-      }
-
-      // Ensure all human players are in the lobby before starting
-      const notInLobby = playersArr.filter(
-        p => !p.isBot && !p.uid.startsWith('bot_') && p.postGame !== 'inLobby' && roomData.status !== 'waiting'
-      );
-      if (notInLobby.length > 0) {
-        showToast(
-          lang === 'ar'
-            ? 'لا يمكن بدء الجيم حتى يعود جميع اللاعبين إلى اللوبي!'
-            : 'Cannot start game until all players return to lobby!',
-          'danger'
-        );
-        return;
-      }
-
-      const resetPlayers: Record<string, PlayerData> = {};
-
-      // Chameleon mode: pick a smart twin word closely aligned in nationality, style, or era
       const chameleonPair = getSmartTwinWord(selectedPair, chosenCat || 'players', wordList);
 
-      // Undercover mode: pick an undercover protector who knows the spy
-      const nonSpies = playersArr.filter(p => !spies.includes(p.uid));
-      const undercoverUid =
-        roomData.gameMode === 'undercover' && nonSpies.length > 0
-          ? nonSpies[Math.floor(Math.random() * nonSpies.length)].uid
-          : null;
-
-      playersArr.forEach(p => {
-        const isThisSpy = spies.includes(p.uid);
-        const playerObj: PlayerData = {
-          uid: p.uid,
-          name: p.name || 'Agent',
-          avatar: p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`,
-          isSpectator: false,
-          postGame: null,
-          role: isThisSpy ? 'spy' : p.uid === undercoverUid ? 'undercover' : 'crew',
-          isSilenced: false,
-          disqualifiedVote: false
-        };
-
-        if (p.isBot) {
-          playerObj.isBot = true;
-        }
-
-        if (isThisSpy && roomData.gameMode === 'chameleon') {
-          playerObj.chameleonWord = chameleonPair[0];
-          playerObj.chameleonWordAr = chameleonPair[1];
-        }
-
-        resetPlayers[p.uid] = playerObj;
+      const setup = computeInitialGameSetup({
+        room: roomData,
+        wordPair: selectedPair,
+        wordCategory: chosenCat,
+        chameleonPair
       });
 
-      const shuffled = Array.from(new Set(playersArr.map(p => p.uid))).sort(() => Math.random() - 0.5);
       lastAnnouncedRoundRef.current = 0;
-      const initialTurnSeconds = roomData.gameMode === 'rapid' ? 7 : (roomData.turnSeconds || 20);
 
       await db.ref(`spy_rooms/${currentRoomCode}`).update({
         status: 'playing',
@@ -1697,16 +1690,18 @@ export default function App() {
         wordAr: selectedPair[1] || 'محطة الفضاء',
         wordCategory: chosenCat || 'players',
         wordImage: null,
-        spies: spies,
-        undercoverUid: undercoverUid || null,
+        spies: setup.spies,
+        undercoverUid: setup.undercoverUid,
         round: 1,
         completedTurnsThisRound: null,
         blackoutActive: false,
+        blackoutEndsAt: null,
         lastBlackoutRound: 0,
-        turnOrder: shuffled,
+        ejectionEvent: null,
+        ejectionEndsAt: null,
+        turnOrder: setup.turnOrder,
         turnIndex: 0,
-        turnTimeLeft: initialTurnSeconds,
-        turnSeconds: initialTurnSeconds,
+        turnTimeLeft: setup.turnTimeLeft,
         votes: null,
         winnerTeam: null,
         gameChat: null,
@@ -1714,7 +1709,7 @@ export default function App() {
         speechBubbles: null,
         scrambleActive: false,
         currentDrawing: null,
-        players: resetPlayers
+        players: setup.players
       });
 
       broadcastAnnouncement(t.annMissionStarted, 'normal');
@@ -1851,14 +1846,13 @@ export default function App() {
             onTriggerEmergencyVote={() => {
               db.ref(`spy_rooms/${currentRoomCode}`).update({
                 status: 'voting',
-                voteTimeLeft: 80,
+                voteTimeLeft: DEFAULT_VOTE_SECONDS,
                 votes: null
               });
               broadcastAnnouncement(t.annEmergencyVote, 'danger');
             }}
             onSendGameClue={(word, targetRound, targetTurnIndex) => {
               const snapRoom = lastRoomSnapshotRef.current;
-              // Guard: strictly ignore stale or race-condition submissions, or if already played this round
               if (
                 snapRoom?.status !== 'playing' ||
                 snapRoom?.round !== targetRound ||
@@ -1869,10 +1863,16 @@ export default function App() {
                 return;
               }
 
+              const senderName = profileNameRef.current || currentUser.displayName || 'Agent';
+              const senderAvatar =
+                profileAvatarRef.current ||
+                currentUser.photoURL ||
+                `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`;
+
               db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
                 uid: currentUser.uid,
-                sender: currentUser.displayName || 'Agent',
-                avatar: currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
+                sender: senderName,
+                avatar: senderAvatar,
                 text: word,
                 round: targetRound,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
@@ -1892,7 +1892,11 @@ export default function App() {
                 return;
               }
 
-              const pName = currentUser.displayName || 'Agent';
+              const pName = profileNameRef.current || currentUser.displayName || 'Agent';
+              const pAvatar =
+                profileAvatarRef.current ||
+                currentUser.photoURL ||
+                `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`;
               const skipMsg = lang === 'ar' ? '⏩ تفويت الدور' : '⏩ Pass Turn';
               db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentUser.uid}`).set({
                 text: skipMsg,
@@ -1901,7 +1905,7 @@ export default function App() {
               db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
                 uid: currentUser.uid,
                 sender: pName,
-                avatar: currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
+                avatar: pAvatar,
                 text: skipMsg,
                 round: targetRound,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
@@ -1916,7 +1920,7 @@ export default function App() {
             }}
             onSendSpyChat={msg => {
               db.ref(`spy_rooms/${currentRoomCode}/spyChat`).push({
-                sender: currentUser.displayName || 'Agent',
+                sender: profileNameRef.current || currentUser.displayName || 'Agent',
                 text: msg
               });
             }}
@@ -1932,6 +1936,7 @@ export default function App() {
               db.ref(`spy_rooms/${currentRoomCode}/votes/${currentUser.uid}`).set(target);
               showToast(t.msgVoteRecorded, 'success');
             }}
+            onLeaveRoom={leaveRoom}
           />
         ) : isGameOver && myPlayer?.postGame !== 'inLobby' ? (
           <GameOverScreen
@@ -1942,17 +1947,12 @@ export default function App() {
                 postGame: 'inLobby'
               });
               const snap = await db.ref(`spy_rooms/${currentRoomCode}/players`).once('value');
-              const pObj = snap.val() || {};
-              // Only human players need to acknowledge returning to lobby
-              const viewing = Object.values(pObj).some((p: unknown) => {
-                const pl = p as PlayerData;
-                return !pl.isBot && !pl.uid.startsWith('bot_') && pl.postGame !== 'inLobby';
-              });
+              const pObj = (snap.val() || {}) as Record<string, PlayerData>;
 
-              if (!viewing) {
+              if (shouldResetGameOverToLobby(pObj)) {
                 const reset: Record<string, PlayerData> = {};
                 Object.keys(pObj).forEach(uid => {
-                  reset[uid] = { ...(pObj[uid] as PlayerData), isSpectator: false, postGame: null };
+                  reset[uid] = { ...pObj[uid], isSpectator: false, postGame: null };
                 });
                 await db.ref(`spy_rooms/${currentRoomCode}`).update({
                   status: 'waiting',
@@ -1965,6 +1965,11 @@ export default function App() {
                   turnOrder: null,
                   turnIndex: null,
                   turnTimeLeft: null,
+                  ejectionEvent: null,
+                  ejectionEndsAt: null,
+                  blackoutActive: false,
+                  blackoutEndsAt: null,
+                  completedTurnsThisRound: null,
                   players: reset
                 });
               }
@@ -2007,7 +2012,7 @@ export default function App() {
             onLeaveRoom={leaveRoom}
             onMakeHost={uid => {
               const targetPlayer = roomData?.players?.[uid];
-              if (targetPlayer?.isBot || uid.startsWith('bot_')) {
+              if (isBotPlayer(targetPlayer, uid)) {
                 showToast(t.toastCannotAssignBotHost, 'danger');
                 return;
               }
@@ -2016,8 +2021,8 @@ export default function App() {
             onKickPlayer={uid => db.ref(`spy_rooms/${currentRoomCode}/players/${uid}`).remove()}
             onSendFriendRequest={async targetUid => {
               await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set({
-                name: currentUser.displayName || 'Agent',
-                avatar: currentUser.photoURL || '',
+                name: profileNameRef.current || currentUser.displayName || 'Agent',
+                avatar: profileAvatarRef.current || currentUser.photoURL || '',
                 timestamp: firebase.database.ServerValue.TIMESTAMP
               });
               await db.ref(`users/${currentUser.uid}/sentRequests/${targetUid}`).set(true);
@@ -2032,8 +2037,8 @@ export default function App() {
                 since: now
               });
               await db.ref(`users/${uid}/friends/${currentUser.uid}`).set({
-                name: currentUser.displayName || 'Agent',
-                avatar: currentUser.photoURL || '',
+                name: profileNameRef.current || currentUser.displayName || 'Agent',
+                avatar: profileAvatarRef.current || currentUser.photoURL || '',
                 since: now
               });
               await db.ref(`users/${currentUser.uid}/friendRequests/${uid}`).remove();
@@ -2042,7 +2047,7 @@ export default function App() {
             }}
             onSendChatMessage={txt => {
               db.ref(`spy_rooms/${currentRoomCode}/lobbyChat`).push({
-                sender: currentUser.displayName || 'Agent',
+                sender: profileNameRef.current || currentUser.displayName || 'Agent',
                 text: txt
               });
             }}
@@ -2110,7 +2115,7 @@ export default function App() {
         isOpen={quickMatchModalOpen}
         onClose={() => setQuickMatchModalOpen(false)}
         onMatchFound={code => {
-          handleRequestJoinRoom(code);
+          joinRoom(code);
         }}
         onToast={showToast}
       />

@@ -7,6 +7,7 @@ import { RoleDossierCard } from '../components/RoleDossierCard';
 import { db } from '../firebase';
 import firebase from 'firebase/compat/app';
 import { getSecretWordDisplay, CATEGORY_META } from '../words';
+import { getEffectiveTurnSeconds } from '../gameEngine';
 import { CATEGORY_STYLES } from '../wordVisuals';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
 import { QuickVoiceControls } from '../components/QuickVoiceControls';
@@ -95,8 +96,11 @@ export const GameScreen: React.FC<Props> = ({
   const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const localStrokesRef = useRef<Array<Array<{ x: number; y: number }>>>([]);
+  const isDrawingRef = useRef<boolean>(false);
   const lastPulseSecondRef = useRef<number>(-1);
   const lastDrawingSyncRef = useRef<number>(0);
+  const bubbleCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const t = dictionary[lang];
   const playersObj = room.players || {};
@@ -118,12 +122,15 @@ export const GameScreen: React.FC<Props> = ({
   const isMyTurn = !amSpectator && currentTurnUid === currentUserUid && !hasAlreadyPlayedThisRound;
 
   const currentRound = room.round || 1;
-  const timeLeft = room.turnTimeLeft != null ? room.turnTimeLeft : room.turnSeconds || 20;
+  const effectiveTurnDuration = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
+  const timeLeft = room.turnTimeLeft != null ? room.turnTimeLeft : effectiveTurnDuration;
 
-  // Undercover Agent role info
+  // Undercover Agent role info (supports 1 or more spies)
   const isUndercover = room.gameMode === 'undercover' && room.undercoverUid === currentUserUid;
-  const firstSpyUid = (room.spies || [])[0];
-  const spyNameForUndercover = firstSpyUid ? playersObj[firstSpyUid]?.name || 'Unknown' : 'Unknown';
+  const spyNameForUndercover = (room.spies || [])
+    .map(sUid => playersObj[sUid]?.name)
+    .filter(Boolean)
+    .join(' ، ') || 'Unknown';
 
   // Spectator count
   const spectatorCount = Object.values(playersObj).filter(p => p.isSpectator).length;
@@ -141,6 +148,9 @@ export const GameScreen: React.FC<Props> = ({
     bubblesRef.on('value', onBubbles);
     return () => {
       bubblesRef.off('value', onBubbles);
+      if (bubbleCleanupTimerRef.current) {
+        clearTimeout(bubbleCleanupTimerRef.current);
+      }
     };
   }, [roomCode]);
 
@@ -154,18 +164,20 @@ export const GameScreen: React.FC<Props> = ({
       sound.playGlitchStatic();
       sound.triggerHaptic('heavy');
 
-      // The split-second intel flash triggers with dramatic tension
+      let hideTimer: ReturnType<typeof setTimeout> | null = null;
       const flashTimer = setTimeout(() => {
         setShowBlackoutFlash(true);
         sound.triggerHaptic('light');
-        // Split-second flash visible for 700ms - ultra fast, rewarding sharp focus!
-        const hideTimer = setTimeout(() => {
+        // Split-second flash visible for 750ms - ultra fast, rewarding sharp focus!
+        hideTimer = setTimeout(() => {
           setShowBlackoutFlash(false);
-        }, 700);
-        return () => clearTimeout(hideTimer);
+        }, 750);
       }, 750);
 
-      return () => clearTimeout(flashTimer);
+      return () => {
+        clearTimeout(flashTimer);
+        if (hideTimer) clearTimeout(hideTimer);
+      };
     } else {
       setShowBlackoutFlash(false);
     }
@@ -183,9 +195,7 @@ export const GameScreen: React.FC<Props> = ({
     }
   }, [timeLeft]);
 
-  // Silent drawing synchronization
-  useEffect(() => {
-    if (room.gameMode !== 'silent') return;
+  const drawStrokesOnCanvas = (strokes: Array<Array<{ x: number; y: number }>>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -199,7 +209,6 @@ export const GameScreen: React.FC<Props> = ({
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
-    const strokes = room.currentDrawing || [];
     strokes.forEach(stroke => {
       if (!stroke || stroke.length === 0) return;
       ctx.beginPath();
@@ -211,51 +220,77 @@ export const GameScreen: React.FC<Props> = ({
       });
       ctx.stroke();
     });
+  };
+
+  // Silent drawing synchronization
+  useEffect(() => {
+    if (room.gameMode !== 'silent') return;
+    if (!isDrawingRef.current) {
+      const remoteStrokes = room.currentDrawing || [];
+      localStrokesRef.current = remoteStrokes;
+      drawStrokesOnCanvas(remoteStrokes);
+    }
   }, [room.currentDrawing, room.gameMode]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isMyTurn || room.gameMode !== 'silent') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    try {
+      canvas.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore if unsupported
+    }
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
 
+    isDrawingRef.current = true;
     setIsDrawing(true);
-    const existing = room.currentDrawing || [];
-    const newStroke = [{ x, y }];
-    db.ref(`spy_rooms/${roomCode}/currentDrawing`).set([...existing, newStroke]);
+    const updated = [...localStrokesRef.current, [{ x, y }]];
+    localStrokesRef.current = updated;
+    drawStrokesOnCanvas(updated);
+    lastDrawingSyncRef.current = Date.now();
+    db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(updated).catch(() => {});
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !isMyTurn || room.gameMode !== 'silent') return;
+    if (!isDrawingRef.current || !isMyTurn || room.gameMode !== 'silent') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const now = Date.now();
-    if (now - lastDrawingSyncRef.current < 40) return;
-    lastDrawingSyncRef.current = now;
-
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
 
-    const existing = [...(room.currentDrawing || [])];
+    const existing = localStrokesRef.current;
     if (existing.length > 0) {
-      const currentStroke = [...existing[existing.length - 1], { x, y }];
-      existing[existing.length - 1] = currentStroke;
-      db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(existing);
+      existing[existing.length - 1] = [...existing[existing.length - 1], { x, y }];
+      drawStrokesOnCanvas(existing);
+
+      const now = Date.now();
+      if (now - lastDrawingSyncRef.current >= 90) {
+        lastDrawingSyncRef.current = now;
+        db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(existing).catch(() => {});
+      }
     }
   };
 
   const handlePointerUp = () => {
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
     setIsDrawing(false);
+    if (isMyTurn && room.gameMode === 'silent' && localStrokesRef.current.length > 0) {
+      db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(localStrokesRef.current).catch(() => {});
+    }
   };
 
   const clearCanvas = () => {
     if (!isMyTurn) return;
     sound.playClick();
-    db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(null);
+    localStrokesRef.current = [];
+    drawStrokesOnCanvas([]);
+    db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(null).catch(() => {});
   };
 
   const finishDrawingTurn = () => {
@@ -272,7 +307,8 @@ export const GameScreen: React.FC<Props> = ({
         text,
         timestamp: firebase.database.ServerValue.TIMESTAMP
       });
-      setTimeout(() => {
+      if (bubbleCleanupTimerRef.current) clearTimeout(bubbleCleanupTimerRef.current);
+      bubbleCleanupTimerRef.current = setTimeout(() => {
         db.ref(`spy_rooms/${roomCode}/speechBubbles/${currentUserUid}`).remove().catch(() => {});
       }, 6000);
     } catch {
@@ -302,13 +338,26 @@ export const GameScreen: React.FC<Props> = ({
       return onToast(t.errOneWordOnly, 'danger');
     }
 
-    const secretWordEn = (room.word || '').trim().toLowerCase();
-    const secretWordAr = (room.wordAr || '').trim();
-    if (
-      (secretWordEn && clean.toLowerCase() === secretWordEn) ||
-      (secretWordAr && clean === secretWordAr)
-    ) {
-      return onToast(t.errCannotTypeSecretWord, 'danger');
+    // Crew/Undercover cannot type the secret word; Chameleon spy cannot type their own decoy word
+    // (avoid blocking the real secret word for a non-crew spy, which would reveal it!)
+    if (!isSpy) {
+      const secretWordEn = (room.word || '').trim().toLowerCase();
+      const secretWordAr = (room.wordAr || '').trim();
+      if (
+        (secretWordEn && clean.toLowerCase() === secretWordEn) ||
+        (secretWordAr && clean === secretWordAr)
+      ) {
+        return onToast(t.errCannotTypeSecretWord, 'danger');
+      }
+    } else if (isChameleonSpy) {
+      const decoyEn = (myPlayer.chameleonWord || '').trim().toLowerCase();
+      const decoyAr = (myPlayer.chameleonWordAr || '').trim();
+      if (
+        (decoyEn && clean.toLowerCase() === decoyEn) ||
+        (decoyAr && clean === decoyAr)
+      ) {
+        return onToast(t.errCannotTypeSecretWord, 'danger');
+      }
     }
 
     sendSpeechBubble(clean);
@@ -602,7 +651,7 @@ export const GameScreen: React.FC<Props> = ({
                 className={`${timeLeft <= 5 ? 'stroke-rose-500' : 'stroke-sky-400'} transition-all duration-1000 ease-linear`}
                 strokeWidth="2.5"
                 strokeDasharray="56.5"
-                strokeDashoffset={56.5 * (1 - Math.max(0, Math.min(1, timeLeft / (room.turnSeconds || 20))))}
+                strokeDashoffset={56.5 * (1 - Math.max(0, Math.min(1, timeLeft / effectiveTurnDuration)))}
                 strokeLinecap="round"
                 fill="none"
               />
@@ -799,6 +848,7 @@ export const GameScreen: React.FC<Props> = ({
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
               onPointerLeave={handlePointerUp}
               className={`w-full aspect-[2/1] rounded-2xl bg-slate-950/90 border border-sky-400/40 touch-none block ${
                 isMyTurn ? 'cursor-crosshair shadow-[0_0_15px_rgba(56,189,248,0.2)]' : 'cursor-default'
@@ -808,6 +858,7 @@ export const GameScreen: React.FC<Props> = ({
             {isMyTurn ? (
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={clearCanvas}
                   className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer"
                 >
@@ -815,6 +866,7 @@ export const GameScreen: React.FC<Props> = ({
                   <span>{t.btnClearDrawing}</span>
                 </button>
                 <button
+                  type="button"
                   onClick={finishDrawingTurn}
                   className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 text-xs font-black flex items-center justify-center gap-1 transition cursor-pointer shadow-md"
                 >
@@ -864,6 +916,20 @@ export const GameScreen: React.FC<Props> = ({
                     <Send className="w-4 h-4" />
                     <span>{t.btnSend || 'Send'}</span>
                   </button>
+                  {onSkipTurn && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sound.playClick();
+                        onSkipTurn(currentRound, turnIndex);
+                      }}
+                      title={t.skipTurnTooltip}
+                      className="px-3 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
+                    >
+                      <FastForward className="w-4 h-4" />
+                      <span className="hidden sm:inline">{t.btnPass}</span>
+                    </button>
+                  )}
                 </div>
               </form>
             ) : (

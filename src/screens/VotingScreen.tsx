@@ -2,16 +2,17 @@ import React from 'react';
 import { dictionary } from '../translations';
 import { Language, RoomData } from '../types';
 import { sound } from '../audio';
-import { AlertCircle, Clock, Eye } from 'lucide-react';
+import { AlertCircle, Clock, Eye, FastForward, LogOut } from 'lucide-react';
 
 interface Props {
   lang: Language;
   currentUserUid: string;
   room: RoomData;
   onCastVote: (targetUid: string) => void;
+  onLeaveRoom?: () => void;
 }
 
-export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCastVote }) => {
+export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCastVote, onLeaveRoom }) => {
   const t = dictionary[lang];
   const playersObj = room.players || {};
   const allPlayers = Object.values(playersObj);
@@ -42,6 +43,12 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
     sound.triggerHaptic('medium');
     onCastVote(targetUid);
   };
+
+  const skipVoters = Object.keys(votes)
+    .filter(voterUid => votes[voterUid] === 'SKIP')
+    .map(voterUid => playersObj[voterUid])
+    .filter(Boolean);
+  const isMySkip = votes[currentUserUid] === 'SKIP';
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-20 pt-4 text-start">
@@ -80,7 +87,6 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
 
             const isMyTarget = votes[currentUserUid] === p.uid;
             const isSelf = p.uid === currentUserUid;
-            // Players can now vote for ANY active player, including themselves!
             const isSelectable = canVote;
 
             return (
@@ -130,6 +136,41 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
           })}
         </div>
 
+        {/* Skip Vote Button */}
+        {!amSpectator && (
+          <button
+            type="button"
+            disabled={!canVote}
+            onClick={() => handleVote('SKIP')}
+            className={`w-full flex items-center justify-between p-3.5 rounded-2xl border transition-all ${
+              canVote
+                ? 'cursor-pointer hover:border-amber-400/70 hover:bg-slate-800/80 active:scale-[0.99]'
+                : 'cursor-default opacity-80'
+            } ${
+              isMySkip
+                ? 'border-amber-400 bg-amber-500/20 shadow-[0_0_20px_rgba(251,191,36,0.3)]'
+                : 'border-slate-800 bg-slate-950/60 text-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
+              <FastForward className="w-4 h-4 text-amber-400" />
+              <span>{t.btnSkipVote}</span>
+            </div>
+
+            <div className="flex items-center -space-x-2 rtl:space-x-reverse">
+              {skipVoters.map(v => (
+                <img
+                  key={v.uid}
+                  src={v.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${v.uid}`}
+                  alt={v.name}
+                  title={v.name}
+                  className="w-7 h-7 rounded-full border-2 border-amber-400 object-cover shadow-md"
+                />
+              ))}
+            </div>
+          </button>
+        )}
+
         {/* Disqualified notice if applicable */}
         {isDisqualified && (
           <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-xs text-rose-300 font-bold">
@@ -138,7 +179,7 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
         )}
 
         {spectatorCount > 0 && (
-          <div className="text-center pt-2">
+          <div className="text-center pt-1">
             <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 font-bold">
               <Eye className="w-3.5 h-3.5" />
               <span>
@@ -146,6 +187,17 @@ export const VotingScreen: React.FC<Props> = ({ lang, currentUserUid, room, onCa
               </span>
             </span>
           </div>
+        )}
+
+        {onLeaveRoom && (
+          <button
+            type="button"
+            onClick={onLeaveRoom}
+            className="w-full py-2.5 rounded-2xl bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-400 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>{t.btnLeaveStation}</span>
+          </button>
         )}
       </div>
     </div>

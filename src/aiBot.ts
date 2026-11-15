@@ -1,4 +1,4 @@
-import { CategoryKey, Language, PlayerData } from './types';
+import { CategoryKey, GameMode, Language, PlayerData } from './types';
 
 // Diverse pool of realistic, human astronaut names in Arabic and English
 const ARABIC_BOT_NAMES = [
@@ -181,6 +181,10 @@ const SPECIFIC_WORD_ASSOCIATIONS: Record<string, { ar: string[]; en: string[] }>
     ar: ['عالم', 'سيارات', 'مهمات', 'شرطة', 'مدينة', 'أسلحة', 'سرقة', 'أكشن'],
     en: ['open-world', 'cars', 'missions', 'police', 'city', 'weapons', 'heist']
   },
+  'gta v': {
+    ar: ['عالم', 'سيارات', 'مهمات', 'شرطة', 'مدينة', 'أسلحة', 'سرقة', 'أكشن'],
+    en: ['open-world', 'cars', 'missions', 'police', 'city', 'weapons', 'heist']
+  },
   'pubg': {
     ar: ['باراشوت', 'طيارة', 'لوت', 'أسلحة', 'زون', 'دروب', 'بقاء', 'سلاح'],
     en: ['parachute', 'airdrop', 'loot', 'weapons', 'zone', 'survival', 'tactical']
@@ -344,18 +348,33 @@ function toSingleWord(raw: string, isAr: boolean): string {
  */
 export function generateSmartBotClue(params: {
   isSpy: boolean;
+  gameMode?: GameMode;
+  chameleonWord?: string;
+  chameleonWordAr?: string;
   word: string;
   wordAr: string;
   category: CategoryKey;
   language: Language;
   previousClues: string[];
 }): string {
-  const { isSpy, word, wordAr, category, language, previousClues } = params;
+  const {
+    isSpy,
+    gameMode,
+    chameleonWord,
+    chameleonWordAr,
+    word,
+    wordAr,
+    category,
+    language,
+    previousClues
+  } = params;
   const isAr = language === 'ar';
   const usedClues = new Set(previousClues.map(c => toSingleWord(c, isAr).toLowerCase()));
 
-  // 🕵️ If Bot is the SPY (Doesn't know the word - Blends in like a smart human with single word):
-  if (isSpy) {
+  const isChameleonSpy = isSpy && gameMode === 'chameleon' && !!(chameleonWord || chameleonWordAr);
+
+  // 🕵️ If Bot is the SPY (Non-Chameleon - Doesn't know the word - Blends in like a smart human with single word):
+  if (isSpy && !isChameleonSpy) {
     const camoPool = SPY_CAMOUFLAGE_CLUES[isAr ? 'ar' : 'en'];
     const candidates = camoPool.filter(c => !usedClues.has(c.toLowerCase()));
     if (candidates.length > 0) {
@@ -365,17 +384,28 @@ export function generateSmartBotClue(params: {
     return isAr ? 'معروف' : 'popular';
   }
 
-  // 👨‍🚀 If Bot is CREW (Knows the word - Gives authentic, single-word clues):
-  const cleanEn = (word || '').toLowerCase().trim();
-  const cleanAr = (wordAr || '').toLowerCase().trim();
+  // 👨‍🚀 If Bot is CREW or CHAMELEON SPY (gives authentic single-word clue based on its visible word):
+  const effectiveWordEn = isChameleonSpy ? (chameleonWord || '') : (word || '');
+  const effectiveWordAr = isChameleonSpy ? (chameleonWordAr || '') : (wordAr || '');
+  const cleanEn = effectiveWordEn.toLowerCase().trim();
+  const cleanAr = effectiveWordAr.toLowerCase().trim();
+  const forbiddenEn = (word || '').toLowerCase().trim();
+  const forbiddenAr = (wordAr || '').toLowerCase().trim();
 
   // 1. First check if we have dedicated word-specific associations!
   const directMatch = SPECIFIC_WORD_ASSOCIATIONS[cleanEn] || SPECIFIC_WORD_ASSOCIATIONS[cleanAr];
   if (directMatch) {
     const specificList = isAr ? directMatch.ar : directMatch.en;
-    const available = specificList.filter(
-      c => !usedClues.has(c.toLowerCase()) && c.toLowerCase() !== cleanEn && c.toLowerCase() !== cleanAr
-    );
+    const available = specificList.filter(c => {
+      const lower = c.toLowerCase();
+      return (
+        !usedClues.has(lower) &&
+        lower !== cleanEn &&
+        lower !== cleanAr &&
+        lower !== forbiddenEn &&
+        lower !== forbiddenAr
+      );
+    });
     if (available.length > 0) {
       const picked = available[Math.floor(Math.random() * available.length)];
       return toSingleWord(picked, isAr);
@@ -389,7 +419,7 @@ export function generateSmartBotClue(params: {
   const filtered = pool.filter(clue => {
     const cLower = clue.toLowerCase();
     if (usedClues.has(cLower)) return false;
-    if (cLower === cleanEn || cLower === cleanAr) return false;
+    if (cLower === cleanEn || cLower === cleanAr || cLower === forbiddenEn || cLower === forbiddenAr) return false;
     if (cleanEn.includes(cLower) || cleanAr.includes(cLower)) return false;
     return true;
   });
@@ -400,6 +430,104 @@ export function generateSmartBotClue(params: {
   }
 
   return isAr ? 'مميز' : 'special';
+}
+
+/**
+ * Generates normalized canvas doodle strokes for AI bots during Silent Mode
+ * so bots participate visually without leaking text words.
+ */
+export function generateBotSilentDrawing(
+  category: CategoryKey,
+  isSpy: boolean
+): Array<Array<{ x: number; y: number }>> {
+  if (isSpy) {
+    // Question-mark / ambiguous squiggle
+    return [
+      [
+        { x: 0.42, y: 0.35 },
+        { x: 0.48, y: 0.25 },
+        { x: 0.56, y: 0.28 },
+        { x: 0.55, y: 0.42 },
+        { x: 0.5, y: 0.52 },
+        { x: 0.5, y: 0.62 }
+      ],
+      [
+        { x: 0.5, y: 0.72 },
+        { x: 0.5, y: 0.76 }
+      ]
+    ];
+  }
+
+  switch (category) {
+    case 'players':
+      // Simple ball circle + kick arc
+      return [
+        [
+          { x: 0.5, y: 0.3 },
+          { x: 0.6, y: 0.38 },
+          { x: 0.58, y: 0.55 },
+          { x: 0.44, y: 0.56 },
+          { x: 0.4, y: 0.4 },
+          { x: 0.5, y: 0.3 }
+        ],
+        [
+          { x: 0.28, y: 0.7 },
+          { x: 0.45, y: 0.64 },
+          { x: 0.68, y: 0.72 }
+        ]
+      ];
+    case 'food':
+      // Simple bowl / slice triangle
+      return [
+        [
+          { x: 0.35, y: 0.3 },
+          { x: 0.65, y: 0.3 },
+          { x: 0.5, y: 0.72 },
+          { x: 0.35, y: 0.3 }
+        ],
+        [
+          { x: 0.46, y: 0.42 },
+          { x: 0.54, y: 0.44 }
+        ]
+      ];
+    case 'places':
+      // Simple pyramid / landmark peak
+      return [
+        [
+          { x: 0.25, y: 0.72 },
+          { x: 0.5, y: 0.25 },
+          { x: 0.75, y: 0.72 },
+          { x: 0.25, y: 0.72 }
+        ]
+      ];
+    case 'games':
+      // Gamepad outline
+      return [
+        [
+          { x: 0.3, y: 0.4 },
+          { x: 0.7, y: 0.4 },
+          { x: 0.75, y: 0.62 },
+          { x: 0.62, y: 0.62 },
+          { x: 0.55, y: 0.54 },
+          { x: 0.45, y: 0.54 },
+          { x: 0.38, y: 0.62 },
+          { x: 0.25, y: 0.62 },
+          { x: 0.3, y: 0.4 }
+        ]
+      ];
+    default:
+      // Star / spark sketch
+      return [
+        [
+          { x: 0.5, y: 0.22 },
+          { x: 0.58, y: 0.68 },
+          { x: 0.35, y: 0.4 },
+          { x: 0.65, y: 0.4 },
+          { x: 0.42, y: 0.68 },
+          { x: 0.5, y: 0.22 }
+        ]
+      ];
+  }
 }
 
 /**

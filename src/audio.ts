@@ -10,9 +10,11 @@ class AudioManager {
   private bgmVolume: number = 0.28;
   private bgmGain: GainNode | null = null;
   private isBgmPlaying: boolean = false;
+  private wasBgmPlayingBeforeHide: boolean = false;
   private bgmTimer: number | null = null;
   private bgmStep: number = 0;
   private currentBgmMode: BgmMode = 'ambient';
+  private lastTactileClickAt: number = 0;
 
   constructor() {
     const savedVol = localStorage.getItem('spy_station_vol');
@@ -45,6 +47,18 @@ class AudioManager {
       window.addEventListener('click', unlockAudio, { once: true, passive: true });
       window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
       window.addEventListener('pointerdown', unlockAudio, { once: true, passive: true });
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          this.wasBgmPlayingBeforeHide = this.isBgmPlaying;
+          if (this.isBgmPlaying) {
+            this.stopBgm();
+          }
+        } else if (this.wasBgmPlayingBeforeHide && !this.bgmMuted) {
+          this.wasBgmPlayingBeforeHide = false;
+          this.startBgm();
+        }
+      });
     }
   }
 
@@ -371,6 +385,9 @@ class AudioManager {
 
   public playTactileClick() {
     if (this.muted || this.volume <= 0) return;
+    const nowMs = Date.now();
+    if (nowMs - this.lastTactileClickAt < 65) return;
+    this.lastTactileClickAt = nowMs;
     try {
       this.initCtx();
       if (!this.ctx) return;

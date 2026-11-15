@@ -422,25 +422,25 @@ const TWIN_PAIRS_MAP: Record<string, string> = {
   // --- Movies & Series ---
   "Titanic": "Avatar", "Avatar": "Titanic",
   "The Dark Knight": "Joker", "Joker": "The Dark Knight",
-  "Harry Potter": "Lord of the Rings", "Lord of the Rings": "Harry Potter",
+  "Harry Potter": "The Lord of the Rings", "The Lord of the Rings": "Harry Potter",
   "Inception": "Interstellar", "Interstellar": "Inception",
   "Avengers": "Spider-Man", "Spider-Man": "Avengers",
   "Kirah Wel Genn": "El Feel El Azraq", "El Feel El Azraq": "Kirah Wel Genn",
-  "El Lemby": "Booha", "Booha": "El Lemby",
-  "Ibrahim Labyad": "Tito", "Tito": "Ibrahim Labyad",
-  "Squid Game": "Money Heist", "Money Heist": "Squid Game",
-  "Breaking Bad": "Better Call Saul", "Better Call Saul": "Breaking Bad",
-  "Game of Thrones": "House of the Dragon", "House of the Dragon": "Game of Thrones",
-  "The Godfather": "Scarface", "Scarface": "The Godfather",
+  "El Lemby": "X-Large", "X-Large": "El Lemby",
+  "Ibrahim El Abyad": "Tito", "Tito": "Ibrahim El Abyad",
+  "Squid Game": "La Casa De Papel", "La Casa De Papel": "Squid Game",
+  "Breaking Bad": "Narcos", "Narcos": "Breaking Bad",
+  "Game of Thrones": "Vikings", "Vikings": "Game of Thrones",
+  "The Godfather": "Fight Club", "Fight Club": "The Godfather",
 
   // --- Games ---
   "PUBG": "Free Fire", "Free Fire": "PUBG",
-  "Fortnite": "Warzone", "Warzone": "Fortnite",
-  "FIFA": "PES", "PES": "FIFA",
-  "GTA": "Cyberpunk 2077", "Cyberpunk 2077": "GTA",
+  "Fortnite": "Apex Legends", "Apex Legends": "Fortnite",
+  "FIFA": "eFootball", "eFootball": "FIFA",
+  "GTA V": "Cyberpunk 2077", "Cyberpunk 2077": "GTA V",
   "Minecraft": "Roblox", "Roblox": "Minecraft",
   "League of Legends": "Dota 2", "Dota 2": "League of Legends",
-  "Valorant": "CS:GO", "CS:GO": "Valorant",
+  "Valorant": "Counter-Strike", "Counter-Strike": "Valorant",
   "Elden Ring": "Dark Souls", "Dark Souls": "Elden Ring",
   "Among Us": "Fall Guys", "Fall Guys": "Among Us",
   "Subway Surfers": "Temple Run", "Temple Run": "Subway Surfers",
@@ -448,59 +448,63 @@ const TWIN_PAIRS_MAP: Record<string, string> = {
   // --- Animals ---
   "Lion": "Tiger", "Tiger": "Lion",
   "Wolf": "Fox", "Fox": "Wolf",
-  "Cat": "Dog", "Dog": "Cat",
   "Eagle": "Falcon", "Falcon": "Eagle",
   "Dolphin": "Whale", "Whale": "Dolphin",
   "Shark": "Orca", "Orca": "Shark",
   "Elephant": "Rhino", "Rhino": "Elephant",
   "Giraffe": "Zebra", "Zebra": "Giraffe",
   "Cheetah": "Leopard", "Leopard": "Cheetah",
-  "Rabbit": "Hamster", "Hamster": "Rabbit",
+  "Rabbit": "Squirrel", "Squirrel": "Rabbit",
   "Monkey": "Chimpanzee", "Chimpanzee": "Monkey",
 
   // --- Jobs ---
   "Doctor": "Pharmacist", "Pharmacist": "Doctor",
-  "Nurse": "Surgeon", "Surgeon": "Nurse",
+  "Nurse": "Doctor",
   "Engineer": "Architect", "Architect": "Engineer",
   "Pilot": "Flight Attendant", "Flight Attendant": "Pilot",
-  "Police Officer": "Detective", "Detective": "Police Officer",
-  "Teacher": "Professor", "Professor": "Teacher",
+  "Police Officer": "Security Guard", "Security Guard": "Police Officer",
+  "Teacher": "Translator", "Translator": "Teacher",
   "Judge": "Lawyer", "Lawyer": "Judge",
   "Chef": "Baker", "Baker": "Chef",
-  "Astronaut": "Astronomer", "Astronomer": "Astronaut",
-  "Programmer": "Data Scientist", "Data Scientist": "Programmer",
+  "Astronaut": "Scientist", "Scientist": "Astronaut",
+  "Programmer": "Data Analyst", "Data Analyst": "Programmer",
 
   // --- Singers ---
   "Amr Diab": "Tamer Hosny", "Tamer Hosny": "Amr Diab",
-  "Mohamed Hamaki": "Ramy Sabry", "Ramy Sabry": "Mohamed Hamaki",
+  "Mohamed Hamaki": "Amr Diab",
   "Wegz": "Marwan Pablo", "Marwan Pablo": "Wegz",
   "Sherine": "Angham", "Angham": "Sherine",
-  "Umm Kulthum": "Abdel Halim Hafez", "Abdel Halim Hafez": "Umm Kulthum",
-  "Drake": "Travis Scott", "Travis Scott": "Drake",
-  "The Weeknd": "Bruno Mars", "Bruno Mars": "The Weeknd",
-  "Taylor Swift": "Ariana Grande", "Ariana Grande": "Taylor Swift",
-  "Billie Eilish": "Olivia Rodrigo", "Olivia Rodrigo": "Billie Eilish",
-  "Eminem": "50 Cent", "50 Cent": "Eminem"
+  "Mohamed Mounir": "Ali El Haggar", "Ali El Haggar": "Mohamed Mounir",
+  "Drake": "The Weeknd", "The Weeknd": "Drake",
+  "Bruno Mars": "Ed Sheeran", "Ed Sheeran": "Bruno Mars",
+  "Taylor Swift": "Adele", "Adele": "Taylor Swift",
+  "Shakira": "Rihanna", "Rihanna": "Shakira",
+  "Beyonce": "Rihanna"
 };
+
+const LOWER_TWIN_PAIRS_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(TWIN_PAIRS_MAP).map(([k, v]) => [k.toLowerCase(), v])
+);
 
 export function getSmartTwinWord(
   targetPair: [string, string],
-  category: CategoryKey,
+  _category: CategoryKey,
   availableList: [string, string][]
 ): [string, string] {
   const targetEn = targetPair[0].trim();
 
-  // 1. Direct matched pair
-  const twinEn = TWIN_PAIRS_MAP[targetEn];
+  // 1. Direct matched pair (case-insensitive)
+  const twinEn = TWIN_PAIRS_MAP[targetEn] || LOWER_TWIN_PAIRS_MAP[targetEn.toLowerCase()];
   if (twinEn) {
-    const found = availableList.find(p => p[0].toLowerCase() === twinEn.toLowerCase());
+    const found = availableList.find(
+      p => p[0].toLowerCase() === twinEn.toLowerCase() && p[0].toLowerCase() !== targetEn.toLowerCase()
+    );
     if (found) return found;
   }
 
   // 2. Fallback: pick the closest neighbor in the category list (next or prev item)
   const idx = availableList.findIndex(p => p[0] === targetPair[0]);
-  if (idx !== -1) {
-    // Pick adjacent neighbor
+  if (idx !== -1 && availableList.length > 1) {
     const neighborIdx = (idx % 2 === 0 ? idx + 1 : idx - 1 + availableList.length) % availableList.length;
     const neighbor = availableList[neighborIdx];
     if (neighbor && neighbor[0] !== targetPair[0]) {

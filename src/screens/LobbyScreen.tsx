@@ -5,6 +5,7 @@ import { CATEGORY_META } from '../words';
 import { Copy, Users, Settings, UserPlus, Play, LogOut, Send, Crown, Check, X, ShieldAlert, Bot, Trash2, Mic, MicOff, Headphones, HeadphoneOff, Clock, AlertTriangle } from 'lucide-react';
 import { sound } from '../audio';
 import { QuickVoiceControls } from '../components/QuickVoiceControls';
+import { getMinRequiredPlayers } from '../gameEngine';
 
 interface Props {
   lang: Language;
@@ -87,11 +88,7 @@ export const LobbyScreen: React.FC<Props> = ({
 
   const spyCount = room.spyCount || 1;
   const isMole = room.gameMode === 'mole';
-  // In mole mode: 2 spies requires at least 5 players (cannot play 4 players with 2 spies!).
-  // In other modes where spies don't know each other: 2 spies can play with 4 players!
-  const minRequiredPlayers = isMole
-    ? Math.max(5, (spyCount * 2) + 1)
-    : Math.max(3, spyCount * 2);
+  const minRequiredPlayers = getMinRequiredPlayers(room.gameMode, spyCount);
   const hasEnoughPlayers = activeCount >= minRequiredPlayers;
 
   // Check if all human players are in the lobby before allowing start

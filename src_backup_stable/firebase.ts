@@ -4,13 +4,13 @@ import 'firebase/compat/database';
 import 'firebase/compat/storage';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDtzl6tAzUWSpuqubdp9FU1PIMvK7tcl3I",
-  authDomain: "spy-station-new.firebaseapp.com",
-  databaseURL: "https://spy-station-new-default-rtdb.firebaseio.com",
-  projectId: "spy-station-new",
-  storageBucket: "spy-station-new.firebasestorage.app",
-  messagingSenderId: "917373852984",
-  appId: "1:917373852984:web:b40bc65040bdb0895ff5cd"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "placeholder-api-key",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "spy-station-new.firebaseapp.com",
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://spy-station-new-default-rtdb.firebaseio.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "spy-station-new",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "spy-station-new.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "917373852984",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:917373852984:web:b40bc65040bdb0895ff5cd"
 };
 
 // Initialize only once

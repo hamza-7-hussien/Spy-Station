@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Shield, Radio, Sparkles } from 'lucide-react';
 import { sound } from '../audio';
 
@@ -15,10 +15,13 @@ export const SciFiAirlockDoors: React.FC<SciFiAirlockDoorsProps> = ({
   sublabel = 'SECURITY CLEARANCE VERIFIED',
   onAnimationComplete
 }) => {
+  const prevIsOpenRef = useRef<boolean>(isOpen);
+
   useEffect(() => {
-    if (isOpen) {
+    if (!prevIsOpenRef.current && isOpen) {
       sound.playAirlockDoor();
     }
+    prevIsOpenRef.current = isOpen;
   }, [isOpen]);
 
   return (

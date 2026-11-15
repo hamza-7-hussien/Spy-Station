@@ -62,9 +62,9 @@ export interface RoomData {
   turnOrder?: string[];
   turnIndex?: number;
   turnTimeLeft?: number;
-  completedTurnsThisRound?: Record<string, boolean>; // uid -> true (strictly guarantees at most one turn per player/bot per round)
+  completedTurnsThisRound?: Record<string, boolean> | null; // uid -> true (strictly guarantees at most one turn per player/bot per round)
   voteTimeLeft?: number;
-  votes?: Record<string, string>; // voterUid -> targetUid or 'SKIP'
+  votes?: Record<string, string> | null; // voterUid -> targetUid or 'SKIP'
   winnerTeam?: 'crew' | 'spies' | null;
   finalSpies?: string[];
   finalPlayers?: Record<string, PlayerData>;
@@ -83,8 +83,10 @@ export interface RoomData {
   };
   voiceStates?: Record<string, VoiceUserState>;
   blackoutActive?: boolean;
+  blackoutEndsAt?: number | null;
   lastBlackoutRound?: number;
   isQuickMatch?: boolean;
+  ejectionEndsAt?: number | null;
   ejectionEvent?: {
     uid: string;
     name: string;

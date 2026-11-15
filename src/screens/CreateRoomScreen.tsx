@@ -3,6 +3,7 @@ import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { dictionary } from '../translations';
 import { Language, CategoryKey, GameMode } from '../types';
 import { CATEGORY_META } from '../words';
+import { getMaxAllowedSpies } from '../gameEngine';
 import {
   Rocket,
   X,
@@ -489,8 +490,17 @@ export const CreateRoomScreen: React.FC<Props> = ({
                     type="button"
                     onClick={() => {
                       sound.playTone(520, 'sine', 0.06);
+                      let effectiveMode = gameMode;
+                      if (gameMode === 'mole' && pNum < 5) {
+                        effectiveMode = 'normal';
+                        setGameMode('normal');
+                        onToast(t.switchedToClassicToastPlayers, 'normal');
+                      }
                       setMaxPlayers(pNum);
-                      if (spyCount >= Math.ceil(pNum / 2)) setSpyCount(Math.max(1, Math.floor((pNum - 1) / 2)));
+                      const maxAllowedForNum = getMaxAllowedSpies(effectiveMode, pNum);
+                      if (spyCount > maxAllowedForNum) {
+                        setSpyCount(Math.max(1, maxAllowedForNum));
+                      }
                     }}
                     className={`flex-1 py-1.5 rounded-xl font-mono text-xs font-bold transition cursor-pointer text-center ${
                       isSelected
@@ -507,12 +517,19 @@ export const CreateRoomScreen: React.FC<Props> = ({
 
           {/* 5. Turn Duration - Glowing Chips */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>{t.lblTurnSeconds}</span>
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>{t.lblTurnSeconds}</span>
+              </label>
+              {gameMode === 'rapid' && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/20 text-orange-300 border border-orange-400/40">
+                  ⚡ 7s (Rapid)
+                </span>
+              )}
+            </div>
 
-            <div className="grid grid-cols-5 gap-2">
+            <div className={`grid grid-cols-5 gap-2 ${gameMode === 'rapid' ? 'opacity-50 pointer-events-none' : ''}`}>
               {[15, 20, 30, 45, 60].map(sec => {
                 const isSelected = turnSeconds === sec;
                 return (
@@ -645,7 +662,7 @@ export const CreateRoomScreen: React.FC<Props> = ({
                 const Icon = mode.icon;
                 const isSelected = gameMode === mode.id;
                 const isMole = mode.id === 'mole';
-                const isMoleDisabled = isMole && (maxPlayers < 4 || spyCount < 2);
+                const isMoleDisabled = isMole && (maxPlayers < 5 || spyCount < 2);
 
                 return (
                   <button

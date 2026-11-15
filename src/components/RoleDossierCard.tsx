@@ -80,15 +80,15 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
         onPointerCancel={() => {
           if (!isPinned) setIsHolding(false);
         }}
-        className={`relative w-full rounded-3xl transition-transform duration-500 transform-style-preserve-3d cursor-pointer ${
+        className={`relative grid w-full rounded-3xl transition-transform duration-500 transform-style-preserve-3d cursor-pointer ${
           isFlipped ? 'rotate-y-180' : ''
         }`}
-        style={{ minHeight: '160px' }}
+        style={{ minHeight: '168px' }}
       >
         {/* ========================================================= */}
         {/* 🪪 FRONT FACE: UNREVEALED TOP-SECRET BIOMETRIC DOSSIER */}
         {/* ========================================================= */}
-        <div className="absolute inset-0 w-full h-full backface-hidden p-4 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 border-2 border-slate-700/80 hover:border-cyan-500/60 shadow-2xl flex flex-col justify-between overflow-hidden">
+        <div className="[grid-area:1/1] w-full h-full backface-hidden p-4 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-zinc-950 border-2 border-slate-700/80 hover:border-cyan-500/60 shadow-2xl flex flex-col justify-between overflow-hidden">
           {/* Animated laser scanner line while holding */}
           {isHolding && (
             <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_15px_rgba(56,189,248,1)] animate-laser-sweep pointer-events-none" />
@@ -132,6 +132,7 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
             </span>
             <button
               type="button"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={togglePin}
               className="px-2 py-0.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1 cursor-pointer"
             >
@@ -145,7 +146,7 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
         {/* 🎭 BACK FACE: REVEALED IDENTITY CARD (SPY OR CREW MEMBER) */}
         {/* ========================================================= */}
         <div
-          className={`absolute inset-0 w-full h-full backface-hidden rotate-y-180 p-4 rounded-3xl border-2 flex flex-col justify-between overflow-hidden shadow-2xl ${
+          className={`[grid-area:1/1] w-full h-full backface-hidden rotate-y-180 p-4 rounded-3xl border-2 flex flex-col justify-between overflow-hidden shadow-2xl ${
             isEffectiveSpy
               ? 'bg-gradient-to-br from-red-950 via-zinc-950 to-neutral-950 border-rose-500/90 shadow-[0_0_50px_rgba(244,63,94,0.6)]'
               : 'bg-gradient-to-br from-sky-950 via-slate-900 to-indigo-950 border-cyan-400/90 shadow-[0_0_50px_rgba(56,189,248,0.5)]'
@@ -192,6 +193,7 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
             {/* Pin / Freeze Button */}
             <button
               type="button"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={togglePin}
               className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition cursor-pointer border ${
                 isPinned

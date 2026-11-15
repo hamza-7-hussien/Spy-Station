@@ -41,6 +41,7 @@ export const QuickMatchModal: React.FC<Props> = ({
   const searchPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const roomListenerRef = useRef<(() => void) | null>(null);
   const hasLaunchedRef = useRef<boolean>(false);
+  const countdownStartedRef = useRef<boolean>(false);
 
   // Clean exit helper
   const cleanUpMatchmaking = async () => {
@@ -81,6 +82,7 @@ export const QuickMatchModal: React.FC<Props> = ({
       setJoinedPlayers([]);
       setCountdown(null);
       hasLaunchedRef.current = false;
+      countdownStartedRef.current = false;
       return;
     }
 
@@ -132,7 +134,7 @@ export const QuickMatchModal: React.FC<Props> = ({
 
       // If no queue room, also check public rooms waiting for players
       if (!targetCode) {
-        const publicSnap = await db.ref('spy_rooms').orderByChild('isPublic').equalTo(true).limitToLast(10).once('value');
+        const publicSnap = await db.ref('spy_rooms').orderByChild('visibility').equalTo('public').limitToLast(10).once('value');
         const pubRooms = publicSnap.val() || {};
         for (const code in pubRooms) {
           const rData = pubRooms[code];
@@ -170,11 +172,14 @@ export const QuickMatchModal: React.FC<Props> = ({
       uid: currentUserUid,
       name: currentUserName,
       avatar: currentUserAvatar,
+      joinedAt: Date.now(),
       isSpectator: false,
       postGame: 'inLobby'
     };
 
-    await db.ref(`spy_rooms/${code}/players/${currentUserUid}`).set(playerData);
+    const pRef = db.ref(`spy_rooms/${code}/players/${currentUserUid}`);
+    await pRef.set(playerData);
+    pRef.onDisconnect().remove();
     listenToRoom(code);
   };
 
@@ -182,7 +187,7 @@ export const QuickMatchModal: React.FC<Props> = ({
     // Generate clean alphanumeric code
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       code += chars[Math.floor(Math.random() * chars.length)];
     }
 
@@ -195,6 +200,7 @@ export const QuickMatchModal: React.FC<Props> = ({
       uid: currentUserUid,
       name: currentUserName,
       avatar: currentUserAvatar,
+      joinedAt: Date.now(),
       isSpectator: false,
       postGame: 'inLobby'
     };
@@ -202,9 +208,10 @@ export const QuickMatchModal: React.FC<Props> = ({
     const newRoom = {
       roomCode: code,
       name: lang === 'ar' ? `مباراة سريعة #${code}` : `Quick Match #${code}`,
+      originalHostUid: currentUserUid,
       hostUid: currentUserUid,
       status: 'waiting',
-      isPublic: true,
+      visibility: 'public',
       isQuickMatch: true,
       maxPlayers: targetPlayersCount,
       spyCount: 1,
@@ -246,10 +253,11 @@ export const QuickMatchModal: React.FC<Props> = ({
         return;
       }
 
-      // If we have enough players (4 or targetPlayersCount), start countdown
+      // If we have enough players (4 or targetPlayersCount), start countdown once
       if (playersList.length >= targetPlayersCount) {
         setStatusText('launching');
-        if (countdown === null) {
+        if (!countdownStartedRef.current) {
+          countdownStartedRef.current = true;
           sound.playMatchFound();
           setCountdown(3);
         }

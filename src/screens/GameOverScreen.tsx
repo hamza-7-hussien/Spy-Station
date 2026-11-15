@@ -69,23 +69,40 @@ export const GameOverScreen: React.FC<Props> = ({
         </h2>
 
         {/* Revealed Secret Word Card */}
-        {(room.word || room.wordAr) && (
-          <div className="p-4 rounded-2xl bg-slate-950/70 border border-sky-500/30 flex flex-col items-center justify-center gap-1.5 shadow-inner text-center">
-            <span className="text-[11px] uppercase tracking-widest text-sky-400 font-bold block">
-              {t.secretWordWas || 'Mission secret word was:'}
-            </span>
-            <div className="flex items-center justify-center gap-2 flex-wrap">
-              {room.wordCategory && (
-                <span className="text-sm text-sky-300 font-bold">
-                  {CATEGORY_STYLES[room.wordCategory]?.icon}
-                </span>
-              )}
-              <span className="text-2xl sm:text-3xl font-black text-white font-heading break-words">
-                {getSecretWordDisplay(room.word, room.wordAr, room.wordCategory, lang)}
+        {(room.word || room.wordAr) && (() => {
+          const chameleonSpy = room.gameMode === 'chameleon'
+            ? spyUids.map(uid => allPlayers[uid]).find(p => p && (p.chameleonWord || p.chameleonWordAr))
+            : null;
+          const decoyDisplay = chameleonSpy
+            ? getSecretWordDisplay(chameleonSpy.chameleonWord, chameleonSpy.chameleonWordAr, room.wordCategory, lang)
+            : '';
+
+          return (
+            <div className="p-4 rounded-2xl bg-slate-950/70 border border-sky-500/30 flex flex-col items-center justify-center gap-1.5 shadow-inner text-center">
+              <span className="text-[11px] uppercase tracking-widest text-sky-400 font-bold block">
+                {t.secretWordWas || 'Mission secret word was:'}
               </span>
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                {room.wordCategory && (
+                  <span className="text-sm text-sky-300 font-bold">
+                    {CATEGORY_STYLES[room.wordCategory]?.icon}
+                  </span>
+                )}
+                <span className="text-2xl sm:text-3xl font-black text-white font-heading break-words">
+                  {getSecretWordDisplay(room.word, room.wordAr, room.wordCategory, lang)}
+                </span>
+              </div>
+              {decoyDisplay && (
+                <div className="mt-1 px-3 py-1 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-300 font-bold flex items-center gap-1.5">
+                  <span>🦎</span>
+                  <span>
+                    {lang === 'ar' ? `كلمة الحرباء التمويهية: ${decoyDisplay}` : `Chameleon decoy word: ${decoyDisplay}`}
+                  </span>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Spies Team */}
         <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-500/30 text-start space-y-2">
