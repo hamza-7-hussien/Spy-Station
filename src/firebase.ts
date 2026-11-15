@@ -2,7 +2,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/database';
 import 'firebase/compat/storage';
-import { getApp } from 'firebase/app';
+import { getApp, getApps, initializeApp } from 'firebase/app';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseAppletConfig from '../firebase-applet-config.json';
 
@@ -21,10 +21,12 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseAppletConfig.appId
 };
 
-// Initialize only once
+// Initialize compat and modular apps cleanly
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
+
+const modularApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = firebase.auth();
 
@@ -36,7 +38,7 @@ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err => {
 export const db = firebase.database();
 
 export const firestore = getFirestore(
-  getApp(),
+  modularApp,
   firebaseAppletConfig.firestoreDatabaseId
 );
 

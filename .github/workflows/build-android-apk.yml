@@ -30,8 +30,13 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify Android SDK
+        run: |
+          SDK_DIR="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          ls -la "$SDK_DIR"
+          ls -la "$SDK_DIR/build-tools" || true
 
       - name: Install dependencies
         run: |
@@ -131,8 +136,9 @@ jobs:
 
           BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -n 1 || true)
           if [ -z "$BUILD_TOOLS_DIR" ]; then
-            yes | sdkmanager --licenses >/dev/null 2>&1 || true
-            sdkmanager "build-tools;35.0.0"
+            SDKMANAGER=$(find "$ANDROID_HOME" -name sdkmanager -type f 2>/dev/null | head -n 1)
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" "build-tools;35.0.0"
             BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
           fi
           mkdir -p ../release-apk
