@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public player profile for Spy Station agents",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the agent"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Agent display name"
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Avatar URL"
+        },
+        "friendCode": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{8}$",
+          "description": "8-character unique friend code"
+        },
+        "score": {
+          "type": "number",
+          "description": "Cumulative XP points"
+        }
+      },
+      "required": ["uid", "name"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Private PII isolated from public agent profiles",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200,
+          "description": "Agent email address"
+        }
+      },
+      "required": ["uid"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "Spy Station multiplayer mission room metadata",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[A-Z0-9]{4,8}$",
+          "description": "Station room code"
+        },
+        "hostUid": {
+          "type": "string",
+          "description": "UID of the current room host"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "playing", "voting", "resolving", "gameover"],
+          "description": "Current lifecycle state of the mission"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "private"],
+          "description": "Room visibility"
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": ["normal", "chameleon", "rapid", "mole", "undercover", "silent", "blackout"],
+          "description": "Active Spy Station game mode"
+        }
+      },
+      "required": ["code", "hostUid", "status", "visibility", "gameMode"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Public agent profiles"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Owner-only private user info"
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Spy Station rooms"
+    }
+  }
+}

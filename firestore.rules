@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'name']) &&
+        data.keys().hasOnly(['uid', 'name', 'avatar', 'friendCode', 'score']) &&
+        data.uid is string && data.uid == userId &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 40 &&
+        (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 500)) &&
+        (!('friendCode' in data) || (data.friendCode is string && data.friendCode.matches('^[A-Z0-9]{8}$'))) &&
+        (!('score' in data) || (data.score is number && data.score >= 0));
+    }
+
+    function isValidUserPrivate(data, userId) {
+      return data.keys().hasAll(['uid']) &&
+        data.keys().hasOnly(['uid', 'email']) &&
+        data.uid is string && data.uid == userId &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 200));
+    }
+
+    function isValidRoom(data, roomId) {
+      return data.keys().hasAll(['code', 'hostUid', 'status', 'visibility', 'gameMode']) &&
+        data.keys().hasOnly(['code', 'hostUid', 'status', 'visibility', 'gameMode']) &&
+        data.code is string && data.code == roomId && data.code.matches('^[A-Z0-9]{4,8}$') &&
+        data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128 &&
+        data.status in ['waiting', 'playing', 'voting', 'resolving', 'gameover'] &&
+        data.visibility in ['public', 'private'] &&
+        data.gameMode in ['normal', 'chameleon', 'rapid', 'mole', 'undercover', 'silent', 'blackout'];
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isValidId(userId) && isOwner(userId) && isValidUserProfile(request.resource.data, userId);
+      allow update: if isValidId(userId) && isOwner(userId) &&
+        isValidUserProfile(request.resource.data, userId) &&
+        request.resource.data.uid == resource.data.uid;
+      allow delete: if false;
+
+      match /private/{docId} {
+        allow get: if isValidId(userId) && isValidId(docId) && isOwner(userId);
+        allow list: if false;
+        allow create: if isValidId(userId) && isValidId(docId) && isOwner(userId) && isValidUserPrivate(request.resource.data, userId);
+        allow update: if isValidId(userId) && isValidId(docId) && isOwner(userId) &&
+          isValidUserPrivate(request.resource.data, userId) &&
+          request.resource.data.uid == resource.data.uid;
+        allow delete: if false;
+      }
+    }
+
+    match /rooms/{roomId} {
+      allow get: if isValidId(roomId) && isSignedIn() &&
+        (resource.data.visibility == 'public' || resource.data.hostUid == request.auth.uid);
+      allow list: if isSignedIn() &&
+        (resource.data.visibility == 'public' || resource.data.hostUid == request.auth.uid);
+      allow create: if isValidId(roomId) && isSignedIn() &&
+        request.resource.data.hostUid == request.auth.uid &&
+        isValidRoom(request.resource.data, roomId);
+      allow update: if isValidId(roomId) && isSignedIn() &&
+        resource.data.hostUid == request.auth.uid &&
+        resource.data.status != 'gameover' &&
+        isValidRoom(request.resource.data, roomId);
+      allow delete: if isValidId(roomId) && isSignedIn() && resource.data.hostUid == request.auth.uid;
+    }
+  }
+}
