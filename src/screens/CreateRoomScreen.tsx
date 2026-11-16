@@ -17,8 +17,6 @@ import {
   Check,
   Plus,
   Minus,
-  Zap,
-  Brush,
   Radio,
   Radar,
   Flame,
@@ -77,7 +75,15 @@ export const CreateRoomScreen: React.FC<Props> = ({
     return new Set([initialCategory as CategoryKey]);
   });
 
-  const [gameMode, setGameMode] = useState<GameMode>(initialValues?.gameMode || 'normal');
+  const initialModeRaw = initialValues?.gameMode as string | undefined;
+  const normalizedInitialMode: GameMode =
+    initialModeRaw === 'chameleon' ||
+    initialModeRaw === 'rapid' ||
+    initialModeRaw === 'mole' ||
+    initialModeRaw === 'undercover'
+      ? (initialModeRaw as GameMode)
+      : 'normal';
+  const [gameMode, setGameMode] = useState<GameMode>(normalizedInitialMode);
   const [maxPlayers, setMaxPlayers] = useState<number>(initialValues?.maxPlayers || 8);
   const [spyCount, setSpyCount] = useState<number>(initialValues?.spyCount || 1);
   const [turnSeconds, setTurnSeconds] = useState<number>(initialValues?.turnSeconds || 20);
@@ -145,16 +151,6 @@ export const CreateRoomScreen: React.FC<Props> = ({
       text: 'text-sky-300'
     },
     {
-      id: 'blackout' as GameMode,
-      title: t.modeBlackoutTitle,
-      desc: t.modeBlackoutDesc,
-      icon: Zap,
-      color: 'from-rose-500/20 to-red-500/20',
-      border: 'border-rose-400',
-      text: 'text-rose-300',
-      badge: t.badgeNew
-    },
-    {
       id: 'chameleon' as GameMode,
       title: t.modeChameleonTitle,
       desc: t.modeChameleonDesc,
@@ -190,21 +186,12 @@ export const CreateRoomScreen: React.FC<Props> = ({
       color: 'from-cyan-500/20 to-blue-500/20',
       border: 'border-cyan-400',
       text: 'text-cyan-300'
-    },
-    {
-      id: 'silent' as GameMode,
-      title: t.modeSilentTitle,
-      desc: t.modeSilentDesc,
-      icon: Brush,
-      color: 'from-teal-500/20 to-cyan-500/20',
-      border: 'border-teal-400',
-      text: 'text-teal-300'
     }
   ];
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-start p-4 pb-24 relative z-20">
-      <div className="w-full max-w-xl rounded-3xl bg-slate-900/95 border border-sky-500/30 p-5 sm:p-6 backdrop-blur-2xl shadow-2xl space-y-6 text-start">
+      <div className="w-full max-w-xl rounded-3xl bg-slate-900 border border-sky-500/30 p-5 sm:p-6 shadow-2xl space-y-6 text-start">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
@@ -615,7 +602,7 @@ export const CreateRoomScreen: React.FC<Props> = ({
       {/* ============================================================== */}
       {isModeModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in-50 duration-200 overscroll-contain select-none"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 animate-in fade-in-50 duration-200 overscroll-contain select-none"
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => {
             if (e.target === e.currentTarget && e.cancelable) e.preventDefault();

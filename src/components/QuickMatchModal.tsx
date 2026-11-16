@@ -303,7 +303,7 @@ export const QuickMatchModal: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-200 select-none overscroll-contain"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 animate-in fade-in duration-200 select-none overscroll-contain"
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
@@ -313,10 +313,6 @@ export const QuickMatchModal: React.FC<Props> = ({
         className="relative w-full max-w-md p-6 rounded-3xl bg-slate-900 border-2 border-amber-500/40 shadow-[0_0_50px_rgba(245,158,11,0.25)] space-y-6 text-center overflow-hidden overscroll-contain"
         onWheel={(e) => e.stopPropagation()}
       >
-        {/* Radar Background Glow */}
-        <div className="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
-
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

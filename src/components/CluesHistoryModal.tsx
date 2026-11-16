@@ -12,7 +12,6 @@ interface ClueEntry {
   text: string;
   round?: number;
   timestamp?: number;
-  drawingStrokes?: Array<Array<{ x: number; y: number }>> | null;
 }
 
 interface Props {
@@ -55,7 +54,7 @@ export const CluesHistoryModal: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200 overscroll-contain select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 animate-in fade-in duration-200 overscroll-contain select-none"
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
@@ -83,7 +82,7 @@ export const CluesHistoryModal: React.FC<Props> = ({
               </h3>
               <p className="text-[11px] text-slate-400">
                 {lang === 'ar'
-                  ? 'سجل كافة التلميحات والرسومات التي قيلت عبر الجولات'
+                  ? 'سجل كافة التلميحات التي قيلت عبر الجولات'
                   : 'Full chronological log of clues given across rounds'}
               </p>
             </div>
@@ -132,7 +131,6 @@ export const CluesHistoryModal: React.FC<Props> = ({
                     const timeStr = clue.timestamp
                       ? new Date(clue.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                       : '';
-                    const hasStrokes = Array.isArray(clue.drawingStrokes) && clue.drawingStrokes.length > 0;
 
                     return (
                       <div
@@ -171,31 +169,9 @@ export const CluesHistoryModal: React.FC<Props> = ({
                           </div>
                         </div>
 
-                        {hasStrokes ? (
-                          <div className="w-28 h-14 rounded-xl bg-slate-950 border border-sky-400/40 p-1 shrink-0">
-                            <svg viewBox="0 0 200 100" className="w-full h-full">
-                              {clue.drawingStrokes!.map((stroke, sIdx) => {
-                                if (!stroke || stroke.length === 0) return null;
-                                const pts = stroke.map(p => `${p.x * 200},${p.y * 100}`).join(' ');
-                                return (
-                                  <polyline
-                                    key={sIdx}
-                                    fill="none"
-                                    stroke="#38bdf8"
-                                    strokeWidth="3"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    points={pts}
-                                  />
-                                );
-                              })}
-                            </svg>
-                          </div>
-                        ) : (
-                          <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-sky-400/40 text-sky-200 text-xs sm:text-sm font-black tracking-wide shadow-inner max-w-[200px] break-words text-center">
-                            "{clue.text}"
-                          </div>
-                        )}
+                        <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-sky-400/40 text-sky-200 text-xs sm:text-sm font-black tracking-wide shadow-inner max-w-[200px] break-words text-center">
+                          "{clue.text}"
+                        </div>
                       </div>
                     );
                   })}

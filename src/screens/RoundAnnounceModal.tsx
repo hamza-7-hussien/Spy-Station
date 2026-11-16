@@ -13,7 +13,7 @@ export const RoundAnnounceModal: React.FC<Props> = ({ lang, round }) => {
 
   return (
     <div className="fixed top-3 inset-x-0 z-50 flex justify-center pointer-events-none px-3 animate-in slide-in-from-top-3 fade-in duration-300">
-      <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-950/95 border border-sky-400 text-white shadow-[0_0_25px_rgba(56,189,248,0.4)] backdrop-blur-xl">
+      <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-950 border border-sky-400 text-white shadow-[0_0_25px_rgba(56,189,248,0.4)]">
         <Rocket className="w-4 h-4 text-sky-400 animate-bounce" />
         <span className="text-[10px] uppercase tracking-wider font-mono text-sky-300 font-bold">
           MISSION UPDATE:

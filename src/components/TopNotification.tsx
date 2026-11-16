@@ -20,7 +20,7 @@ export const TopNotification: React.FC<Props> = ({ toast }) => {
 
   return (
     <div className="fixed top-2.5 left-1/2 -translate-x-1/2 z-[9999] max-w-sm pointer-events-none transition-all duration-300 animate-in fade-in slide-in-from-top-2">
-      <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border backdrop-blur-xl font-bold text-[11px] text-center shadow-md ${bgBorder}`}>
+      <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border font-bold text-[11px] text-center shadow-md ${bgBorder}`}>
         {toast.type === 'danger' ? (
           <AlertCircle className="w-3 h-3 text-rose-400 shrink-0" />
         ) : toast.type === 'success' ? (

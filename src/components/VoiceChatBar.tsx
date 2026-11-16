@@ -42,7 +42,7 @@ export const VoiceChatBar: React.FC<Props> = ({
 
   if (!isJoined) {
     return (
-      <div className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-900/80 border border-sky-500/20 backdrop-blur-md shadow-md gap-2">
+      <div className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-900/95 border border-sky-500/20 shadow-md gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <div className="p-1.5 rounded-xl bg-sky-500/10 text-sky-400 shrink-0">
             <Radio className="w-4 h-4" />
@@ -78,7 +78,7 @@ export const VoiceChatBar: React.FC<Props> = ({
 
   return (
     <div
-      className={`w-full p-3 rounded-2xl border transition-all flex items-center justify-between gap-2 shadow-lg backdrop-blur-md ${
+      className={`w-full p-3 rounded-2xl border transition-all flex items-center justify-between gap-2 shadow-lg ${
         isSpeaking
           ? 'bg-emerald-950/70 border-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.3)]'
           : 'bg-slate-900/90 border-sky-400/40'

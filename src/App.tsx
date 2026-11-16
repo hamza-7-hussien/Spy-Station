@@ -30,7 +30,6 @@ import { GameScreen } from './screens/GameScreen';
 import { VotingScreen } from './screens/VotingScreen';
 import { GameOverScreen } from './screens/GameOverScreen';
 import { RoundAnnounceModal } from './screens/RoundAnnounceModal';
-import { SciFiAirlockDoors } from './components/SciFiAirlockDoors';
 import { BottomNav } from './components/BottomNav';
 import { TopNotification } from './components/TopNotification';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -42,15 +41,14 @@ import { ApplicantWaitingApprovalModal } from './components/ApplicantWaitingAppr
 import { QuickMatchModal } from './components/QuickMatchModal';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
 import {
-  generateBotSilentDrawing,
   generateSmartBotClue,
   generateSmartBotVote,
   generateUniqueBotName
 } from './aiBot';
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { MandatoryUpdateModal } from './components/MandatoryUpdateModal';
+import { saveAccountProfile } from './utils/savedAccounts';
 import {
-  BLACKOUT_DURATION_MS,
   DEFAULT_VOTE_SECONDS,
   ROUND_GRACE_MS,
   areAllEligibleVotesSubmitted,
@@ -61,7 +59,6 @@ import {
   isBotPlayer,
   resolveVoteOutcome,
   shouldResetGameOverToLobby,
-  shouldTriggerBlackout,
   validateGameStart
 } from './gameEngine';
 
@@ -73,7 +70,7 @@ function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, u
   return out;
 }
 
-const CURRENT_APP_VERSION = '2.7.0';
+const CURRENT_APP_VERSION = '2.8.0';
 const ROUND_ANNOUNCE_MS = 2400;
 
 export default function App() {
@@ -129,8 +126,6 @@ export default function App() {
   const [rankModalOpen, setRankModalOpen] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [quickMatchModalOpen, setQuickMatchModalOpen] = useState(false);
-  const [airlockOpen, setAirlockOpen] = useState(true);
-  const wasPlayingRef = useRef(false);
 
   // Dynamic Adaptive Espionage Background Music (Ambient vs Suspense)
   useEffect(() => {
@@ -143,19 +138,6 @@ export default function App() {
     } else {
       sound.setBgmMode('ambient');
     }
-  }, [roomData?.status]);
-
-  // Screen Transition: Airlock Doors Opening on Game Start
-  useEffect(() => {
-    const isPlaying = roomData?.status === 'playing';
-    if (isPlaying && !wasPlayingRef.current) {
-      setAirlockOpen(false);
-      const timer = window.setTimeout(() => {
-        setAirlockOpen(true);
-      }, 150);
-      return () => window.clearTimeout(timer);
-    }
-    wasPlayingRef.current = isPlaying;
   }, [roomData?.status]);
 
   // Global Tactile Button Click Audio Feedback
@@ -256,6 +238,19 @@ export default function App() {
     permissionErrorMsg: t.voicePermissionError
   });
 
+  // Auto-join voice room in listen-only mode (Mic OFF, Headphones ON) when entering a room
+  const voiceAutoJoinedRoomRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentRoomCode || !currentUser?.uid) {
+      voiceAutoJoinedRoomRef.current = null;
+      return;
+    }
+    if (voiceAutoJoinedRoomRef.current !== currentRoomCode) {
+      voiceAutoJoinedRoomRef.current = currentRoomCode;
+      voice.joinVoice(true);
+    }
+  }, [currentRoomCode, currentUser?.uid, voice.joinVoice]);
+
   // Sync document direction & language
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -332,6 +327,19 @@ export default function App() {
         setProfileAvatar(fallbackAvatar);
         user.getIdToken(false).catch(() => {});
 
+        const providerKind = user.providerData?.some(p => p?.providerId === 'google.com')
+          ? 'google'
+          : 'password';
+        if (user.email) {
+          saveAccountProfile({
+            uid: user.uid,
+            email: user.email,
+            name: fallbackName,
+            avatar: fallbackAvatar,
+            provider: providerKind
+          });
+        }
+
         db.ref(`users/${user.uid}`)
           .once('value')
           .then(snap => {
@@ -342,6 +350,15 @@ export default function App() {
             if (!val.createdAt) patch.createdAt = firebase.database.ServerValue.TIMESTAMP;
             if (Object.keys(patch).length > 0) {
               db.ref(`users/${user.uid}`).update(patch).catch(() => {});
+            }
+            if (user.email) {
+              saveAccountProfile({
+                uid: user.uid,
+                email: user.email,
+                name: val.name || fallbackName,
+                avatar: val.avatar || fallbackAvatar,
+                provider: providerKind
+              });
             }
           })
           .catch(() => {});
@@ -392,6 +409,15 @@ export default function App() {
       if (data) {
         if (data.name) setProfileName(data.name);
         if (data.avatar) setProfileAvatar(data.avatar);
+        if (currentUser.email) {
+          saveAccountProfile({
+            uid: currentUser.uid,
+            email: currentUser.email,
+            name: data.name || currentUser.displayName || currentUser.email.split('@')[0] || 'Agent',
+            avatar: data.avatar || currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
+            provider: currentUser.providerData?.some(p => p?.providerId === 'google.com') ? 'google' : 'password'
+          });
+        }
       }
     };
     profileRef.on('value', onProfileChange);
@@ -708,26 +734,12 @@ export default function App() {
       const resolvedRound = expectedRound ?? typedRoom.round ?? 1;
       const speakerUid = typedRoom.turnOrder?.[typedRoom.turnIndex || 0];
       const speakerPlayer = speakerUid ? typedRoom.players?.[speakerUid] : null;
-      const currentStrokes =
-        typedRoom.gameMode === 'silent' && Array.isArray(typedRoom.currentDrawing) && typedRoom.currentDrawing.length > 0
-          ? typedRoom.currentDrawing
-          : null;
-
-      const completedDrawing =
-        currentStrokes && speakerUid
-          ? {
-              uid: speakerUid,
-              sender: speakerPlayer?.name || 'Agent',
-              strokes: currentStrokes
-            }
-          : null;
 
       const result = computeNextTurnState(typedRoom, {
         expectedTurnIndex,
         expectedRound: resolvedRound,
         wasTimeout,
-        now: getServerNow(),
-        completedDrawing
+        now: getServerNow()
       });
       if (!result.changed) return;
 
@@ -740,25 +752,10 @@ export default function App() {
         turnTimeLeft: result.room.turnTimeLeft ?? null,
         turnGraceUntil: result.room.turnGraceUntil ?? null,
         turnEndsAt: result.room.turnEndsAt ?? null,
-        votes: result.room.votes ?? null,
-        currentDrawing: null,
-        lastDrawing: result.room.lastDrawing ?? null,
-        blackoutActive: result.room.blackoutActive ?? false
+        votes: result.room.votes ?? null
       };
 
       await db.ref(`spy_rooms/${currentRoomCode}`).update(turnPatch);
-
-      if (completedDrawing && completedDrawing.strokes.length > 0) {
-        await db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
-          uid: completedDrawing.uid,
-          sender: completedDrawing.sender,
-          avatar: speakerPlayer?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${completedDrawing.uid}`,
-          text: lang === 'ar' ? 'رسمة' : 'Drawing',
-          drawingStrokes: completedDrawing.strokes,
-          round: typedRoom.round || 1,
-          timestamp: firebase.database.ServerValue.TIMESTAMP
-        }).catch(() => {});
-      }
 
       if (result.afkKickedName) {
         broadcastAnnouncement(
@@ -872,14 +869,6 @@ export default function App() {
 
             const now = getServerNow();
 
-            // Clear blackout cleanly when duration expires
-            if (room.blackoutActive && (!room.blackoutEndsAt || now >= room.blackoutEndsAt)) {
-              await db.ref(`spy_rooms/${currentRoomCode}`).update({
-                blackoutActive: false,
-                blackoutEndsAt: null
-              });
-            }
-
             // Pause turn countdown while cinematic ejection overlay or round-start grace is active
             if ((room.ejectionEndsAt && now < room.ejectionEndsAt) || (room.turnGraceUntil && now < room.turnGraceUntil)) {
               return;
@@ -909,17 +898,6 @@ export default function App() {
                 turnTimeLeft: defaultTurnSeconds
               });
               return;
-            }
-
-            const computedLeft = Math.max(0, Math.ceil((room.turnEndsAt - now) / 1000));
-
-            // Host-authoritative Blackout Protocol Trigger
-            if (shouldTriggerBlackout(room, computedLeft)) {
-              await db.ref(`spy_rooms/${currentRoomCode}`).update({
-                blackoutActive: true,
-                blackoutEndsAt: now + BLACKOUT_DURATION_MS,
-                lastBlackoutRound: room.round || 1
-              });
             }
 
             const isBotTurn = isBotPlayer(currentSpeaker, currentSpeakerUid);
@@ -1085,15 +1063,6 @@ export default function App() {
 
         const latestSpeaker = latest.players?.[currentSpeakerUid];
         const isBotSpy = (latest.spies || []).includes(currentSpeakerUid);
-
-        if (latest.gameMode === 'silent') {
-          const strokes = generateBotSilentDrawing(latest.wordCategory || 'players', isBotSpy);
-          await db.ref(`spy_rooms/${currentRoomCode}/currentDrawing`).set(strokes);
-          advanceTimer = setTimeout(() => {
-            if (!cancelled) advanceTurn(targetTurnIndex, false, targetRound);
-          }, 1100);
-          return;
-        }
 
         const prevClues = Object.values(latest.gameChat || {}).map(c => c.text || '');
         const smartClue = generateSmartBotClue({
@@ -2014,7 +1983,10 @@ export default function App() {
               ? {
                   visibility: roomData.visibility,
                   categories: roomData.categories,
-                  gameMode: roomData.gameMode,
+                  gameMode:
+                    (roomData.gameMode as string) === 'silent' || (roomData.gameMode as string) === 'blackout'
+                      ? 'normal'
+                      : roomData.gameMode,
                   maxPlayers: roomData.maxPlayers,
                   spyCount: roomData.spyCount,
                   turnSeconds: roomData.turnSeconds
@@ -2063,11 +2035,6 @@ export default function App() {
         {announcedRound !== null && (
           <RoundAnnounceModal lang={lang} round={announcedRound} />
         )}
-        <SciFiAirlockDoors
-          isOpen={airlockOpen}
-          label={lang === 'ar' ? 'بوابة المحطة 07 // بدء الجولة' : 'STATION AIRLOCK // MISSION START'}
-          sublabel={lang === 'ar' ? 'تم تأكيد الهوية والتصريح الأمني' : 'SECURITY CLEARANCE CONFIRMED'}
-        />
 
         {/* Room Screens */}
         {isPlaying ? (
@@ -2088,7 +2055,19 @@ export default function App() {
             onToggleVoiceDeafen={voice.toggleDeafen}
             onAdvanceTurn={() => advanceTurn(roomData?.turnIndex, false, roomData?.round)}
             onTriggerEmergencyVote={() => {
+              const snapRoom = lastRoomSnapshotRef.current;
               const now = getServerNow();
+              const activeSpeakerUid = snapRoom?.turnOrder?.[snapRoom?.turnIndex || 0];
+              if (
+                !snapRoom ||
+                snapRoom.status !== 'playing' ||
+                activeSpeakerUid !== currentUser.uid ||
+                (snapRoom.ejectionEndsAt && now < snapRoom.ejectionEndsAt) ||
+                (snapRoom.turnGraceUntil && now < snapRoom.turnGraceUntil)
+              ) {
+                showToast(t.emergencyVoteOnlyMyTurn, 'danger');
+                return;
+              }
               db.ref(`spy_rooms/${currentRoomCode}`).update({
                 status: 'voting',
                 voteTimeLeft: DEFAULT_VOTE_SECONDS,
@@ -2096,11 +2075,7 @@ export default function App() {
                 turnGraceUntil: null,
                 turnEndsAt: null,
                 votes: null,
-                voteChat: null,
-                blackoutActive: false,
-                blackoutEndsAt: null,
-                currentDrawing: null,
-                lastDrawing: null
+                voteChat: null
               });
               broadcastAnnouncement(t.annEmergencyVote, 'danger');
             }}

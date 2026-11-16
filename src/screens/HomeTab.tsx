@@ -43,7 +43,7 @@ export const HomeTab: React.FC<Props> = ({
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-4">
       {/* Profile Bar */}
-      <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-900/80 border border-sky-400/30 backdrop-blur-xl shadow-lg shadow-black/40">
+      <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-900 border border-sky-400/30 shadow-lg shadow-black/40">
         <div className="flex items-center gap-3">
           <img
             src={userAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=agent`}
@@ -102,7 +102,7 @@ export const HomeTab: React.FC<Props> = ({
       </button>
 
       {/* Categories Card */}
-      <div className="p-5 rounded-3xl bg-slate-900/80 border border-sky-500/25 backdrop-blur-xl shadow-xl space-y-4">
+      <div className="p-5 rounded-3xl bg-slate-900 border border-sky-500/25 shadow-xl space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-bold text-slate-400 tracking-wider uppercase flex items-center gap-2">
             <Sparkles className="w-3.5 h-3.5 text-sky-400" />

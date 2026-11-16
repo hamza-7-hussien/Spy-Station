@@ -120,16 +120,12 @@ export const MandatoryUpdateModal: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-200 select-none overscroll-contain"
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/95 animate-in fade-in duration-200 select-none overscroll-contain"
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
       }}
     >
-      {/* Background glow effects */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-sky-500/15 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
-
       <div
         className="relative w-full max-w-md rounded-[32px] bg-gradient-to-b from-slate-900 via-slate-900/95 to-slate-950 border-2 border-sky-400/50 shadow-[0_0_60px_rgba(56,189,248,0.25)] p-6 sm:p-7 text-center overflow-hidden overscroll-contain"
         onWheel={(e) => e.stopPropagation()}

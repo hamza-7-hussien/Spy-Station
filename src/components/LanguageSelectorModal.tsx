@@ -71,7 +71,7 @@ export const LanguageSelectorBar: React.FC<Props> = ({
       {/* Snug & Compact 5-Languages Selector Modal - No excess whitespace */}
       {modalOpen && (
         <div
-          className="fixed inset-0 z-[120] flex items-center justify-center p-3 bg-black/85 backdrop-blur-md animate-in fade-in duration-150 overscroll-contain select-none"
+          className="fixed inset-0 z-[120] flex items-center justify-center p-3 bg-black/90 animate-in fade-in duration-150 overscroll-contain select-none"
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => {
             if (e.target === e.currentTarget && e.cancelable) e.preventDefault();

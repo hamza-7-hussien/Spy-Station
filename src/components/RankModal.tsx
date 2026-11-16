@@ -50,7 +50,7 @@ export const RankModal: React.FC<Props> = ({ lang, xp, isOpen, onClose }) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in overscroll-contain select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 animate-in fade-in overscroll-contain select-none"
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget && e.cancelable) e.preventDefault();

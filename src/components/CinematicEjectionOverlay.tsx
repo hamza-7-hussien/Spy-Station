@@ -62,7 +62,7 @@ export const CinematicEjectionOverlay: React.FC<Props> = ({
   }, [isSpy]); // Stable dependency, never re-runs on parent re-renders
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl overflow-hidden select-none animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#030712]/95 overflow-hidden select-none animate-in fade-in duration-300">
       {/* Moving Cosmic Stars Background */}
       <div className="absolute inset-0 pointer-events-none opacity-30">
         <div className="absolute w-1 h-1 bg-white rounded-full top-[15%] left-[20%] animate-ping" />
@@ -103,7 +103,7 @@ export const CinematicEjectionOverlay: React.FC<Props> = ({
               <div className="w-full h-3 bg-gradient-to-r from-rose-700 via-rose-500 to-rose-700 rounded-t-xl border-2 border-rose-400 shadow-[0_0_15px_rgba(244,63,94,0.8)]" />
 
               {/* Vertical Laser Prison Bars */}
-              <div className="w-full h-full flex justify-around px-1 py-0.5 bg-rose-950/20 backdrop-blur-[1px] border-x-2 border-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.4)]">
+              <div className="w-full h-full flex justify-around px-1 py-0.5 bg-rose-950/30 border-x-2 border-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.4)]">
                 {[...Array(6)].map((_, i) => (
                   <div
                     key={i}
@@ -152,7 +152,7 @@ export const CinematicEjectionOverlay: React.FC<Props> = ({
       <div className="mt-8 max-w-md mx-auto text-center px-6 space-y-3 z-20">
         {animStage === 'verdict' && (
           <div
-            className={`p-4 rounded-3xl border-2 backdrop-blur-xl animate-in zoom-in-95 duration-400 shadow-2xl ${
+            className={`p-4 rounded-3xl border-2 animate-in zoom-in-95 duration-400 shadow-2xl ${
               isSpy
                 ? 'bg-rose-950/85 border-rose-500 text-rose-100 shadow-[0_0_35px_rgba(244,63,94,0.5)]'
                 : 'bg-slate-900/90 border-sky-400 text-sky-100 shadow-[0_0_35px_rgba(56,189,248,0.4)]'

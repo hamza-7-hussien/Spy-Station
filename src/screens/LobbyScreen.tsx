@@ -157,7 +157,7 @@ export const LobbyScreen: React.FC<Props> = ({
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-20 pt-2 text-start">
-      <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/85 border border-sky-500/30 backdrop-blur-2xl shadow-2xl space-y-4">
+      <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/95 border border-sky-500/30 shadow-2xl space-y-4">
         {/* Frequency Code */}
         <div className="text-center space-y-1">
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">
@@ -188,10 +188,6 @@ export const LobbyScreen: React.FC<Props> = ({
               ? t.modeRapid
               : room.gameMode === 'undercover'
               ? t.modeUndercover
-              : room.gameMode === 'silent'
-              ? t.modeSilentStation
-              : room.gameMode === 'blackout'
-              ? t.modeBlackout
               : t.modeNormal}
           </div>
         </div>

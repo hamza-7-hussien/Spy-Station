@@ -62,7 +62,7 @@ export const FriendsTab: React.FC<Props> = ({
       {/* Custom Delete Friend Modal */}
       {deleteConfirmFriend && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-150 overscroll-contain select-none"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4 animate-in fade-in duration-150 overscroll-contain select-none"
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => {
             if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
@@ -110,7 +110,7 @@ export const FriendsTab: React.FC<Props> = ({
           </div>
         </div>
       )}
-      <div className="p-5 rounded-3xl bg-slate-900/80 border border-sky-500/25 backdrop-blur-xl shadow-xl space-y-5">
+      <div className="p-5 rounded-3xl bg-slate-900 border border-sky-500/25 shadow-xl space-y-5">
         <h2 className="text-sm font-bold text-sky-400 text-center font-heading">
           {t.friendsTitle} 👥
         </h2>

@@ -167,7 +167,7 @@ export const SettingsTab: React.FC<Props> = ({
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-24">
-      <div className="p-6 rounded-3xl bg-slate-900/80 border border-sky-500/25 backdrop-blur-xl shadow-xl space-y-6 text-start">
+      <div className="p-6 rounded-3xl bg-slate-900 border border-sky-500/25 shadow-xl space-y-6 text-start">
         <h2 className="text-sm font-bold text-sky-400 text-center font-heading flex items-center justify-center gap-2">
           <Settings className="w-4 h-4" />
           <span>{t.settingsTitle}</span>

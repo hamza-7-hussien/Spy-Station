@@ -2,23 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const versionInfo = JSON.parse(fs.readFileSync('public/version.json', 'utf8'));
-const versionName = versionInfo.version || '2.7.0';
+const versionName = versionInfo.version || '2.8.0';
 const buildNum = Number(process.env.BUILD_NUM || 1);
 
-// 1. Update build.gradle versionCode, versionName, and Play Services Auth dependency
+// 1. Update build.gradle versionCode & versionName
 const gradlePath = 'android/app/build.gradle';
 let gradle = fs.readFileSync(gradlePath, 'utf8');
 gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${buildNum}`);
 gradle = gradle.replace(/versionName\s+"[^"]+"/, `versionName "${versionName}"`);
-if (!gradle.includes('play-services-auth')) {
-  gradle = gradle.replace(
-    /dependencies\s*\{/,
-    "dependencies {\n    implementation 'com.google.android.gms:play-services-auth:21.3.0'"
-  );
-}
 fs.writeFileSync(gradlePath, gradle);
 
-// 2. Add WebRTC voice, network & wake-lock permissions to AndroidManifest.xml
+// 2. Add WebRTC voice, network & wake-lock permissions and disable HyperOS/MIUI auto force-dark in AndroidManifest.xml
 const manifestPath = 'android/app/src/main/AndroidManifest.xml';
 let manifest = fs.readFileSync(manifestPath, 'utf8');
 const perms = [
@@ -35,6 +29,9 @@ for (const p of perms) {
       `    <uses-permission android:name="${p}" />\n    <application`
     );
   }
+}
+if (!manifest.includes('android:forceDarkAllowed')) {
+  manifest = manifest.replace('<application', '<application\n        android:forceDarkAllowed="false"');
 }
 fs.writeFileSync(manifestPath, manifest);
 
@@ -58,7 +55,7 @@ if (fs.existsSync(stylesPath)) {
   }
 }
 
-// 4. Write enhanced MainActivity.java for Immersive Sticky Fullscreen, native Google account picker, zero scrollbars/overscroll, clean Chrome UA, 3P cookies & OAuth popup Dialog support
+// 4. Write enhanced MainActivity.java for Immersive Sticky Fullscreen, single clean native Google account picker, dark OAuth popup Dialog, zero scrollbars/overscroll, clean Chrome UA, and 3P cookies
 const mainActivityPath = 'android/app/src/main/java/com/spystation/game/MainActivity.java';
 const mainActivityJava = `package com.spystation.game;
 
@@ -66,12 +63,15 @@ import android.accounts.AccountManager;
 import android.app.Dialog;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
@@ -85,47 +85,36 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
-import com.google.android.gms.auth.api.signin.GoogleSignIn;
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
-import com.google.android.gms.auth.api.signin.GoogleSignInClient;
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
-import com.google.android.gms.common.api.ApiException;
-import com.google.android.gms.tasks.Task;
 import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
-    private static final int RC_GOOGLE_SIGN_IN = 9001;
     private static final int RC_ACCOUNT_PICKER = 9002;
-    private static final String GOOGLE_WEB_CLIENT_ID = "917373852984-gc48n5v2nidpe6ob79a7ue0j5i01rnak.apps.googleusercontent.com";
 
     private class SpyStationNativeBridge {
         @JavascriptInterface
         public void signInWithGoogle() {
-            runOnUiThread(() -> launchNativeGoogleAccountPicker());
+            signInWithGoogle("");
+        }
+
+        @JavascriptInterface
+        public void signInWithGoogle(final String loginHint) {
+            runOnUiThread(() -> launchNativeGoogleAccountPicker(loginHint));
         }
     }
 
-    private void launchNativeGoogleAccountPicker() {
-        try {
-            GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                .requestIdToken(GOOGLE_WEB_CLIENT_ID)
-                .requestEmail()
-                .build();
-            GoogleSignInClient client = GoogleSignIn.getClient(this, gso);
-            client.signOut().addOnCompleteListener(this, task -> {
-                try {
-                    startActivityForResult(client.getSignInIntent(), RC_GOOGLE_SIGN_IN);
-                } catch (Exception ex) {
-                    launchSystemAccountManagerPicker();
-                }
-            });
-        } catch (Exception ex) {
-            launchSystemAccountManagerPicker();
+    private void launchNativeGoogleAccountPicker(final String loginHint) {
+        if (loginHint != null && !loginHint.trim().isEmpty()) {
+            notifyNativeGoogleAuth("loginHint", null, loginHint.trim(), null);
+            return;
         }
+        launchSystemAccountManagerPicker();
     }
 
     private void launchSystemAccountManagerPicker() {
@@ -273,10 +262,60 @@ public class MainActivity extends BridgeActivity {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
                 final Dialog popupDialog = new Dialog(MainActivity.this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-                final WebView popupWebView = new WebView(MainActivity.this);
-                popupWebView.setLayoutParams(new ViewGroup.LayoutParams(
+                Window dialogWindow = popupDialog.getWindow();
+                if (dialogWindow != null) {
+                    dialogWindow.setBackgroundDrawable(new ColorDrawable(Color.parseColor("#030712")));
+                }
+
+                final LinearLayout container = new LinearLayout(MainActivity.this);
+                container.setOrientation(LinearLayout.VERTICAL);
+                container.setBackgroundColor(Color.parseColor("#030712"));
+                container.setLayoutParams(new ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
+                ));
+
+                final LinearLayout header = new LinearLayout(MainActivity.this);
+                header.setOrientation(LinearLayout.HORIZONTAL);
+                header.setGravity(Gravity.CENTER_VERTICAL);
+                header.setBackgroundColor(Color.parseColor("#0f172a"));
+                final float density = getResources().getDisplayMetrics().density;
+                final int padH = Math.round(14 * density);
+                final int padV = Math.round(10 * density);
+                header.setPadding(padH, padV, padH, padV);
+
+                final TextView titleView = new TextView(MainActivity.this);
+                titleView.setText("Google Sign-In");
+                titleView.setTextColor(Color.parseColor("#e2e8f0"));
+                titleView.setTextSize(14f);
+                titleView.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                header.addView(titleView);
+
+                final TextView closeBtn = new TextView(MainActivity.this);
+                closeBtn.setText("✕");
+                closeBtn.setTextColor(Color.parseColor("#94a3b8"));
+                closeBtn.setTextSize(18f);
+                closeBtn.setPadding(Math.round(10 * density), Math.round(4 * density), Math.round(4 * density), Math.round(4 * density));
+                closeBtn.setOnClickListener(v -> popupDialog.dismiss());
+                header.addView(closeBtn);
+                container.addView(header);
+
+                final ProgressBar progressBar = new ProgressBar(MainActivity.this, null, android.R.attr.progressBarStyleHorizontal);
+                progressBar.setMax(100);
+                progressBar.setProgress(10);
+                progressBar.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Math.max(4, Math.round(3 * density))
+                ));
+                container.addView(progressBar);
+
+                final WebView popupWebView = new WebView(MainActivity.this);
+                popupWebView.setBackgroundColor(Color.parseColor("#030712"));
+                popupWebView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+                popupWebView.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f
                 ));
 
                 WebSettings pSettings = popupWebView.getSettings();
@@ -302,6 +341,16 @@ public class MainActivity extends BridgeActivity {
 
                 popupWebView.setWebChromeClient(new WebChromeClient() {
                     @Override
+                    public void onProgressChanged(WebView vw, int newProgress) {
+                        if (newProgress >= 100) {
+                            progressBar.setVisibility(View.GONE);
+                        } else {
+                            progressBar.setVisibility(View.VISIBLE);
+                            progressBar.setProgress(newProgress);
+                        }
+                    }
+
+                    @Override
                     public void onCloseWindow(WebView window) {
                         runOnUiThread(() -> {
                             if (popupDialog.isShowing()) {
@@ -311,7 +360,8 @@ public class MainActivity extends BridgeActivity {
                     }
                 });
 
-                popupDialog.setContentView(popupWebView);
+                container.addView(popupWebView);
+                popupDialog.setContentView(container);
                 popupDialog.setOnDismissListener(d -> {
                     CookieManager.getInstance().flush();
                     popupWebView.destroy();
@@ -329,31 +379,6 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == RC_GOOGLE_SIGN_IN) {
-            try {
-                Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
-                GoogleSignInAccount account = task.getResult(ApiException.class);
-                if (account != null && account.getIdToken() != null) {
-                    notifyNativeGoogleAuth("idToken", account.getIdToken(), account.getEmail(), null);
-                    return;
-                }
-                if (account != null && account.getEmail() != null) {
-                    notifyNativeGoogleAuth("loginHint", null, account.getEmail(), null);
-                    return;
-                }
-                launchSystemAccountManagerPicker();
-            } catch (ApiException e) {
-                int code = e.getStatusCode();
-                if (code == 12501 || (resultCode == RESULT_CANCELED && code == 16)) {
-                    notifyNativeGoogleAuth("cancelled", null, null, null);
-                } else {
-                    launchSystemAccountManagerPicker();
-                }
-            } catch (Exception e) {
-                launchSystemAccountManagerPicker();
-            }
-            return;
-        }
         if (requestCode == RC_ACCOUNT_PICKER) {
             if (resultCode == RESULT_OK && data != null) {
                 String chosenEmail = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
@@ -406,4 +431,4 @@ for (const [folder, src] of Object.entries(iconMap)) {
     fs.copyFileSync(src, path.join(dir, 'ic_launcher_round.png'));
   }
 }
-console.log(`Configured Spy Station Android v${versionName} (build ${buildNum}) with native Google Account picker & immersive fullscreen`);
+console.log(`Configured Spy Station Android v${versionName} (build ${buildNum}) with single clean Google account picker, dark OAuth dialog, and immersive fullscreen`);

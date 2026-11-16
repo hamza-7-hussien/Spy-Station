@@ -2,7 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AFK_MAX_MISSED_TURNS,
-  BLACKOUT_DURATION_MS,
   DEFAULT_TURN_SECONDS,
   DEFAULT_VOTE_SECONDS,
   EJECTION_CINEMATIC_MS,
@@ -17,7 +16,6 @@ import {
   isBotPlayer,
   resolveVoteOutcome,
   shouldResetGameOverToLobby,
-  shouldTriggerBlackout,
   validateGameStart
 } from './gameEngine';
 import { CategoryKey, GameMode, PlayerData, RoomData } from './types';
@@ -26,7 +24,6 @@ import { CATEGORY_STYLES } from './wordVisuals';
 import {
   evaluatePlayerSuspicionScores,
   generateBotLobbyGreeting,
-  generateBotSilentDrawing,
   generateBotVoteDiscussionLine,
   generateSmartBotClue,
   generateSmartBotVote
@@ -70,8 +67,8 @@ describe('gameEngine constants & validation', () => {
   it('computes effective turn seconds cleanly without overwriting base duration', () => {
     assert.equal(getEffectiveTurnSeconds('rapid', 30), RAPID_TURN_SECONDS);
     assert.equal(getEffectiveTurnSeconds('normal', 30), 30);
-    assert.equal(getEffectiveTurnSeconds('blackout', undefined), DEFAULT_TURN_SECONDS);
-    assert.equal(getEffectiveTurnSeconds('silent', 2), DEFAULT_TURN_SECONDS);
+    assert.equal(getEffectiveTurnSeconds('chameleon', undefined), DEFAULT_TURN_SECONDS);
+    assert.equal(getEffectiveTurnSeconds('undercover', 2), DEFAULT_TURN_SECONDS);
   });
 
   it('enforces minimum required players and spy limits for standard vs mole modes', () => {
@@ -117,15 +114,13 @@ describe('gameEngine constants & validation', () => {
   });
 });
 
-describe('computeInitialGameSetup across all 7 game modes', () => {
+describe('computeInitialGameSetup across all 5 active game modes', () => {
   const modes: GameMode[] = [
     'normal',
     'chameleon',
     'rapid',
     'mole',
-    'undercover',
-    'silent',
-    'blackout'
+    'undercover'
   ];
 
   modes.forEach(mode => {
@@ -190,14 +185,13 @@ describe('computeInitialGameSetup across all 7 game modes', () => {
 });
 
 describe('computeNextTurnState, AFK auto-kick, and round progression', () => {
-  it('enforces strictly 1 turn per active player per round and rotates turnOrder on next round', () => {
+  it('enforces strictly 1 turn per active player per round and keeps sequential turnOrder fixed on next round', () => {
     let room = makeRoom({
       status: 'playing',
       round: 1,
       turnOrder: ['u_0', 'u_1', 'u_2', 'u_3'],
       turnIndex: 0,
-      turnTimeLeft: 12,
-      blackoutActive: true
+      turnTimeLeft: 12
     });
 
     const speakers: string[] = [];
@@ -214,8 +208,8 @@ describe('computeNextTurnState, AFK auto-kick, and round progression', () => {
     assert.equal(room.blackoutActive, false);
     assert.equal(room.currentDrawing, null);
     assert.equal(room.completedTurnsThisRound, undefined);
-    // Last speaker (u_3) should not start Round 2 immediately
-    assert.notEqual(room.turnOrder![0], 'u_3');
+    // Strict fixed sequential order across all rounds
+    assert.deepEqual(room.turnOrder, ['u_0', 'u_1', 'u_2', 'u_3']);
   });
 
   it('rejects stale turn advancement when expectedTurnIndex or expectedRound mismatches', () => {
@@ -270,24 +264,7 @@ describe('computeNextTurnState, AFK auto-kick, and round progression', () => {
   });
 });
 
-describe('Blackout protocol trigger & voting resolution', () => {
-  it('triggers blackout once per round cleanly without firing twice in the same round', () => {
-    const room = makeRoom({
-      status: 'playing',
-      gameMode: 'blackout',
-      turnSeconds: 20,
-      round: 1,
-      blackoutActive: false,
-      lastBlackoutRound: 0
-    });
-
-    assert.equal(shouldTriggerBlackout(room, 18), false);
-    assert.equal(shouldTriggerBlackout(room, 10), true);
-
-    const alreadyTriggeredRoom = { ...room, lastBlackoutRound: 1 };
-    assert.equal(shouldTriggerBlackout(alreadyTriggeredRoom, 10), false);
-    assert.equal(BLACKOUT_DURATION_MS, 3500);
-  });
+describe('Voting resolution & survivor parity rules', () => {
 
   it('excludes disqualifiedVote players from eligible voters so voting never hangs', () => {
     const players = makePlayers(4);
@@ -343,9 +320,9 @@ describe('Blackout protocol trigger & voting resolution', () => {
     assert.equal(crewRes.nextRoomFields.winnerTeam, 'crew');
     assert.equal(crewRes.nextRoomFields.voteTimeLeft, null);
 
-    // 4. Standard vs Mole parity (1 spy vs 1 innocent remaining after ejecting an innocent from 3-player game)
+    // 4. 3-player game: ejecting an innocent leaves 1 spy vs 1 crew (< 3 active players), so spies win immediately without aborting to lobby!
     const threePlayers = makePlayers(3);
-    const stdParityRoom = makeRoom({
+    const threePlayerRoom = makeRoom({
       gameMode: 'normal',
       status: 'voting',
       round: 1,
@@ -353,10 +330,26 @@ describe('Blackout protocol trigger & voting resolution', () => {
       players: threePlayers,
       votes: { u_0: 'u_1', u_1: 'u_2', u_2: 'u_1' }
     });
-    const stdContinue = resolveVoteOutcome(stdParityRoom, 10000);
+    const threeRes = resolveVoteOutcome(threePlayerRoom, 10000);
+    assert.equal(threeRes.outcome, 'spies_win');
+    assert.equal(threeRes.nextRoomFields.status, 'gameover');
+    assert.equal(threeRes.nextRoomFields.winnerTeam, 'spies');
+
+    // 5. 4-player game: ejecting 1 innocent leaves 1 spy vs 2 crew -> continues with ejection cinematic pause
+    const fourPlayers = makePlayers(4);
+    const stdContinueRoom = makeRoom({
+      gameMode: 'normal',
+      status: 'voting',
+      round: 1,
+      spies: ['u_3'],
+      players: fourPlayers,
+      votes: { u_0: 'u_1', u_1: 'u_3', u_2: 'u_1', u_3: 'u_1' }
+    });
+    const stdContinue = resolveVoteOutcome(stdContinueRoom, 10000);
     assert.equal(stdContinue.outcome, 'innocent_ejected_continue');
     assert.equal(stdContinue.nextRoomFields.ejectionEndsAt, 10000 + EJECTION_CINEMATIC_MS + 300);
 
+    // 6. Mole parity: 4 players, ejecting 1 innocent leaves 1 spy vs 2 crew -> wait; 3 players spy parity -> spies win
     const moleParityRoom = makeRoom({
       gameMode: 'mole',
       status: 'voting',
@@ -410,7 +403,7 @@ describe('wordsDB & getSmartTwinWord integrity (Chameleon mode)', () => {
   });
 });
 
-describe('AI Bot clues, Chameleon decoy clues, Silent doodles, and voting', () => {
+describe('AI Bot clues, Chameleon decoy clues, and voting', () => {
   it('generates a strictly single-word clue that never reveals the secret or decoy word', () => {
     const clue = generateSmartBotClue({
       isSpy: true,
@@ -427,21 +420,6 @@ describe('AI Bot clues, Chameleon decoy clues, Silent doodles, and voting', () =
     assert.equal(/\s/.test(clue), false);
     assert.notEqual(clue, 'رونالدو');
     assert.notEqual(clue, 'ميسي');
-  });
-
-  it('generates valid normalized canvas strokes in Silent mode', () => {
-    const crewStrokes = generateBotSilentDrawing('places', false);
-    const spyStrokes = generateBotSilentDrawing('places', true);
-    [crewStrokes, spyStrokes].forEach(strokes => {
-      assert.ok(strokes.length > 0);
-      strokes.forEach(stroke => {
-        assert.ok(stroke.length >= 2);
-        stroke.forEach(pt => {
-          assert.ok(pt.x >= 0 && pt.x <= 1);
-          assert.ok(pt.y >= 0 && pt.y <= 1);
-        });
-      });
-    });
   });
 
   it('never causes spy bots to vote for themselves or fellow spies when innocents remain', () => {
@@ -546,7 +524,7 @@ describe('AI Bot clues, Chameleon decoy clues, Silent doodles, and voting', () =
   });
 });
 
-describe('Expanded word banks, category emojis, and Silent/Timer turn mechanics', () => {
+describe('Expanded word banks, category emojis, and Turn Timer deadlines', () => {
   it('ensures every category has >= 100 words and a representative emoji icon', () => {
     const expectedCategories: CategoryKey[] = [
       'players', 'food', 'places', 'movies', 'games', 'animals', 'jobs', 'singers'
@@ -558,38 +536,25 @@ describe('Expanded word banks, category emojis, and Silent/Timer turn mechanics'
     }
   });
 
-  it('persists Silent lastDrawing across turns in the same round and sets turnEndsAt/turnGraceUntil', () => {
+  it('sets turnEndsAt cleanly across sequential turns without shifting player order', () => {
     const room = makeRoom({
       status: 'playing',
-      gameMode: 'silent',
+      gameMode: 'normal',
       round: 1,
       turnSeconds: 20,
       turnOrder: ['u_0', 'u_1', 'u_2', 'u_3'],
       turnIndex: 0
     });
 
-    const drawing = [[{ x: 0.1, y: 0.2 }, { x: 0.8, y: 0.7 }]];
     const step1 = computeNextTurnState(room, {
       expectedTurnIndex: 0,
-      now: 50000,
-      completedDrawing: { uid: 'u_0', sender: 'User 0', strokes: drawing }
+      now: 50000
     });
     assert.equal(step1.changed, true);
-    assert.equal(step1.room.lastDrawing?.uid, 'u_0');
-    assert.deepEqual(step1.room.lastDrawing?.strokes, drawing);
+    assert.equal(step1.room.turnIndex, 1);
     assert.equal(step1.room.turnGraceUntil, null);
     assert.equal(step1.room.turnEndsAt, 50000 + 20000);
-
-    // Trigger blackout even in rapid 7s mode cleanly
-    const rapidBlackoutRoom = makeRoom({
-      status: 'playing',
-      gameMode: 'blackout',
-      turnSeconds: 7,
-      round: 1,
-      blackoutActive: false,
-      lastBlackoutRound: 0
-    });
-    assert.equal(shouldTriggerBlackout(rapidBlackoutRoom, 3), true);
+    assert.deepEqual(step1.room.turnOrder, ['u_0', 'u_1', 'u_2', 'u_3']);
   });
 });
 

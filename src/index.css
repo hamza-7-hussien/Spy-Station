@@ -16,6 +16,8 @@
     margin: 0;
     padding: 0;
     overflow: hidden;
+    background-color: #030712;
+    color-scheme: dark;
     overscroll-behavior-y: none;
     overscroll-behavior-x: none;
     overscroll-behavior: none;
@@ -91,7 +93,7 @@
 }
 
 @keyframes pulseGlow {
-  0%, 100% { opacity: 0.4; transform: scale(0.98); }
+  0%, 100% { opacity: 0.45; transform: scale(0.98); }
   50% { opacity: 0.9; transform: scale(1.02); }
 }
 
@@ -102,11 +104,9 @@
 @keyframes neonFlicker {
   0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
     opacity: 1;
-    filter: drop-shadow(0 0 25px rgba(244, 63, 94, 0.9));
   }
   20%, 24%, 55% {
-    opacity: 0.4;
-    filter: drop-shadow(0 0 5px rgba(244, 63, 94, 0.3));
+    opacity: 0.5;
   }
 }
 
@@ -140,11 +140,11 @@
 }
 
 @keyframes glitchFlicker {
-  0% { transform: translate(0) scale(1); filter: hue-rotate(0deg); }
-  20% { transform: translate(-2px, 1px) scale(1.01); filter: hue-rotate(15deg); }
-  40% { transform: translate(2px, -1px) scale(0.99); filter: hue-rotate(-15deg); }
-  60% { transform: translate(-1px, 2px) scale(1.02); filter: hue-rotate(30deg); }
-  80% { transform: translate(1px, -2px) scale(1); filter: hue-rotate(0deg); }
+  0% { transform: translate(0) scale(1); }
+  20% { transform: translate(-2px, 1px) scale(1.01); }
+  40% { transform: translate(2px, -1px) scale(0.99); }
+  60% { transform: translate(-1px, 2px) scale(1.01); }
+  80% { transform: translate(1px, -2px) scale(1); }
   100% { transform: translate(0) scale(1); }
 }
 

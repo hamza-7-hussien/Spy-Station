@@ -269,12 +269,8 @@ export function computeNextTurnState(
     nextCompletedTurns = null;
     nextBlackoutActive = false;
 
-    // Sequential seat order rotated cleanly for the new round so the last speaker doesn't go immediately twice
-    let rotated = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, activeUids.length));
-    if (rotated.length > 1 && currentSpeakerUid && rotated[0] === currentSpeakerUid) {
-      rotated = [...rotated.slice(1), currentSpeakerUid];
-    }
-    nextTurnOrder = rotated;
+    // Strict fixed sequential seat order every round (no jumping/rotating seats between rounds)
+    nextTurnOrder = getOrderedActiveUids(playersObj, 0);
     nextTurnIndex = 0;
     nextVotes = null;
   } else {
@@ -311,17 +307,7 @@ export function computeNextTurnState(
 
   const nextGraceUntil = roundChanged ? now + ROUND_GRACE_MS : null;
   const nextTurnEndsAt = (nextGraceUntil || now) + defaultTurnSeconds * 1000;
-  const nextLastDrawing =
-    roundChanged || inputRoom.gameMode !== 'silent'
-      ? null
-      : completedDrawing && completedDrawing.strokes.length > 0
-      ? {
-          uid: completedDrawing.uid,
-          sender: completedDrawing.sender,
-          strokes: completedDrawing.strokes,
-          timestamp: now
-        }
-      : inputRoom.lastDrawing ?? null;
+  const nextLastDrawing = null;
 
   return {
     changed: true,
@@ -340,27 +326,12 @@ export function computeNextTurnState(
       votes: nextVotes,
       currentDrawing: null,
       lastDrawing: nextLastDrawing,
-      blackoutActive: nextBlackoutActive
+      blackoutActive: false
     }
   };
 }
 
-export function shouldTriggerBlackout(room: RoomData, timeLeft: number): boolean {
-  if (room.gameMode !== 'blackout' || room.status !== 'playing' || room.blackoutActive) {
-    return false;
-  }
-  const currentRound = room.round || 1;
-  if ((room.lastBlackoutRound || 0) === currentRound) {
-    return false;
-  }
-  const defaultTurnSeconds = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
-  const halfTurn = Math.max(3, Math.floor(defaultTurnSeconds / 2));
-  const completedCount = Object.keys(room.completedTurnsThisRound || {}).length;
-
-  // Trigger at the midpoint of a turn, OR on the 2nd+ turn of the round if earlier turns finished rapidly
-  if (timeLeft >= 3 && (timeLeft <= halfTurn || completedCount >= 1)) {
-    return true;
-  }
+export function shouldTriggerBlackout(_room: RoomData, _timeLeft: number): boolean {
   return false;
 }
 
@@ -421,7 +392,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
   const nextTurnTime = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
 
   if (!ejectedUid) {
-    const safeActiveUids = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, Object.keys(playersObj).length));
+    const safeActiveUids = getOrderedActiveUids(playersObj, 0);
     const graceUntil = now + ROUND_GRACE_MS;
     return {
       outcome: 'nobody_ejected',
@@ -491,7 +462,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
       };
     }
 
-    const safeActiveUids = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, Object.keys(playersObj).length));
+    const safeActiveUids = getOrderedActiveUids(playersObj, 0);
     return {
       outcome: 'spy_ejected_continue',
       ejectedUid,
@@ -521,14 +492,18 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
     };
   }
 
-  const remainingActiveUids = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, Object.keys(playersObj).length));
+  const remainingActiveUids = getOrderedActiveUids(playersObj, 0);
   const remainingSpiesCount = currentSpies.filter(uid => remainingActiveUids.includes(uid)).length;
   const remainingInnocentCount = remainingActiveUids.length - remainingSpiesCount;
 
   const isMoleMode = room.gameMode === 'mole';
-  const spiesWin = isMoleMode
-    ? remainingSpiesCount >= remainingInnocentCount
-    : remainingInnocentCount === 0 || remainingSpiesCount > remainingInnocentCount;
+  // A match requires at least 3 active players; if an innocent is ejected and <= 2 players remain with an active spy, spies immediately win!
+  const spiesWin =
+    remainingActiveUids.length < 3
+      ? remainingSpiesCount > 0
+      : isMoleMode
+      ? remainingSpiesCount >= remainingInnocentCount
+      : remainingInnocentCount === 0 || remainingSpiesCount > remainingInnocentCount;
 
   if (spiesWin) {
     return {

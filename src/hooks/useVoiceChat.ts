@@ -32,12 +32,13 @@ export function useVoiceChat({
   permissionErrorMsg = 'يرجى السماح بصلاحية الميكروفون لاستخدام المحادثة الصوتية 🎙️'
 }: Props) {
   const [isJoined, setIsJoined] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [isDeafened, setIsDeafened] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceUsers, setVoiceUsers] = useState<Record<string, VoiceUserState>>({});
 
   const localStreamRef = useRef<MediaStream | null>(null);
+  const isJoinedRef = useRef<boolean>(false);
   const isDeafenedRef = useRef<boolean>(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -82,9 +83,23 @@ export function useVoiceChat({
     };
   }, [roomCode]);
 
+  const stopVolumeDetection = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    setIsSpeaking(false);
+  }, []);
+
   // Audio level monitoring for local microphone
-  const startVolumeDetection = (stream: MediaStream) => {
+  const startVolumeDetection = useCallback((stream: MediaStream) => {
     try {
+      stopVolumeDetection();
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AudioCtx) return;
 
@@ -131,20 +146,7 @@ export function useVoiceChat({
     } catch (e) {
       console.warn('Volume detection not supported:', e);
     }
-  };
-
-  const stopVolumeDetection = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-    analyserRef.current = null;
-    setIsSpeaking(false);
-  };
+  }, [roomCode, currentUserUid, stopVolumeDetection]);
 
   // Helper to drain queued ICE candidates once remote description is set
   const drainCandidateQueue = async (peerUid: string, pc: RTCPeerConnection) => {
@@ -171,7 +173,7 @@ export function useVoiceChat({
     peerConnectionsRef.current[peerUid] = pc;
     pendingCandidatesRef.current[peerUid] = [];
 
-    // Always ensure an audio transceiver exists so incoming audio is negotiated properly
+    // Always ensure a sendrecv audio transceiver exists so incoming audio works immediately in listen-only mode
     try {
       pc.addTransceiver('audio', { direction: 'sendrecv' });
     } catch (e) {
@@ -236,7 +238,7 @@ export function useVoiceChat({
     return pc;
   }, [roomCode, currentUserUid]);
 
-  // WebRTC Peer signaling listener
+  // WebRTC Peer signaling listener with polite-peer rollback handling
   useEffect(() => {
     if (!isJoined || !roomCode || !currentUserUid) return;
 
@@ -254,9 +256,18 @@ export function useVoiceChat({
           pc = createPeerConnection(peerUid);
         }
 
+        const isPolite = currentUserUid > peerUid;
+
         // Process Offer
-        if (signalData.offer && pc.signalingState !== 'have-local-offer') {
+        if (signalData.offer) {
+          const offerCollision = pc.signalingState !== 'stable';
+          if (offerCollision && !isPolite) {
+            continue;
+          }
           try {
+            if (offerCollision) {
+              await pc.setLocalDescription({ type: 'rollback' });
+            }
             await pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
             await drainCandidateQueue(peerUid, pc);
 
@@ -379,43 +390,67 @@ export function useVoiceChat({
     }
   };
 
-  // Join Voice Chat
-  const joinVoice = async (startMuted: boolean = false) => {
-    try {
-      const stream = await getSafeAudioStream();
+  // Attach microphone stream lazily & renegotiate with peers
+  const attachMicrophoneStream = useCallback(async (startMuted: boolean) => {
+    const stream = await getSafeAudioStream();
+    stream.getAudioTracks().forEach(track => {
+      track.enabled = !startMuted;
+    });
+    localStreamRef.current = stream;
 
-      // Set microphone track state based on startMuted
-      stream.getAudioTracks().forEach(track => {
-        track.enabled = !startMuted;
-      });
-
-      localStreamRef.current = stream;
-
-      // Attach tracks to any already-created peer connections
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        Object.values(peerConnectionsRef.current).forEach(pc => {
-          const senders = pc.getSenders();
-          const sender = senders.find(s => s.track?.kind === 'audio' || !s.track);
-          if (sender) {
-            sender.replaceTrack(audioTrack).catch(() => {});
-          } else {
-            try {
-              pc.addTrack(audioTrack, stream);
-            } catch {
-              // ignore
-            }
+    const audioTrack = stream.getAudioTracks()[0];
+    if (audioTrack) {
+      const entries = Object.entries(peerConnectionsRef.current);
+      for (const [peerUid, pc] of entries) {
+        const senders = pc.getSenders();
+        const sender = senders.find(s => s.track?.kind === 'audio' || !s.track);
+        if (sender) {
+          await sender.replaceTrack(audioTrack).catch(() => {});
+        } else {
+          try {
+            pc.addTrack(audioTrack, stream);
+          } catch {
+            // ignore
+          }
+        }
+        // Ensure transceiver stays sendrecv and renegotiate if stable
+        pc.getTransceivers().forEach(tr => {
+          if (tr.receiver.track?.kind === 'audio') {
+            tr.direction = 'sendrecv';
           }
         });
+        if (pc.signalingState === 'stable') {
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${peerUid}/${currentUserUid}/offer`).set({
+              type: offer.type,
+              sdp: offer.sdp
+            });
+          } catch {
+            // ignore non-fatal renegotiation errors
+          }
+        }
+      }
+    }
+
+    startVolumeDetection(stream);
+  }, [roomCode, currentUserUid, startVolumeDetection]);
+
+  // Join Voice Chat: when startMuted=true, connects in listen-only mode WITHOUT prompting mic permission!
+  const joinVoice = useCallback(async (startMuted: boolean = true) => {
+    if (!roomCode || !currentUserUid) return;
+
+    try {
+      if (!startMuted) {
+        await attachMicrophoneStream(false);
       }
 
+      isJoinedRef.current = true;
       setIsJoined(true);
       setIsMuted(startMuted);
       setIsDeafened(false);
       isDeafenedRef.current = false;
-
-      // Start volume detector
-      startVolumeDetection(stream);
 
       // Publish presence in Firebase
       const myVoiceRef = db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}`);
@@ -430,18 +465,11 @@ export function useVoiceChat({
       });
 
       myVoiceRef.onDisconnect().remove();
-
-      if (!startMuted) {
-        onToast?.(
-          permissionErrorMsg ? 'تم تشغيل المايك بنجاح 🎙️' : 'Microphone enabled 🎙️',
-          'success'
-        );
-      }
     } catch (err) {
       console.warn('Voice join error:', err);
       onToast?.(permissionErrorMsg, 'danger');
     }
-  };
+  }, [roomCode, currentUserUid, currentUserName, attachMicrophoneStream, onToast, permissionErrorMsg]);
 
   // Leave Voice Chat
   const leaveVoice = useCallback(async () => {
@@ -461,39 +489,62 @@ export function useVoiceChat({
     });
     audioElementsRef.current = {};
 
+    isJoinedRef.current = false;
+    isDeafenedRef.current = false;
     setIsJoined(false);
-    setIsMuted(false);
+    setIsMuted(true);
+    setIsDeafened(false);
     setIsSpeaking(false);
 
-    try {
-      await db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}`).remove();
-      await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}`).remove();
-    } catch {
-      // ignore
+    if (roomCode && currentUserUid) {
+      try {
+        await db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}`).remove();
+        await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}`).remove();
+      } catch {
+        // ignore
+      }
     }
-  }, [roomCode, currentUserUid]);
+  }, [roomCode, currentUserUid, stopVolumeDetection]);
 
-  // Toggle Mute (Microphone)
-  const toggleMute = () => {
-    if (!localStreamRef.current) {
-      joinVoice(false);
+  // Toggle Mute (Microphone) — acquires mic lazily on first unmute
+  const toggleMute = useCallback(async () => {
+    if (!isJoinedRef.current) {
+      await joinVoice(false);
       return;
     }
+
+    if (!localStreamRef.current) {
+      try {
+        await attachMicrophoneStream(false);
+        setIsMuted(false);
+        db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/muted`).set(false).catch(() => {});
+      } catch (err) {
+        console.warn('Mic permission error on unmute:', err);
+        onToast?.(permissionErrorMsg, 'danger');
+      }
+      return;
+    }
+
     const audioTrack = localStreamRef.current.getAudioTracks()[0];
     if (audioTrack) {
-      const nextState = !audioTrack.enabled;
-      audioTrack.enabled = nextState;
-      const muted = !nextState;
+      const nextEnabled = !audioTrack.enabled;
+      audioTrack.enabled = nextEnabled;
+      const muted = !nextEnabled;
       setIsMuted(muted);
       db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/muted`).set(muted).catch(() => {});
       if (muted) {
+        setIsSpeaking(false);
         db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/speaking`).set(false).catch(() => {});
       }
     }
-  };
+  }, [joinVoice, attachMicrophoneStream, roomCode, currentUserUid, onToast, permissionErrorMsg]);
 
   // Toggle Deafen (Headphones / Audio Output)
   const toggleDeafen = useCallback(() => {
+    if (!isJoinedRef.current) {
+      joinVoice(true);
+      return;
+    }
     const nextDeafened = !isDeafenedRef.current;
     isDeafenedRef.current = nextDeafened;
     setIsDeafened(nextDeafened);
@@ -505,7 +556,7 @@ export function useVoiceChat({
     if (roomCode && currentUserUid) {
       db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/deafened`).set(nextDeafened).catch(() => {});
     }
-  }, [roomCode, currentUserUid]);
+  }, [roomCode, currentUserUid, joinVoice]);
 
   // Clean up on unmount or room leave
   useEffect(() => {

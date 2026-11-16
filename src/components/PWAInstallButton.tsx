@@ -62,7 +62,7 @@ export const PWAInstallButton: React.FC<Props> = ({ lang, variant = 'prominent',
       )}
 
       {showIOSGuide && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/90 p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 shadow-2xl relative text-start">
             <button
               onClick={() => setShowIOSGuide(false)}

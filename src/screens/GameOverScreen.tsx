@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
 import { dictionary } from '../translations';
 import { Language, RoomData, PlayerData } from '../types';
-import confetti from 'canvas-confetti';
 import { sound } from '../audio';
 import { getSecretWordDisplay } from '../words';
 import { CATEGORY_STYLES } from '../wordVisuals';
@@ -45,21 +44,11 @@ export const GameOverScreen: React.FC<Props> = ({
     } else {
       sound.playSpyRevealSting();
     }
-
-    try {
-      confetti({
-        particleCount: isCrewWinner ? 100 : 50,
-        spread: 70,
-        origin: { y: 0.6 }
-      });
-    } catch {
-      // ignore
-    }
   }, [isCrewWinner]);
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-20 pt-4 text-start">
-      <div className="p-6 rounded-3xl bg-slate-900/90 border border-sky-500/30 backdrop-blur-2xl shadow-2xl space-y-5 text-center">
+      <div className="p-6 rounded-3xl bg-slate-900/95 border border-sky-500/30 shadow-2xl space-y-5 text-center">
         <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center bg-gradient-to-tr from-sky-500 to-purple-500 shadow-[0_0_30px_rgba(56,189,248,0.5)]">
           <Trophy className="w-8 h-8 text-slate-950 fill-current" />
         </div>

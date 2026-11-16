@@ -10,9 +10,7 @@ export type GameMode =
   | 'chameleon'
   | 'rapid'
   | 'mole'
-  | 'undercover'
-  | 'silent'
-  | 'blackout';
+  | 'undercover';
 
 export type CategoryKey =
   | 'players'

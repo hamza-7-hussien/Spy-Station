@@ -68,7 +68,7 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
         {/* Spy Cracked Glass & Laser Beam Visuals */}
         {!amSpectator && isEffectiveSpy && (
           <>
-            <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-35 mix-blend-screen" xmlns="http://www.w3.org/2000/svg">
+            <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-35" xmlns="http://www.w3.org/2000/svg">
               <line x1="0" y1="20" x2="80" y2="90" stroke="#f43f5e" strokeWidth="1.5" strokeDasharray="3 2" />
               <line x1="80" y1="90" x2="160" y2="40" stroke="#f43f5e" strokeWidth="2" />
               <line x1="80" y1="90" x2="95" y2="150" stroke="#f43f5e" strokeWidth="1.5" />
@@ -92,7 +92,7 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
             ) : isEffectiveSpy ? (
               <span className="flex items-center gap-1 text-rose-400 font-black animate-pulse">
                 <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
-                <span>{lang === 'ar' ? '🚨 بروتوكول التسلل السري' : '🚨 INFILTRATION BREACH'}</span>
+                <span>{lang === 'ar' ? '🚨 تنبيه تسلل سري' : '🚨 INFILTRATION ALERT'}</span>
               </span>
             ) : (
               <span className="flex items-center gap-1 text-cyan-300 font-black">

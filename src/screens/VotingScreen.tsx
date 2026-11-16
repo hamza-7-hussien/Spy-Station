@@ -84,7 +84,7 @@ export const VotingScreen: React.FC<Props> = ({
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 pb-8 pt-2 text-start">
       <div
-        className={`p-5 sm:p-6 rounded-3xl bg-slate-900/90 backdrop-blur-2xl transition-all duration-300 space-y-4 text-center ${
+        className={`p-5 sm:p-6 rounded-3xl bg-slate-900/95 transition-all duration-300 space-y-4 text-center ${
           isFinalSeconds
             ? 'border-2 border-rose-500 shadow-[0_0_40px_rgba(244,63,94,0.65)] ring-2 ring-rose-500/40'
             : 'border border-rose-500/40 shadow-2xl'

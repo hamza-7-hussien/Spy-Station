@@ -34,7 +34,7 @@ export const BottomNav: React.FC<Props> = ({
   ];
 
   return (
-    <nav className="shrink-0 w-full z-40 min-h-[68px] pb-[env(safe-area-inset-bottom,0px)] bg-slate-950/95 border-t border-sky-500/25 backdrop-blur-xl flex items-center justify-around px-2 shadow-[0_-8px_30px_rgba(0,0,0,0.6)]">
+    <nav className="shrink-0 w-full z-40 min-h-[68px] pb-[env(safe-area-inset-bottom,0px)] bg-slate-950 border-t border-sky-500/25 flex items-center justify-around px-2 shadow-[0_-8px_30px_rgba(0,0,0,0.6)]">
       {tabs.map(tab => {
         const Icon = tab.icon;
         const isActive = currentTab === tab.id;
