@@ -58,11 +58,12 @@ export const LanguageSelectorBar: React.FC<Props> = ({
             sound.triggerHaptic('light');
             setModalOpen(true);
           }}
-          className="px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-100 text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+          className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-sky-500/20 to-indigo-500/20 hover:from-sky-500/30 hover:to-indigo-500/30 active:scale-95 border border-sky-400/40 text-sky-200 text-xs font-bold flex items-center gap-2 transition cursor-pointer shadow-sm hover:shadow-[0_0_15px_rgba(56,189,248,0.25)]"
         >
+          <span className="text-base leading-none">{currentMeta.flag}</span>
           <span className="font-heading tracking-wide">{currentMeta.nativeName}</span>
-          <span className="text-[10px] text-sky-400 uppercase font-mono">
-            {currentMeta.code}
+          <span className="text-[10px] text-sky-400/80 uppercase font-mono">
+            ({currentMeta.code})
           </span>
         </button>
       </div>

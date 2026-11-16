@@ -42,9 +42,7 @@ import { ApplicantWaitingApprovalModal } from './components/ApplicantWaitingAppr
 import { QuickMatchModal } from './components/QuickMatchModal';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
 import {
-  generateBotLobbyGreeting,
   generateBotSilentDrawing,
-  generateBotVoteDiscussionLine,
   generateSmartBotClue,
   generateSmartBotVote,
   generateUniqueBotName
@@ -75,7 +73,7 @@ function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, u
   return out;
 }
 
-const CURRENT_APP_VERSION = '2.6.0';
+const CURRENT_APP_VERSION = '2.6.1';
 const ROUND_ANNOUNCE_MS = 2400;
 
 export default function App() {
@@ -274,7 +272,36 @@ export default function App() {
 
   // Auth listener with redirect recovery, RTDB profile bootstrap, and persistent session maintenance
   useEffect(() => {
-    auth.getRedirectResult().catch(() => {});
+    auth
+      .getRedirectResult()
+      .then(res => {
+        if (res?.user) {
+          const u = res.user;
+          const fallbackName = u.displayName || (u.email ? u.email.split('@')[0] : 'Agent');
+          const fallbackAvatar =
+            u.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(fallbackName || u.uid)}`;
+          db.ref(`users/${u.uid}`)
+            .once('value')
+            .then(snap => {
+              const val = snap.val() || {};
+              const patch: Record<string, unknown> = {};
+              if (!val.name) patch.name = fallbackName;
+              if (!val.avatar) patch.avatar = fallbackAvatar;
+              if (!val.createdAt) patch.createdAt = firebase.database.ServerValue.TIMESTAMP;
+              if (Object.keys(patch).length > 0) {
+                db.ref(`users/${u.uid}`).update(patch).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(err => {
+        const msg = err?.message;
+        if (msg) {
+          console.warn('Redirect sign-in notice:', err);
+          setToast({ message: msg, type: 'danger' });
+        }
+      });
 
     const unsub = auth.onAuthStateChanged(user => {
       setCurrentUser(user);
@@ -766,16 +793,12 @@ export default function App() {
               ? Math.max(0, Math.ceil((room.voteEndsAt! - now) / 1000))
               : Math.max(0, (room.voteTimeLeft ?? DEFAULT_VOTE_SECONDS) - 1);
 
-            let botsJustVoted = false;
-
-            // Commit bot votes & discussion once all humans voted or timer <= 2s
+            // Commit bot votes once all humans voted or timer <= 2s (bots never write chat messages)
             if (unvotedBots.length > 0 && (currentVoteTimeLeft <= 2 || unvotedHumansCount === 0)) {
-              botsJustVoted = true;
               const spies = room.spies || [];
               const activePlayers = Object.values(room.players || {}).filter(p => !p.isSpectator);
               const botVoteUpdates: Record<string, string> = {};
               const nextVotes = { ...(room.votes || {}) };
-              let botMsgsCount = Object.values(room.voteChat || {}).filter(m => m.isBot).length;
 
               for (const bot of unvotedBots) {
                 const isBotSpy = spies.includes(bot.uid);
@@ -793,42 +816,13 @@ export default function App() {
                 });
                 botVoteUpdates[`spy_rooms/${currentRoomCode}/votes/${bot.uid}`] = target;
                 nextVotes[bot.uid] = target;
-
-                if (botMsgsCount < 3) {
-                  const line = generateBotVoteDiscussionLine({
-                    botUid: bot.uid,
-                    isSpy: isBotSpy,
-                    isUndercover: isBotUndercover,
-                    targetUid: target,
-                    activePlayers,
-                    gameChat: room.gameChat,
-                    lang
-                  });
-                  if (line) {
-                    botMsgsCount++;
-                    await db.ref(`spy_rooms/${currentRoomCode}/voteChat`).push({
-                      uid: bot.uid,
-                      sender: bot.name || 'Agent',
-                      avatar: bot.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${bot.uid}`,
-                      text: line,
-                      isBot: true,
-                      timestamp: firebase.database.ServerValue.TIMESTAMP
-                    }).catch(() => {});
-                  }
-                }
               }
               room.votes = nextVotes;
               await db.ref().update(botVoteUpdates);
             }
 
             const allVotedNow = areAllEligibleVotesSubmitted(room);
-            // If bots just posted chat & voted when time was left, allow 1s pause so humans can read bot chat before resolving
-            if (botsJustVoted && currentVoteTimeLeft > 2 && allVotedNow) {
-              await db.ref(`spy_rooms/${currentRoomCode}`).update({
-                voteTimeLeft: 2,
-                voteEndsAt: now + 1500
-              });
-            } else if (currentVoteTimeLeft <= 0 || allVotedNow) {
+            if (currentVoteTimeLeft <= 0 || allVotedNow) {
               if (voteIntervalRef.current) {
                 clearInterval(voteIntervalRef.current);
                 voteIntervalRef.current = null;
@@ -1040,29 +1034,6 @@ export default function App() {
               wordAr: latest.wordAr,
               wordCategory: latest.wordCategory
             });
-
-            const existingBotMsgs = Object.values(latest.voteChat || {}).filter(m => m.isBot).length;
-            if (existingBotMsgs < 3 && Math.random() < 0.85) {
-              const line = generateBotVoteDiscussionLine({
-                botUid: bot.uid,
-                isSpy: isBotSpy,
-                isUndercover: isBotUndercover,
-                targetUid: chosenTarget,
-                activePlayers,
-                gameChat: latest.gameChat,
-                lang
-              });
-              if (line) {
-                await db.ref(`spy_rooms/${currentRoomCode}/voteChat`).push({
-                  uid: bot.uid,
-                  sender: bot.name || 'Agent',
-                  avatar: bot.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${bot.uid}`,
-                  text: line,
-                  isBot: true,
-                  timestamp: firebase.database.ServerValue.TIMESTAMP
-                }).catch(() => {});
-              }
-            }
 
             await db.ref(`spy_rooms/${currentRoomCode}/votes/${bot.uid}`).set(chosenTarget);
           }
@@ -1837,12 +1808,6 @@ export default function App() {
       isSpectator: false,
       isBot: true
     });
-    db.ref(`spy_rooms/${currentRoomCode}/lobbyChat`)
-      .push({
-        sender: name.replace(/\s*🤖$/, ''),
-        text: generateBotLobbyGreeting(lang)
-      })
-      .catch(() => {});
     showToast(t.toastBotAdded.replace('{name}', name), 'success');
   };
 
@@ -1952,7 +1917,7 @@ export default function App() {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[#030712] text-slate-100">
+      <div className="h-[100dvh] w-full overflow-hidden flex flex-col items-center justify-center p-4 bg-[#030712] text-slate-100">
         <UfoLoader />
         <div className="mt-4 text-xs font-bold text-sky-400 font-heading tracking-widest uppercase animate-pulse">
           SPY STATION INITIALIZING...
@@ -1988,7 +1953,7 @@ export default function App() {
   // Create or Edit Room Configuration Modal
   if (inCreateModal) {
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-start p-4 bg-[#030712] relative overflow-x-hidden">
+      <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative">
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
         <TopNotification toast={toast} />
@@ -2027,7 +1992,7 @@ export default function App() {
     const myPlayer = (roomData.players || {})[currentUser.uid];
 
     return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-start p-4 bg-[#030712] relative overflow-x-hidden selection:bg-sky-500/30">
+      <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative selection:bg-sky-500/30">
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
         <TopNotification toast={toast} />
@@ -2350,7 +2315,7 @@ export default function App() {
     Object.keys(friendRequests || {}).length + Object.keys(roomInvites || {}).length;
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-start p-4 bg-[#030712] relative overflow-x-hidden selection:bg-sky-500/30">
+    <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col overflow-hidden bg-[#030712] relative selection:bg-sky-500/30">
       <div className="stars-overlay" />
       <OfflineIndicator lang={lang} />
       <TopNotification toast={toast} />
@@ -2388,9 +2353,10 @@ export default function App() {
         />
       )}
 
-      {/* Main Tabs */}
-      {activeTab === 'home' && (
-        <HomeTab
+      {/* Main Scrollable Viewport above Anchored BottomNav */}
+      <main className="flex-1 w-full overflow-y-auto overflow-x-hidden overscroll-none px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-4 relative z-10">
+        {activeTab === 'home' && (
+          <HomeTab
           lang={lang}
           userName={profileName}
           userAvatar={profileAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`}
@@ -2537,6 +2503,8 @@ export default function App() {
           onToast={showToast}
         />
       )}
+
+      </main>
 
       {/* Applicant Waiting Approval Modal */}
       {pendingJoinApproval && (

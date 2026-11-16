@@ -38,12 +38,12 @@ export const HostJoinApprovalModal: React.FC<Props> = ({
       >
         {/* Header / Queue status */}
         <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-sky-400 uppercase tracking-wider">
-            <Globe className="w-4 h-4" />
+          <div className="flex items-center gap-1.5 text-xs font-bold text-sky-400 uppercase tracking-widest">
+            <Globe className="w-4 h-4 animate-pulse" />
             <span>{t.joinRequestTitle}</span>
           </div>
           {queueTotal > 1 && (
-            <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-slate-800 border border-slate-700 text-sky-300 text-[11px] font-bold tabular-nums">
+            <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/40 text-sky-300 text-[11px] font-bold">
               <Users className="w-3 h-3" />
               <span>{t.queueRatio.replace('{index}', queueIndex.toString()).replace('{total}', queueTotal.toString())}</span>
             </span>
@@ -54,8 +54,11 @@ export const HostJoinApprovalModal: React.FC<Props> = ({
           <img
             src={request.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${request.uid}`}
             alt={request.name}
-            className="w-20 h-20 rounded-full mx-auto object-cover border-2 border-sky-400/70"
+            className="w-20 h-20 rounded-full mx-auto object-cover border-4 border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.5)]"
           />
+          <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-sky-500 text-slate-950 flex items-center justify-center font-bold text-xs">
+            🛰️
+          </div>
         </div>
 
         <div className="space-y-1">

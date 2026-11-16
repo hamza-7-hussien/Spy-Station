@@ -10,3 +10,4 @@ coverage/
 src_backup_audio_polish_checkpoint/
 .aistudio/
 .playwright-cli/
+public/assets/

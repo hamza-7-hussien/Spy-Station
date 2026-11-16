@@ -1,15 +1,15 @@
 import React from 'react';
 import { dictionary } from '../translations';
 import { Language, RankTier } from '../types';
-import { X, Zap, Award, Shield, Compass, Star, Crown } from 'lucide-react';
+import { X, Trophy, Zap } from 'lucide-react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 export const RANK_TIERS: RankTier[] = [
-  { min: 0, icon: 'cadet', key: 'rankCadet' },
-  { min: 100, icon: 'officer', key: 'rankOfficer' },
-  { min: 300, icon: 'commander', key: 'rankCommander' },
-  { min: 700, icon: 'master', key: 'rankMaster' },
-  { min: 1500, icon: 'legend', key: 'rankLegend' }
+  { min: 0, icon: '🥉', key: 'rankCadet' },
+  { min: 100, icon: '🥈', key: 'rankAgent' },
+  { min: 300, icon: '🥇', key: 'rankCommander' },
+  { min: 700, icon: '💎', key: 'rankEliteCommander' },
+  { min: 1500, icon: '🌌', key: 'rankLegend' }
 ];
 
 export function getRankInfo(xp: number) {
@@ -23,21 +23,6 @@ export function getRankInfo(xp: number) {
   };
 }
 
-function renderTierIcon(iconKey: string) {
-  switch (iconKey) {
-    case 'officer':
-      return <Shield className="w-9 h-9 text-sky-400" />;
-    case 'commander':
-      return <Compass className="w-9 h-9 text-indigo-400" />;
-    case 'master':
-      return <Star className="w-9 h-9 text-amber-400" />;
-    case 'legend':
-      return <Crown className="w-9 h-9 text-amber-300" />;
-    default:
-      return <Award className="w-9 h-9 text-slate-300" />;
-  }
-}
-
 interface Props {
   lang: Language;
   xp: number;
@@ -46,6 +31,7 @@ interface Props {
 }
 
 export const RankModal: React.FC<Props> = ({ lang, xp, isOpen, onClose }) => {
+  // Lock background scroll when rank modal is open
   useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
@@ -74,47 +60,45 @@ export const RankModal: React.FC<Props> = ({ lang, xp, isOpen, onClose }) => {
       }}
     >
       <div
-        className="w-full max-w-sm rounded-2xl bg-[#111827] border border-slate-800 p-6 text-center shadow-2xl relative overscroll-contain"
+        className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 text-center shadow-2xl relative overscroll-contain"
         onWheel={(e) => e.stopPropagation()}
       >
         <button
           onClick={onClose}
-          className="min-w-[40px] min-h-[40px] absolute top-3 inset-inline-end-3 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+          className="absolute top-4 inset-inline-end-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
         >
           <X className="w-5 h-5" />
         </button>
 
-        <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center">
-          {renderTierIcon(current.icon)}
+        <div className="text-6xl my-2 filter drop-shadow-[0_0_15px_rgba(56,189,248,0.5)]">
+          {current.icon}
         </div>
 
-        <h3 className="text-xl font-black text-white font-heading">
+        <h3 className="text-xl font-black text-sky-400 font-heading">
           {t[current.key as keyof typeof t] || current.key}
         </h3>
 
-        <div className="text-sm font-bold text-sky-400 font-mono tabular-nums mt-1 mb-4">
-          {xp} XP
-        </div>
+        <div className="text-sm font-bold text-slate-400 mb-4">{xp} XP</div>
 
-        <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800 mb-2">
+        <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden border border-slate-800 p-0.5 mb-2">
           <div
-            className="h-full rounded-full bg-sky-400 transition-all duration-500"
+            className="h-full rounded-full bg-gradient-to-r from-sky-400 via-indigo-500 to-purple-400 transition-all duration-500 shadow-[0_0_10px_rgba(56,189,248,0.5)]"
             style={{ width: `${progressPct}%` }}
           />
         </div>
 
         <div className="text-xs text-slate-400 font-medium mb-5">{nextText}</div>
 
-        <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-start text-xs text-slate-300 flex items-start gap-2.5">
-          <Zap className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+        <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/80 text-start text-xs text-slate-300 flex items-start gap-2.5">
+          <Zap className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <span>{t.lblHowToEarnXp}</span>
         </div>
 
         <button
           onClick={onClose}
-          className="w-full min-h-[44px] mt-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm transition cursor-pointer"
+          className="w-full mt-5 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm transition"
         >
-          {t.closeBtn || t.btnCancel}
+          {t.btnCancel}
         </button>
       </div>
     </div>

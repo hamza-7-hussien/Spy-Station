@@ -5,9 +5,12 @@
   "server": {
     "androidScheme": "https",
     "allowNavigation": [
+      "localhost",
       "*.firebaseapp.com",
       "*.googleapis.com",
       "*.google.com",
+      "*.gstatic.com",
+      "*.googleusercontent.com",
       "accounts.google.com",
       "*.firebaseio.com",
       "*.firebasestorage.app"

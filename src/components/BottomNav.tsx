@@ -1,7 +1,7 @@
 import React from 'react';
 import { dictionary } from '../translations';
 import { Language } from '../types';
-import { Compass, Globe, Users, Settings, LucideIcon } from 'lucide-react';
+import { Rocket, Globe, Users, Settings, LucideIcon } from 'lucide-react';
 import { sound } from '../audio';
 
 interface Props {
@@ -27,14 +27,14 @@ export const BottomNav: React.FC<Props> = ({
   const t = dictionary[lang];
 
   const tabs: TabItem[] = [
-    { id: 'home', label: t.navHome, icon: Compass },
+    { id: 'home', label: t.navHome, icon: Rocket },
     { id: 'stations', label: t.navStations, icon: Globe },
     { id: 'friends', label: t.navFriends, icon: Users, badge: badgeCount },
     { id: 'settings', label: t.navSettings, icon: Settings }
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 h-[68px] bg-[#0b101b]/95 border-t border-slate-800 backdrop-blur-xl flex items-center justify-around px-2">
+    <nav className="shrink-0 w-full z-40 min-h-[68px] pb-[env(safe-area-inset-bottom,0px)] bg-slate-950/95 border-t border-sky-500/25 backdrop-blur-xl flex items-center justify-around px-2 shadow-[0_-8px_30px_rgba(0,0,0,0.6)]">
       {tabs.map(tab => {
         const Icon = tab.icon;
         const isActive = currentTab === tab.id;
@@ -47,24 +47,21 @@ export const BottomNav: React.FC<Props> = ({
               sound.triggerHaptic('light');
               onSelectTab(tab.id);
             }}
-            className={`flex flex-col items-center justify-center gap-1 w-full h-full relative transition-colors cursor-pointer ${
+            className={`flex flex-col items-center justify-center gap-1 w-full py-2.5 relative transition-all cursor-pointer ${
               isActive
-                ? 'text-sky-400 font-bold'
+                ? 'text-sky-400 font-extrabold scale-105'
                 : 'text-slate-400 hover:text-slate-200 font-medium'
             }`}
           >
-            {isActive && (
-              <span className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-sky-400 rounded-b-full" />
-            )}
             <div className="relative">
-              <Icon className="w-5 h-5" />
+              <Icon className={`w-5 h-5 ${isActive ? 'drop-shadow-[0_0_8px_rgba(56,189,248,0.8)]' : ''}`} />
               {tab.badge && tab.badge > 0 ? (
-                <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center tabular-nums">
+                <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center shadow-[0_0_8px_rgba(244,63,94,0.6)]">
                   {tab.badge > 9 ? '9+' : tab.badge}
                 </span>
               ) : null}
             </div>
-            <span className="text-[11px]">{tab.label}</span>
+            <span className="text-[11px] tracking-wide">{tab.label}</span>
           </button>
         );
       })}
