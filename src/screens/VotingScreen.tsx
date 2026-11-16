@@ -3,27 +3,27 @@ import { dictionary } from '../translations';
 import { Language, RoomData } from '../types';
 import { sound } from '../audio';
 import { DEFAULT_VOTE_SECONDS } from '../gameEngine';
-import { AlertCircle, Clock, Eye, FastForward, LogOut, MessageSquare, Send } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, Eye, MessageSquare, Send } from 'lucide-react';
 
 interface Props {
   lang: Language;
   currentUserUid: string;
   room: RoomData;
+  serverTimeOffsetMs?: number;
   onCastVote: (targetUid: string) => void;
   onSendVoteChat?: (msg: string) => void;
-  onLeaveRoom?: () => void;
 }
 
 export const VotingScreen: React.FC<Props> = ({
   lang,
   currentUserUid,
   room,
+  serverTimeOffsetMs = 0,
   onCastVote,
-  onSendVoteChat,
-  onLeaveRoom
+  onSendVoteChat
 }) => {
   const [chatMsg, setChatMsg] = useState('');
-  const [nowTs, setNowTs] = useState(() => Date.now());
+  const [nowTs, setNowTs] = useState(() => Date.now() + serverTimeOffsetMs);
   const t = dictionary[lang];
   const playersObj = room.players || {};
   const allPlayers = Object.values(playersObj);
@@ -39,9 +39,10 @@ export const VotingScreen: React.FC<Props> = ({
   const spectatorCount = allPlayers.filter(p => p.isSpectator).length;
 
   useEffect(() => {
-    const id = setInterval(() => setNowTs(Date.now()), 500);
+    setNowTs(Date.now() + serverTimeOffsetMs);
+    const id = setInterval(() => setNowTs(Date.now() + serverTimeOffsetMs), 250);
     return () => clearInterval(id);
-  }, []);
+  }, [serverTimeOffsetMs]);
 
   const computedTimeLeft =
     typeof room.voteEndsAt === 'number' && room.voteEndsAt > 0
@@ -75,12 +76,6 @@ export const VotingScreen: React.FC<Props> = ({
     onSendVoteChat(clean);
     setChatMsg('');
   };
-
-  const skipVoters = Object.keys(votes)
-    .filter(voterUid => votes[voterUid] === 'SKIP')
-    .map(voterUid => playersObj[voterUid])
-    .filter(Boolean);
-  const isMySkip = votes[currentUserUid] === 'SKIP';
 
   const voteMessages = Object.values(room.voteChat || {})
     .filter(m => !m.isBot)
@@ -118,6 +113,27 @@ export const VotingScreen: React.FC<Props> = ({
               </span>
             </div>
           </div>
+
+          {!amSpectator && !isDisqualified && (
+            <div className="pt-1">
+              {hasVoted ? (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-bold">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>
+                    {lang === 'ar'
+                      ? 'تم تسجيل صوتك — بانتظار تصويت بقية اللاعبين...'
+                      : 'Vote recorded — waiting for remaining players...'}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs font-bold text-slate-300">
+                  {lang === 'ar'
+                    ? 'اختر المشتبه به الآن (التصويت إجباري لجميع اللاعبين)'
+                    : 'Select the suspect now (mandatory vote for all players)'}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Players to Vote on */}
@@ -178,41 +194,6 @@ export const VotingScreen: React.FC<Props> = ({
           })}
         </div>
 
-        {/* Skip Vote Button */}
-        {!amSpectator && (
-          <button
-            type="button"
-            disabled={!canVote}
-            onClick={() => handleVote('SKIP')}
-            className={`w-full flex items-center justify-between p-3.5 rounded-2xl border transition-all ${
-              canVote
-                ? 'cursor-pointer hover:border-amber-400/70 hover:bg-slate-800/80 active:scale-[0.99]'
-                : 'cursor-default opacity-80'
-            } ${
-              isMySkip
-                ? 'border-amber-400 bg-amber-500/20 shadow-[0_0_20px_rgba(251,191,36,0.3)]'
-                : 'border-slate-800 bg-slate-950/60 text-slate-300'
-            }`}
-          >
-            <div className="flex items-center gap-2 font-bold text-xs sm:text-sm">
-              <FastForward className="w-4 h-4 text-amber-400" />
-              <span>{t.btnSkipVote}</span>
-            </div>
-
-            <div className="flex items-center -space-x-2 rtl:space-x-reverse">
-              {skipVoters.map(v => (
-                <img
-                  key={v.uid}
-                  src={v.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${v.uid}`}
-                  alt={v.name}
-                  title={v.name}
-                  className="w-7 h-7 rounded-full border-2 border-amber-400 object-cover shadow-md"
-                />
-              ))}
-            </div>
-          </button>
-        )}
-
         {/* Human Players Discussion Chat (Optional, Zero Bot Messages) */}
         {onSendVoteChat && !amSpectator && (
           <div className="p-3 rounded-2xl bg-slate-950/70 border border-sky-500/20 text-start space-y-2">
@@ -263,17 +244,6 @@ export const VotingScreen: React.FC<Props> = ({
               </span>
             </span>
           </div>
-        )}
-
-        {onLeaveRoom && (
-          <button
-            type="button"
-            onClick={onLeaveRoom}
-            className="w-full py-2.5 rounded-2xl bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-400 text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>{t.btnLeaveStation}</span>
-          </button>
         )}
       </div>
     </div>

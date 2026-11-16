@@ -61,11 +61,11 @@ export interface RoomData {
   round?: number;
   turnOrder?: string[];
   turnIndex?: number;
-  turnTimeLeft?: number;
+  turnTimeLeft?: number | null;
   turnEndsAt?: number | null;
   turnGraceUntil?: number | null;
   completedTurnsThisRound?: Record<string, boolean> | null; // uid -> true (strictly guarantees at most one turn per player/bot per round)
-  voteTimeLeft?: number;
+  voteTimeLeft?: number | null;
   voteEndsAt?: number | null;
   votes?: Record<string, string> | null; // voterUid -> targetUid or 'SKIP'
   winnerTeam?: 'crew' | 'spies' | null;

@@ -64,7 +64,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: |
-          VERSION=$(node -e 'console.log(require("./public/version.json").version || "2.6.1")')
+          VERSION=$(node -e 'console.log(require("./public/version.json").version || "2.7.0")')
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
 
           cd android
@@ -106,6 +106,8 @@ jobs:
               -keypass "$KEY_PASS" \
               -dname "CN=Spy Station, O=SpyStation, C=EG"
           fi
+
+          keytool -list -v -keystore release.keystore -alias "$KS_ALIAS" -storepass "$KS_PASS" | grep -E "SHA1:|SHA256:" || true
 
           "$BUILD_TOOLS_DIR/zipalign" -f -p 4 "$UNSIGNED_APK" app-aligned.apk
           "$BUILD_TOOLS_DIR/apksigner" sign \

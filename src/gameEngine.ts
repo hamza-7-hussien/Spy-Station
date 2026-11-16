@@ -198,6 +198,7 @@ export function computeNextTurnState(
   inputRoom: RoomData,
   options: {
     expectedTurnIndex?: number;
+    expectedRound?: number;
     wasTimeout?: boolean;
     now?: number;
     completedDrawing?: {
@@ -207,9 +208,13 @@ export function computeNextTurnState(
     } | null;
   } = {}
 ): TurnAdvanceResult {
-  const { expectedTurnIndex, wasTimeout = false, now = Date.now(), completedDrawing } = options;
+  const { expectedTurnIndex, expectedRound, wasTimeout = false, now = Date.now(), completedDrawing } = options;
 
   if (!inputRoom || inputRoom.status !== 'playing' || !inputRoom.turnOrder || inputRoom.turnOrder.length === 0) {
+    return { changed: false, room: inputRoom, afkKickedName: null, roundChanged: false };
+  }
+
+  if (expectedRound !== undefined && (inputRoom.round || 1) !== expectedRound) {
     return { changed: false, room: inputRoom, afkKickedName: null, roundChanged: false };
   }
 
@@ -382,8 +387,8 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
   const votes = room.votes || {};
   const counts: Record<string, number> = {};
   Object.values(votes).forEach(tgt => {
-    const key = tgt || 'SKIP';
-    counts[key] = (counts[key] || 0) + 1;
+    if (!tgt || tgt === 'SKIP' || !room.players?.[tgt]) return;
+    counts[tgt] = (counts[tgt] || 0) + 1;
   });
 
   let maxVotes = 0;
@@ -398,7 +403,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
   }
 
   const ejectedUid =
-    maxVotes > 0 && topCandidates.length === 1 && topCandidates[0] !== 'SKIP'
+    maxVotes > 0 && topCandidates.length === 1
       ? topCandidates[0]
       : null;
 
@@ -432,6 +437,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
         turnTimeLeft: nextTurnTime,
         turnGraceUntil: graceUntil,
         turnEndsAt: graceUntil + nextTurnTime * 1000,
+        voteTimeLeft: null,
         voteEndsAt: null,
         votes: null,
         voteChat: null,
@@ -475,6 +481,8 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
           finalPlayers: playersObj,
           players: playersObj,
           spies: updatedSpies,
+          voteTimeLeft: null,
+          voteEndsAt: null,
           votes: null,
           voteChat: null,
           blackoutActive: false,
@@ -499,6 +507,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
         ejectionEndsAt,
         turnGraceUntil: ejectionEndsAt,
         turnEndsAt: ejectionEndsAt + nextTurnTime * 1000,
+        voteTimeLeft: null,
         voteEndsAt: null,
         votes: null,
         voteChat: null,
@@ -533,6 +542,8 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
         finalSpies: currentSpies,
         finalPlayers: playersObj,
         players: playersObj,
+        voteTimeLeft: null,
+        voteEndsAt: null,
         votes: null,
         voteChat: null,
         blackoutActive: false,
@@ -556,6 +567,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
       ejectionEndsAt,
       turnGraceUntil: ejectionEndsAt,
       turnEndsAt: ejectionEndsAt + nextTurnTime * 1000,
+      voteTimeLeft: null,
       voteEndsAt: null,
       votes: null,
       voteChat: null,

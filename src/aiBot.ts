@@ -355,7 +355,7 @@ export function generateSmartBotVote(params: {
 }): string {
   const { botUid, isSpy, isUndercover = false, activePlayers, spies, gameChat, word, wordAr, wordCategory } = params;
   const otherCandidates = activePlayers.filter(p => p.uid !== botUid && !p.isSpectator);
-  if (otherCandidates.length === 0) return 'SKIP';
+  if (otherCandidates.length === 0) return botUid;
 
   const scores = evaluatePlayerSuspicionScores({
     activePlayers,
@@ -366,7 +366,7 @@ export function generateSmartBotVote(params: {
     wordCategory
   });
 
-  // Spies and the Undercover protector both try to protect spies and vote out innocents (or skip)
+  // Spies and the Undercover protector both try to protect spies and vote out innocents
   if (isSpy || isUndercover) {
     const nonSpies = otherCandidates.filter(p => !spies.includes(p.uid));
     if (nonSpies.length > 0) {
@@ -378,7 +378,7 @@ export function generateSmartBotVote(params: {
       const topChoices = ranked.slice(0, Math.min(2, ranked.length));
       return topChoices[Math.floor(Math.random() * topChoices.length)].uid;
     }
-    return isUndercover ? 'SKIP' : otherCandidates[0].uid;
+    return otherCandidates[0].uid;
   }
 
   const ranked = [...otherCandidates].sort((a, b) => (scores[b.uid] || 0) - (scores[a.uid] || 0));

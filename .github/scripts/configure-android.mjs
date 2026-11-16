@@ -2,14 +2,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const versionInfo = JSON.parse(fs.readFileSync('public/version.json', 'utf8'));
-const versionName = versionInfo.version || '2.6.1';
+const versionName = versionInfo.version || '2.7.0';
 const buildNum = Number(process.env.BUILD_NUM || 1);
 
-// 1. Update build.gradle versionCode & versionName
+// 1. Update build.gradle versionCode, versionName, and Play Services Auth dependency
 const gradlePath = 'android/app/build.gradle';
 let gradle = fs.readFileSync(gradlePath, 'utf8');
 gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${buildNum}`);
 gradle = gradle.replace(/versionName\s+"[^"]+"/, `versionName "${versionName}"`);
+if (!gradle.includes('play-services-auth')) {
+  gradle = gradle.replace(
+    /dependencies\s*\{/,
+    "dependencies {\n    implementation 'com.google.android.gms:play-services-auth:21.3.0'"
+  );
+}
 fs.writeFileSync(gradlePath, gradle);
 
 // 2. Add WebRTC voice, network & wake-lock permissions to AndroidManifest.xml
@@ -52,11 +58,13 @@ if (fs.existsSync(stylesPath)) {
   }
 }
 
-// 4. Write enhanced MainActivity.java for Immersive Sticky Fullscreen, zero scrollbars/overscroll, clean Chrome UA, 3P cookies & OAuth popup Dialog support
+// 4. Write enhanced MainActivity.java for Immersive Sticky Fullscreen, native Google account picker, zero scrollbars/overscroll, clean Chrome UA, 3P cookies & OAuth popup Dialog support
 const mainActivityPath = 'android/app/src/main/java/com/spystation/game/MainActivity.java';
 const mainActivityJava = `package com.spystation.game;
 
+import android.accounts.AccountManager;
 import android.app.Dialog;
+import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -67,6 +75,7 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
@@ -80,8 +89,79 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.tasks.Task;
+import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
+    private static final int RC_GOOGLE_SIGN_IN = 9001;
+    private static final int RC_ACCOUNT_PICKER = 9002;
+    private static final String GOOGLE_WEB_CLIENT_ID = "917373852984-gc48n5v2nidpe6ob79a7ue0j5i01rnak.apps.googleusercontent.com";
+
+    private class SpyStationNativeBridge {
+        @JavascriptInterface
+        public void signInWithGoogle() {
+            runOnUiThread(() -> launchNativeGoogleAccountPicker());
+        }
+    }
+
+    private void launchNativeGoogleAccountPicker() {
+        try {
+            GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken(GOOGLE_WEB_CLIENT_ID)
+                .requestEmail()
+                .build();
+            GoogleSignInClient client = GoogleSignIn.getClient(this, gso);
+            client.signOut().addOnCompleteListener(this, task -> {
+                try {
+                    startActivityForResult(client.getSignInIntent(), RC_GOOGLE_SIGN_IN);
+                } catch (Exception ex) {
+                    launchSystemAccountManagerPicker();
+                }
+            });
+        } catch (Exception ex) {
+            launchSystemAccountManagerPicker();
+        }
+    }
+
+    private void launchSystemAccountManagerPicker() {
+        try {
+            Intent intent = AccountManager.newChooseAccountIntent(
+                null,
+                null,
+                new String[]{"com.google"},
+                null,
+                null,
+                null,
+                null
+            );
+            startActivityForResult(intent, RC_ACCOUNT_PICKER);
+        } catch (Exception ex) {
+            notifyNativeGoogleAuth("error", null, null, ex.getMessage());
+        }
+    }
+
+    private void notifyNativeGoogleAuth(final String status, final String idToken, final String email, final String message) {
+        runOnUiThread(() -> {
+            final WebView wv = getBridge() != null ? getBridge().getWebView() : null;
+            if (wv == null) return;
+            try {
+                JSONObject json = new JSONObject();
+                json.put("status", status);
+                if (idToken != null) json.put("idToken", idToken);
+                if (email != null) json.put("email", email);
+                if (message != null) json.put("message", message);
+                final String js = "if (window.__onNativeGoogleAuthResult) { window.__onNativeGoogleAuthResult(" + json.toString() + "); }";
+                wv.evaluateJavascript(js, null);
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
     private String buildCleanChromeUserAgent(String rawUa) {
         if (rawUa == null || rawUa.isEmpty()) return rawUa;
         return rawUa
@@ -122,6 +202,7 @@ public class MainActivity extends BridgeActivity {
         final WebView webView = getBridge().getWebView();
         if (webView == null) return;
 
+        webView.addJavascriptInterface(new SpyStationNativeBridge(), "SpyStationNative");
         webView.setBackgroundColor(Color.parseColor("#030712"));
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
@@ -247,6 +328,47 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == RC_GOOGLE_SIGN_IN) {
+            try {
+                Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
+                GoogleSignInAccount account = task.getResult(ApiException.class);
+                if (account != null && account.getIdToken() != null) {
+                    notifyNativeGoogleAuth("idToken", account.getIdToken(), account.getEmail(), null);
+                    return;
+                }
+                if (account != null && account.getEmail() != null) {
+                    notifyNativeGoogleAuth("loginHint", null, account.getEmail(), null);
+                    return;
+                }
+                launchSystemAccountManagerPicker();
+            } catch (ApiException e) {
+                int code = e.getStatusCode();
+                if (code == 12501 || (resultCode == RESULT_CANCELED && code == 16)) {
+                    notifyNativeGoogleAuth("cancelled", null, null, null);
+                } else {
+                    launchSystemAccountManagerPicker();
+                }
+            } catch (Exception e) {
+                launchSystemAccountManagerPicker();
+            }
+            return;
+        }
+        if (requestCode == RC_ACCOUNT_PICKER) {
+            if (resultCode == RESULT_OK && data != null) {
+                String chosenEmail = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
+                if (chosenEmail != null && !chosenEmail.isEmpty()) {
+                    notifyNativeGoogleAuth("loginHint", null, chosenEmail, null);
+                    return;
+                }
+            }
+            notifyNativeGoogleAuth("cancelled", null, null, null);
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
         applyImmersiveFullscreen();
@@ -284,4 +406,4 @@ for (const [folder, src] of Object.entries(iconMap)) {
     fs.copyFileSync(src, path.join(dir, 'ic_launcher_round.png'));
   }
 }
-console.log(`Configured Spy Station Android v${versionName} (build ${buildNum}) with immersive fullscreen & OAuth popup WebView`);
+console.log(`Configured Spy Station Android v${versionName} (build ${buildNum}) with native Google Account picker & immersive fullscreen`);

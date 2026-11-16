@@ -8,6 +8,22 @@ import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { Globe, Mail, Lock, User as UserIcon, Sparkles, KeyRound, X, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
+interface NativeGoogleAuthResult {
+  status: 'idToken' | 'loginHint' | 'cancelled' | 'error';
+  idToken?: string;
+  email?: string;
+  message?: string;
+}
+
+declare global {
+  interface Window {
+    SpyStationNative?: {
+      signInWithGoogle?: () => void;
+    };
+    __onNativeGoogleAuthResult?: (payload: NativeGoogleAuthResult) => void;
+  }
+}
+
 interface Props {
   lang: Language;
   onToggleLanguage?: () => void;
@@ -97,6 +113,42 @@ export const AuthScreen: React.FC<Props> = ({
     return err.message || t.errActionFailed;
   };
 
+  const requestNativeGoogleAccount = (): Promise<NativeGoogleAuthResult | null> =>
+    new Promise(resolve => {
+      if (typeof window === 'undefined' || !window.SpyStationNative?.signInWithGoogle) {
+        resolve(null);
+        return;
+      }
+
+      let settled = false;
+      const timerId = window.setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          delete window.__onNativeGoogleAuthResult;
+          resolve({ status: 'cancelled' });
+        }
+      }, 120000);
+
+      window.__onNativeGoogleAuthResult = payload => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timerId);
+        delete window.__onNativeGoogleAuthResult;
+        resolve(payload || { status: 'cancelled' });
+      };
+
+      try {
+        window.SpyStationNative.signInWithGoogle();
+      } catch {
+        if (!settled) {
+          settled = true;
+          window.clearTimeout(timerId);
+          delete window.__onNativeGoogleAuthResult;
+          resolve(null);
+        }
+      }
+    });
+
   const signInWithGoogleResilient = async (provider: firebase.auth.GoogleAuthProvider): Promise<firebase.auth.UserCredential | null> => {
     await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     try {
@@ -119,6 +171,37 @@ export const AuthScreen: React.FC<Props> = ({
     try {
       sound.playTone(550, 'sine', 0.1);
       setLoading(true);
+
+      const nativeResult = await requestNativeGoogleAccount();
+      if (nativeResult) {
+        if (nativeResult.status === 'cancelled') {
+          onToast(t.googleCancelNotice || (lang === 'ar' ? 'تم إلغاء اختيار حساب Google.' : 'Google account selection was cancelled.'), 'normal');
+          return;
+        }
+        if (nativeResult.status === 'idToken' && nativeResult.idToken) {
+          await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+          const credential = firebase.auth.GoogleAuthProvider.credential(nativeResult.idToken);
+          const credRes = await auth.signInWithCredential(credential);
+          if (credRes?.user) {
+            await syncUserProfileToDb(credRes.user);
+          }
+          return;
+        }
+        if (nativeResult.status === 'loginHint' && nativeResult.email) {
+          const provider = new firebase.auth.GoogleAuthProvider();
+          provider.setCustomParameters({ login_hint: nativeResult.email });
+          const res = await signInWithGoogleResilient(provider);
+          if (res?.user) {
+            await syncUserProfileToDb(res.user);
+          }
+          return;
+        }
+        if (nativeResult.status === 'error' && nativeResult.message) {
+          onToast(nativeResult.message, 'danger');
+          return;
+        }
+      }
+
       const provider = new firebase.auth.GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const res = await signInWithGoogleResilient(provider);

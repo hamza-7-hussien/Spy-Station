@@ -218,15 +218,18 @@ describe('computeNextTurnState, AFK auto-kick, and round progression', () => {
     assert.notEqual(room.turnOrder![0], 'u_3');
   });
 
-  it('rejects stale turn advancement when expectedTurnIndex mismatches', () => {
+  it('rejects stale turn advancement when expectedTurnIndex or expectedRound mismatches', () => {
     const room = makeRoom({
       status: 'playing',
-      round: 1,
+      round: 2,
       turnOrder: ['u_0', 'u_1', 'u_2'],
       turnIndex: 1
     });
-    const stale = computeNextTurnState(room, { expectedTurnIndex: 0, wasTimeout: false });
-    assert.equal(stale.changed, false);
+    const staleIdx = computeNextTurnState(room, { expectedTurnIndex: 0, expectedRound: 2, wasTimeout: false });
+    assert.equal(staleIdx.changed, false);
+
+    const staleRound = computeNextTurnState(room, { expectedTurnIndex: 1, expectedRound: 1, wasTimeout: false });
+    assert.equal(staleRound.changed, false);
   });
 
   it('auto-converts player to spectator after 3 consecutive timed-out turns and resets streak on active play', () => {
@@ -300,19 +303,21 @@ describe('Blackout protocol trigger & voting resolution', () => {
     assert.equal(areAllEligibleVotesSubmitted(room), true);
   });
 
-  it('handles SKIP majority, ties, ejection cinematic pause, and standard vs mole parity win rules', () => {
-    // 1. SKIP wins
-    const skipRoom = makeRoom({
+  it('handles zero-vote timeout, ties, ejection cinematic pause, and standard vs mole parity win rules', () => {
+    // 1. Zero valid votes -> nobody ejected & round increments cleanly
+    const emptyVoteRoom = makeRoom({
       status: 'voting',
       round: 1,
       spies: ['u_3'],
       players: makePlayers(4),
-      votes: { u_0: 'SKIP', u_1: 'SKIP', u_2: 'u_3', u_3: 'u_0' }
+      votes: null,
+      voteTimeLeft: 12
     });
-    const skipRes = resolveVoteOutcome(skipRoom, 10000);
-    assert.equal(skipRes.outcome, 'nobody_ejected');
-    assert.equal(skipRes.nextRoomFields.round, 2);
-    assert.equal(skipRes.nextRoomFields.status, 'playing');
+    const emptyRes = resolveVoteOutcome(emptyVoteRoom, 10000);
+    assert.equal(emptyRes.outcome, 'nobody_ejected');
+    assert.equal(emptyRes.nextRoomFields.round, 2);
+    assert.equal(emptyRes.nextRoomFields.status, 'playing');
+    assert.equal(emptyRes.nextRoomFields.voteTimeLeft, null);
 
     // 2. Tie vote -> nobody ejected
     const tieRoom = makeRoom({
@@ -336,6 +341,7 @@ describe('Blackout protocol trigger & voting resolution', () => {
     assert.equal(crewRes.outcome, 'crew_win');
     assert.equal(crewRes.nextRoomFields.status, 'gameover');
     assert.equal(crewRes.nextRoomFields.winnerTeam, 'crew');
+    assert.equal(crewRes.nextRoomFields.voteTimeLeft, null);
 
     // 4. Standard vs Mole parity (1 spy vs 1 innocent remaining after ejecting an innocent from 3-player game)
     const threePlayers = makePlayers(3);
@@ -511,7 +517,7 @@ describe('AI Bot clues, Chameleon decoy clues, Silent doodles, and voting', () =
     assert.ok(voteLine && voteLine.includes('Bot 2'));
   });
 
-  it('protects real spies when an Undercover bot votes or talks', () => {
+  it('protects real spies when an Undercover bot votes and never returns SKIP', () => {
     const players = Object.values(makePlayers(5, [0, 1, 2]));
     const spies = ['bot_1'];
     for (let i = 0; i < 20; i++) {
@@ -522,9 +528,21 @@ describe('AI Bot clues, Chameleon decoy clues, Silent doodles, and voting', () =
         activePlayers: players,
         spies
       });
+      assert.notEqual(target, 'SKIP');
       assert.notEqual(target, 'bot_1');
       assert.notEqual(target, 'bot_0');
     }
+
+    // Even if all other players are spies, never return SKIP
+    const twoPlayers = Object.values(makePlayers(2, [0, 1]));
+    const fallbackTarget = generateSmartBotVote({
+      botUid: 'bot_0',
+      isSpy: false,
+      isUndercover: true,
+      activePlayers: twoPlayers,
+      spies: ['bot_1']
+    });
+    assert.equal(fallbackTarget, 'bot_1');
   });
 });
 

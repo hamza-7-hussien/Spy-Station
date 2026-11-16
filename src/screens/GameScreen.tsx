@@ -36,7 +36,6 @@ import {
   MessageSquare,
   Zap,
   Music,
-  FastForward,
   RotateCcw
 } from 'lucide-react';
 
@@ -45,6 +44,7 @@ interface Props {
   currentUserUid: string;
   roomCode: string;
   room: RoomData;
+  serverTimeOffsetMs?: number;
   isVoiceJoined?: boolean;
   isVoiceMuted?: boolean;
   isVoiceDeafened?: boolean;
@@ -57,7 +57,6 @@ interface Props {
   onAdvanceTurn: () => void;
   onTriggerEmergencyVote: () => void;
   onSendGameClue: (word: string, targetRound: number, targetTurnIndex: number) => void;
-  onSkipTurn?: (targetRound: number, targetTurnIndex: number) => void;
   onSendSpyChat: (msg: string) => void;
   onAwardCrewXP?: (players: Record<string, PlayerData>, spies: string[]) => void;
   onToast: (msg: string, type?: 'normal' | 'danger' | 'success') => void;
@@ -69,6 +68,7 @@ export const GameScreen: React.FC<Props> = ({
   currentUserUid,
   roomCode,
   room,
+  serverTimeOffsetMs = 0,
   isVoiceJoined = false,
   isVoiceMuted = false,
   isVoiceDeafened = false,
@@ -81,7 +81,6 @@ export const GameScreen: React.FC<Props> = ({
   onAdvanceTurn,
   onTriggerEmergencyVote,
   onSendGameClue,
-  onSkipTurn,
   onSendSpyChat,
   onAwardCrewXP,
   onToast,
@@ -95,7 +94,7 @@ export const GameScreen: React.FC<Props> = ({
   const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [strokeCount, setStrokeCount] = useState(0);
-  const [nowTs, setNowTs] = useState(() => Date.now());
+  const [nowTs, setNowTs] = useState(() => Date.now() + serverTimeOffsetMs);
   const localStrokesRef = useRef<Array<Array<{ x: number; y: number }>>>([]);
   const isDrawingRef = useRef<boolean>(false);
   const lastPulseSecondRef = useRef<number>(-1);
@@ -125,9 +124,10 @@ export const GameScreen: React.FC<Props> = ({
   const effectiveTurnDuration = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
 
   useEffect(() => {
-    const id = setInterval(() => setNowTs(Date.now()), 250);
+    setNowTs(Date.now() + serverTimeOffsetMs);
+    const id = setInterval(() => setNowTs(Date.now() + serverTimeOffsetMs), 250);
     return () => clearInterval(id);
-  }, []);
+  }, [serverTimeOffsetMs]);
 
   const isFreezeActive =
     (typeof room.ejectionEndsAt === 'number' && room.ejectionEndsAt > nowTs) ||
@@ -914,20 +914,6 @@ export const GameScreen: React.FC<Props> = ({
                     <Send className="w-4 h-4" />
                     <span>{t.btnSend || 'Send'}</span>
                   </button>
-                  {onSkipTurn && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        sound.playClick();
-                        onSkipTurn(currentRound, turnIndex);
-                      }}
-                      title={t.skipTurnTooltip}
-                      className="px-3 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
-                    >
-                      <FastForward className="w-4 h-4" />
-                      <span className="hidden sm:inline">{t.btnPass}</span>
-                    </button>
-                  )}
                 </div>
               </form>
             ) : (
