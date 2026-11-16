@@ -21,9 +21,13 @@ import {
   validateGameStart
 } from './gameEngine';
 import { CategoryKey, GameMode, PlayerData, RoomData } from './types';
-import { getSmartTwinWord, wordsDB } from './words';
+import { CATEGORY_META, getSmartTwinWord, wordsDB } from './words';
+import { CATEGORY_STYLES } from './wordVisuals';
 import {
+  evaluatePlayerSuspicionScores,
+  generateBotLobbyGreeting,
   generateBotSilentDrawing,
+  generateBotVoteDiscussionLine,
   generateSmartBotClue,
   generateSmartBotVote
 } from './aiBot';
@@ -173,6 +177,14 @@ describe('computeInitialGameSetup across all 7 game modes', () => {
       } else {
         assert.equal(setup.undercoverUid, null);
       }
+
+      // Deterministic sequential turn order matching joinedAt seat order regardless of randomFn
+      assert.deepEqual(
+        setup.turnOrder,
+        Object.values(setup.players)
+          .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))
+          .map(p => p.uid)
+      );
     });
   });
 });
@@ -364,7 +376,7 @@ describe('Blackout protocol trigger & voting resolution', () => {
     const afterU1Left = { u_0: waitingPlayers.u_0, bot_2: waitingPlayers.bot_2 };
     assert.equal(shouldResetGameOverToLobby(afterU1Left), true);
     assert.equal(isBotPlayer(waitingPlayers.bot_2), true);
-    assert.equal(DEFAULT_VOTE_SECONDS, 80);
+    assert.equal(DEFAULT_VOTE_SECONDS, 45);
   });
 });
 
@@ -439,4 +451,127 @@ describe('AI Bot clues, Chameleon decoy clues, Silent doodles, and voting', () =
       assert.equal(spies.includes(target), false);
     }
   });
+
+  it('adapts spy bot clues contextually in Arabic and deduces suspicious generic clues when crew votes', () => {
+    const contextClue = generateSmartBotClue({
+      isSpy: true,
+      word: 'Koshary',
+      wordAr: 'كشري',
+      category: 'food',
+      language: 'ar',
+      previousClues: ['مصري', 'شعبي']
+    });
+    assert.ok(contextClue.length > 0);
+    assert.equal(/\s/.test(contextClue), false);
+    assert.notEqual(contextClue, 'مصري');
+
+    const players = Object.values(makePlayers(4, [0, 1, 2, 3]));
+    const spies = ['bot_2'];
+    const gameChat = {
+      m1: { uid: 'bot_0', text: 'مكرونة' },
+      m2: { uid: 'bot_1', text: 'دقة' },
+      m3: { uid: 'bot_2', text: 'معروف' },
+      m4: { uid: 'bot_3', text: 'عدس' }
+    };
+
+    const scores = evaluatePlayerSuspicionScores({
+      activePlayers: players,
+      spies,
+      gameChat,
+      word: 'Koshary',
+      wordAr: 'كشري',
+      wordCategory: 'food'
+    });
+    assert.ok(scores.bot_2 > scores.bot_0);
+    assert.ok(scores.bot_2 > scores.bot_1);
+
+    const voteTarget = generateSmartBotVote({
+      botUid: 'bot_0',
+      isSpy: false,
+      activePlayers: players,
+      spies,
+      gameChat,
+      word: 'Koshary',
+      wordAr: 'كشري',
+      wordCategory: 'food'
+    });
+    assert.equal(voteTarget, 'bot_2');
+
+    const greeting = generateBotLobbyGreeting('ar');
+    assert.ok(greeting.length > 0);
+
+    const voteLine = generateBotVoteDiscussionLine({
+      botUid: 'bot_0',
+      isSpy: false,
+      targetUid: 'bot_2',
+      activePlayers: players,
+      gameChat,
+      lang: 'ar'
+    });
+    assert.ok(voteLine && voteLine.includes('Bot 2'));
+  });
+
+  it('protects real spies when an Undercover bot votes or talks', () => {
+    const players = Object.values(makePlayers(5, [0, 1, 2]));
+    const spies = ['bot_1'];
+    for (let i = 0; i < 20; i++) {
+      const target = generateSmartBotVote({
+        botUid: 'bot_0',
+        isSpy: false,
+        isUndercover: true,
+        activePlayers: players,
+        spies
+      });
+      assert.notEqual(target, 'bot_1');
+      assert.notEqual(target, 'bot_0');
+    }
+  });
 });
+
+describe('Expanded word banks, category emojis, and Silent/Timer turn mechanics', () => {
+  it('ensures every category has >= 100 words and a representative emoji icon', () => {
+    const expectedCategories: CategoryKey[] = [
+      'players', 'food', 'places', 'movies', 'games', 'animals', 'jobs', 'singers'
+    ];
+    for (const cat of expectedCategories) {
+      assert.ok(wordsDB[cat].length >= 100, `Expected ${cat} >= 100 words, got ${wordsDB[cat].length}`);
+      assert.ok(CATEGORY_META[cat].icon.trim().length > 0, `CATEGORY_META[${cat}].icon missing`);
+      assert.ok(CATEGORY_STYLES[cat].icon.trim().length > 0, `CATEGORY_STYLES[${cat}].icon missing`);
+    }
+  });
+
+  it('persists Silent lastDrawing across turns in the same round and sets turnEndsAt/turnGraceUntil', () => {
+    const room = makeRoom({
+      status: 'playing',
+      gameMode: 'silent',
+      round: 1,
+      turnSeconds: 20,
+      turnOrder: ['u_0', 'u_1', 'u_2', 'u_3'],
+      turnIndex: 0
+    });
+
+    const drawing = [[{ x: 0.1, y: 0.2 }, { x: 0.8, y: 0.7 }]];
+    const step1 = computeNextTurnState(room, {
+      expectedTurnIndex: 0,
+      now: 50000,
+      completedDrawing: { uid: 'u_0', sender: 'User 0', strokes: drawing }
+    });
+    assert.equal(step1.changed, true);
+    assert.equal(step1.room.lastDrawing?.uid, 'u_0');
+    assert.deepEqual(step1.room.lastDrawing?.strokes, drawing);
+    assert.equal(step1.room.turnGraceUntil, null);
+    assert.equal(step1.room.turnEndsAt, 50000 + 20000);
+
+    // Trigger blackout even in rapid 7s mode cleanly
+    const rapidBlackoutRoom = makeRoom({
+      status: 'playing',
+      gameMode: 'blackout',
+      turnSeconds: 7,
+      round: 1,
+      blackoutActive: false,
+      lastBlackoutRound: 0
+    });
+    assert.equal(shouldTriggerBlackout(rapidBlackoutRoom, 3), true);
+  });
+});
+

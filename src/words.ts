@@ -1,6 +1,7 @@
 import { CategoryKey, Language } from './types';
+import { EXPANDED_FOREIGN_MOVIES, EXPANDED_TWIN_PAIRS, EXPANDED_WORDS_DB } from './wordsExpanded';
 
-export const wordsDB: Record<CategoryKey, [string, string][]> = {
+const BASE_WORDS_DB: Record<CategoryKey, [string, string][]> = {
   players: [
     ["Messi", "ميسي"], ["Ronaldo", "رونالدو"], ["Neymar", "نيمار"], ["Mbappe", "مبابي"],
     ["Haaland", "هالاند"], ["De Bruyne", "دي بروين"], ["Benzema", "بنزيما"], ["Modric", "مودريتش"],
@@ -253,6 +254,33 @@ export const wordsDB: Record<CategoryKey, [string, string][]> = {
   ]
 };
 
+function mergeCategoryPairs(
+  base: [string, string][],
+  extra: [string, string][]
+): [string, string][] {
+  const seen = new Set(base.map(p => p[0].toLowerCase().trim()));
+  const merged = [...base];
+  for (const item of extra) {
+    const key = item[0].toLowerCase().trim();
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+  return merged;
+}
+
+export const wordsDB: Record<CategoryKey, [string, string][]> = {
+  players: mergeCategoryPairs(BASE_WORDS_DB.players, EXPANDED_WORDS_DB.players),
+  food: mergeCategoryPairs(BASE_WORDS_DB.food, EXPANDED_WORDS_DB.food),
+  places: mergeCategoryPairs(BASE_WORDS_DB.places, EXPANDED_WORDS_DB.places),
+  movies: mergeCategoryPairs(BASE_WORDS_DB.movies, EXPANDED_WORDS_DB.movies),
+  games: mergeCategoryPairs(BASE_WORDS_DB.games, EXPANDED_WORDS_DB.games),
+  animals: mergeCategoryPairs(BASE_WORDS_DB.animals, EXPANDED_WORDS_DB.animals),
+  jobs: mergeCategoryPairs(BASE_WORDS_DB.jobs, EXPANDED_WORDS_DB.jobs),
+  singers: mergeCategoryPairs(BASE_WORDS_DB.singers, EXPANDED_WORDS_DB.singers)
+};
+
 export const CATEGORY_META: Record<CategoryKey, { icon: string; key: string }> = {
   players: { icon: '⚽', key: 'catFootball' },
   food: { icon: '🍕', key: 'catFood' },
@@ -316,7 +344,8 @@ export const FOREIGN_MOVIES_SET = new Set([
   'shutter island',
   'the shawshank redemption',
   'narcos',
-  'la casa de papel'
+  'la casa de papel',
+  ...EXPANDED_FOREIGN_MOVIES
 ]);
 
 export function isForeignMovie(wordEn?: string | null): boolean {
@@ -479,7 +508,8 @@ const TWIN_PAIRS_MAP: Record<string, string> = {
   "Bruno Mars": "Ed Sheeran", "Ed Sheeran": "Bruno Mars",
   "Taylor Swift": "Adele", "Adele": "Taylor Swift",
   "Shakira": "Rihanna", "Rihanna": "Shakira",
-  "Beyonce": "Rihanna"
+  "Beyonce": "Rihanna",
+  ...EXPANDED_TWIN_PAIRS
 };
 
 const LOWER_TWIN_PAIRS_MAP: Record<string, string> = Object.fromEntries(

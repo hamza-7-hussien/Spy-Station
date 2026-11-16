@@ -1,17 +1,14 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { dictionary } from '../translations';
-import { Language, RoomData, PlayerData, CategoryKey } from '../types';
+import { Language, RoomData, PlayerData, VoiceUserState } from '../types';
 import { sound } from '../audio';
 import { RoleDossierCard } from '../components/RoleDossierCard';
-
 import { db } from '../firebase';
 import firebase from 'firebase/compat/app';
-import { getSecretWordDisplay, CATEGORY_META } from '../words';
+import { getSecretWordDisplay } from '../words';
 import { getEffectiveTurnSeconds } from '../gameEngine';
-import { CATEGORY_STYLES } from '../wordVisuals';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
 import { QuickVoiceControls } from '../components/QuickVoiceControls';
-import { VoiceUserState } from '../types';
 import {
   Clock,
   Mic,
@@ -29,16 +26,13 @@ import {
   Volume2,
   VolumeX,
   Radar,
-  Sparkles,
   VolumeX as MuteIcon,
-  RotateCw,
   Lock,
   MessageSquare,
   Zap,
   Music,
-  Fingerprint,
-  Pin,
-  FastForward
+  FastForward,
+  RotateCcw
 } from 'lucide-react';
 
 interface Props {
@@ -76,7 +70,6 @@ export const GameScreen: React.FC<Props> = ({
   isVoiceSpeaking = false,
   voiceUsers = {},
   onJoinVoice = () => {},
-  onLeaveVoice = () => {},
   onToggleVoiceMute = () => {},
   onToggleVoiceDeafen = () => {},
   onAdvanceTurn,
@@ -84,7 +77,6 @@ export const GameScreen: React.FC<Props> = ({
   onSendGameClue,
   onSkipTurn,
   onSendSpyChat,
-  onAwardCrewXP,
   onToast,
   onLeaveRoom
 }) => {
@@ -95,7 +87,7 @@ export const GameScreen: React.FC<Props> = ({
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const [strokeCount, setStrokeCount] = useState(0);
   const localStrokesRef = useRef<Array<Array<{ x: number; y: number }>>>([]);
   const isDrawingRef = useRef<boolean>(false);
   const lastPulseSecondRef = useRef<number>(-1);
@@ -108,7 +100,6 @@ export const GameScreen: React.FC<Props> = ({
   const amSpectator = !!myPlayer.isSpectator;
   const isSpy = (room.spies || []).includes(currentUserUid);
 
-  // Chameleon mode decoy word or regular word display using strict bilingual rules
   const isChameleonSpy = isSpy && room.gameMode === 'chameleon';
   const displayWord = isChameleonSpy
     ? getSecretWordDisplay(myPlayer.chameleonWord, myPlayer.chameleonWordAr, room.wordCategory, lang)
@@ -125,65 +116,48 @@ export const GameScreen: React.FC<Props> = ({
   const effectiveTurnDuration = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
   const timeLeft = room.turnTimeLeft != null ? room.turnTimeLeft : effectiveTurnDuration;
 
-  // Undercover Agent role info (supports 1 or more spies)
   const isUndercover = room.gameMode === 'undercover' && room.undercoverUid === currentUserUid;
   const spyNameForUndercover = (room.spies || [])
     .map(sUid => playersObj[sUid]?.name)
     .filter(Boolean)
-    .join(' ، ') || 'Unknown';
+    .join(' · ') || 'Unknown';
 
-  // Spectator count
   const spectatorCount = Object.values(playersObj).filter(p => p.isSpectator).length;
-
-  // Clues list
   const cluesList = Object.values(room.gameChat || {});
+  const activeUids = (turnOrder.length > 0 ? turnOrder : Object.keys(playersObj)).filter(
+    uid => playersObj[uid] && !playersObj[uid].isSpectator
+  );
+
+  // Flexible emergency vote: available on player's turn OR once round 1 reaches halfway / round >= 2
+  const completedCount = Object.keys(room.completedTurnsThisRound || {}).length;
+  const canEmergencyVote =
+    !amSpectator &&
+    (isMyTurn || currentRound >= 2 || completedCount >= Math.max(1, Math.floor(activeUids.length / 2)));
 
   // Listen to speech bubbles
   useEffect(() => {
     const bubblesRef = db.ref(`spy_rooms/${roomCode}/speechBubbles`);
     const onBubbles = (snap: firebase.database.DataSnapshot) => {
-      const val = snap.val() || {};
-      setSpeechBubbles(val);
+      setSpeechBubbles(snap.val() || {});
     };
     bubblesRef.on('value', onBubbles);
     return () => {
       bubblesRef.off('value', onBubbles);
-      if (bubbleCleanupTimerRef.current) {
-        clearTimeout(bubbleCleanupTimerRef.current);
-      }
+      if (bubbleCleanupTimerRef.current) clearTimeout(bubbleCleanupTimerRef.current);
     };
   }, [roomCode]);
 
-  // Blackout Protocol State for GameScreen (Audio & Visuals)
+  // Blackout Protocol Audio Alert (Fair non-blocking comms-jamming surge)
   const isBlackoutActive = !!room.blackoutActive;
-  const [showBlackoutFlash, setShowBlackoutFlash] = useState(false);
-
   useEffect(() => {
     if (isBlackoutActive) {
       sound.playBlackoutAlarm();
       sound.playGlitchStatic();
-      sound.triggerHaptic('heavy');
-
-      let hideTimer: ReturnType<typeof setTimeout> | null = null;
-      const flashTimer = setTimeout(() => {
-        setShowBlackoutFlash(true);
-        sound.triggerHaptic('light');
-        // Split-second flash visible for 750ms - ultra fast, rewarding sharp focus!
-        hideTimer = setTimeout(() => {
-          setShowBlackoutFlash(false);
-        }, 750);
-      }, 750);
-
-      return () => {
-        clearTimeout(flashTimer);
-        if (hideTimer) clearTimeout(hideTimer);
-      };
-    } else {
-      setShowBlackoutFlash(false);
+      sound.triggerHaptic('medium');
     }
   }, [isBlackoutActive]);
 
-  // Audio timer countdown pulse (High-tension ticking in final seconds)
+  // Audio timer countdown pulse
   useEffect(() => {
     if (timeLeft !== lastPulseSecondRef.current) {
       lastPulseSecondRef.current = timeLeft;
@@ -195,15 +169,25 @@ export const GameScreen: React.FC<Props> = ({
     }
   }, [timeLeft]);
 
-  const drawStrokesOnCanvas = (strokes: Array<Array<{ x: number; y: number }>>) => {
+  const drawStrokesOnCanvas = useCallback((strokes: Array<Array<{ x: number; y: number }>>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rect = canvas.getBoundingClientRect();
+    const cssWidth = rect.width || 420;
+    const cssHeight = rect.height || 210;
+    const targetW = Math.round(cssWidth * dpr);
+    const targetH = Math.round(cssHeight * dpr);
+
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
     ctx.strokeStyle = '#38bdf8';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
@@ -213,24 +197,24 @@ export const GameScreen: React.FC<Props> = ({
       if (!stroke || stroke.length === 0) return;
       ctx.beginPath();
       stroke.forEach((pt, i) => {
-        const x = pt.x * w;
-        const y = pt.y * h;
+        const x = pt.x * cssWidth;
+        const y = pt.y * cssHeight;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
       ctx.stroke();
     });
-  };
+  }, []);
 
-  // Silent drawing synchronization
   useEffect(() => {
     if (room.gameMode !== 'silent') return;
     if (!isDrawingRef.current) {
       const remoteStrokes = room.currentDrawing || [];
       localStrokesRef.current = remoteStrokes;
+      setStrokeCount(remoteStrokes.length);
       drawStrokesOnCanvas(remoteStrokes);
     }
-  }, [room.currentDrawing, room.gameMode]);
+  }, [room.currentDrawing, room.gameMode, drawStrokesOnCanvas]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isMyTurn || room.gameMode !== 'silent') return;
@@ -239,16 +223,16 @@ export const GameScreen: React.FC<Props> = ({
     try {
       canvas.setPointerCapture(e.pointerId);
     } catch {
-      // ignore if unsupported
+      // ignore
     }
     const rect = canvas.getBoundingClientRect();
     const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
 
     isDrawingRef.current = true;
-    setIsDrawing(true);
-    const updated = [...localStrokesRef.current, [{ x, y }]];
+    const updated = [...localStrokesRef.current, [{ x, y }, { x, y }]];
     localStrokesRef.current = updated;
+    setStrokeCount(updated.length);
     drawStrokesOnCanvas(updated);
     lastDrawingSyncRef.current = Date.now();
     db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(updated).catch(() => {});
@@ -258,7 +242,6 @@ export const GameScreen: React.FC<Props> = ({
     if (!isDrawingRef.current || !isMyTurn || room.gameMode !== 'silent') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const rect = canvas.getBoundingClientRect();
     const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
@@ -267,7 +250,6 @@ export const GameScreen: React.FC<Props> = ({
     if (existing.length > 0) {
       existing[existing.length - 1] = [...existing[existing.length - 1], { x, y }];
       drawStrokesOnCanvas(existing);
-
       const now = Date.now();
       if (now - lastDrawingSyncRef.current >= 90) {
         lastDrawingSyncRef.current = now;
@@ -279,23 +261,36 @@ export const GameScreen: React.FC<Props> = ({
   const handlePointerUp = () => {
     if (!isDrawingRef.current) return;
     isDrawingRef.current = false;
-    setIsDrawing(false);
     if (isMyTurn && room.gameMode === 'silent' && localStrokesRef.current.length > 0) {
       db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(localStrokesRef.current).catch(() => {});
     }
+  };
+
+  const undoLastStroke = () => {
+    if (!isMyTurn || localStrokesRef.current.length === 0) return;
+    sound.playClick();
+    const updated = localStrokesRef.current.slice(0, -1);
+    localStrokesRef.current = updated;
+    setStrokeCount(updated.length);
+    drawStrokesOnCanvas(updated);
+    db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(updated.length > 0 ? updated : null).catch(() => {});
   };
 
   const clearCanvas = () => {
     if (!isMyTurn) return;
     sound.playClick();
     localStrokesRef.current = [];
+    setStrokeCount(0);
     drawStrokesOnCanvas([]);
     db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(null).catch(() => {});
   };
 
-  const finishDrawingTurn = () => {
+  const finishDrawingTurn = async () => {
     if (!isMyTurn) return;
     sound.playClick();
+    if (localStrokesRef.current.length > 0) {
+      await db.ref(`spy_rooms/${roomCode}/currentDrawing`).set(localStrokesRef.current).catch(() => {});
+    }
     onAdvanceTurn();
   };
 
@@ -316,7 +311,6 @@ export const GameScreen: React.FC<Props> = ({
     }
   };
 
-  // Reset clue input when turn passes or round changes
   useEffect(() => {
     if (!isMyTurn) {
       setClueInput('');
@@ -338,24 +332,33 @@ export const GameScreen: React.FC<Props> = ({
       return onToast(t.errOneWordOnly, 'danger');
     }
 
-    // Crew/Undercover cannot type the secret word; Chameleon spy cannot type their own decoy word
-    // (avoid blocking the real secret word for a non-crew spy, which would reveal it!)
+    const normalizeMatch = (val: string) =>
+      val
+        .trim()
+        .toLowerCase()
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي')
+        .replace(/[\u064B-\u065F]/g, '');
+
+    const cleanNorm = normalizeMatch(clean);
+    const matchesSecret = (candidateEn?: string, candidateAr?: string) => {
+      const enNorm = normalizeMatch(candidateEn || '');
+      const arNorm = normalizeMatch(candidateAr || '');
+      if (enNorm && cleanNorm === enNorm) return true;
+      if (arNorm) {
+        if (cleanNorm === arNorm) return true;
+        if (cleanNorm.replace(/^ال/, '') === arNorm.replace(/^ال/, '')) return true;
+      }
+      return false;
+    };
+
     if (!isSpy) {
-      const secretWordEn = (room.word || '').trim().toLowerCase();
-      const secretWordAr = (room.wordAr || '').trim();
-      if (
-        (secretWordEn && clean.toLowerCase() === secretWordEn) ||
-        (secretWordAr && clean === secretWordAr)
-      ) {
+      if (matchesSecret(room.word, room.wordAr)) {
         return onToast(t.errCannotTypeSecretWord, 'danger');
       }
     } else if (isChameleonSpy) {
-      const decoyEn = (myPlayer.chameleonWord || '').trim().toLowerCase();
-      const decoyAr = (myPlayer.chameleonWordAr || '').trim();
-      if (
-        (decoyEn && clean.toLowerCase() === decoyEn) ||
-        (decoyAr && clean === decoyAr)
-      ) {
+      if (matchesSecret(myPlayer.chameleonWord, myPlayer.chameleonWordAr)) {
         return onToast(t.errCannotTypeSecretWord, 'danger');
       }
     }
@@ -382,112 +385,47 @@ export const GameScreen: React.FC<Props> = ({
     }
   };
 
-  // Active players list
-  const activeUids = (turnOrder.length > 0 ? turnOrder : Object.keys(playersObj)).filter(
-    uid => playersObj[uid] && !playersObj[uid].isSpectator
-  );
+  const lastDrawingStrokes =
+    room.gameMode === 'silent' && strokeCount === 0 && room.lastDrawing?.strokes?.length
+      ? room.lastDrawing.strokes
+      : null;
 
   return (
-    <div className={`w-full max-w-3xl mx-auto space-y-3.5 pb-24 pt-1 text-start select-none relative z-10 transition-colors duration-500 ${
-      isBlackoutActive ? 'brightness-75 saturate-150' : ''
-    }`}>
-      {/* ============================================================== */}
-      {/* 🚨 BLACKOUT PROTOCOL EMERGENCY OVERLAY */}
-      {/* ============================================================== */}
-      {/* ============================================================== */}
-      {/* 🚨 BLACKOUT PROTOCOL EMERGENCY OVERLAY */}
-      {/* ============================================================== */}
+    <div className="w-full max-w-5xl mx-auto space-y-4 pb-20 pt-1 text-start select-none relative z-10">
+      {/* Non-blocking Blackout Comms-Jamming Banner */}
       {isBlackoutActive && (
-        <div className="fixed inset-0 z-50 pointer-events-none flex flex-col items-center justify-between p-4 sm:p-6 bg-red-950/60 border-4 border-rose-500/60 animate-pulse shadow-[inset_0_0_120px_rgba(244,63,94,0.6)] backdrop-blur-[2px]">
-          {/* Top Warning Banner with Tactical Emergency Timer HUD */}
-          <div className="w-full max-w-xl flex items-center justify-between px-4 py-2.5 rounded-2xl bg-black/95 border-2 border-rose-500 text-rose-300 shadow-[0_0_40px_rgba(244,63,94,0.8)] backdrop-blur-md">
-            <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-rose-500 animate-bounce" />
-              <span className="font-heading font-black text-xs sm:text-sm tracking-wider uppercase text-rose-200">
-                {lang === 'ar' ? '🚨 بروتوكول التعتيم: انقطاع كهرباء وتشويش طارئ! ⚡' : '🚨 BLACKOUT PROTOCOL: EMERGENCY COMMS GLITCH ⚡'}
-              </span>
-            </div>
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 border border-rose-400/50 text-rose-300 text-xs font-mono font-black shadow-[0_0_15px_rgba(244,63,94,0.4)]">
-              <Clock className="w-3.5 h-3.5 animate-spin text-rose-400" style={{ animationDuration: '3s' }} />
-              <span>BLACKOUT</span>
-            </div>
+        <div className="px-4 py-2.5 rounded-xl bg-rose-950/80 border border-rose-500/60 text-rose-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs sm:text-sm font-bold">
+            <Zap className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{t.blackoutAlert}</span>
           </div>
-
-          {/* Central Tactical Glitch Intel */}
-          <div className="my-auto text-center pointer-events-none select-none px-4 max-w-xl w-full">
-            {showBlackoutFlash ? (
-              /* Ultra-fast split-second Intel Flash */
-              <div className="animate-in zoom-in-95 duration-100 p-6 rounded-3xl bg-black/95 border-2 border-rose-500 shadow-[0_0_60px_rgba(244,63,94,0.9)] backdrop-blur-2xl space-y-3">
-                <div className="text-xs sm:text-sm font-mono font-black text-rose-400 tracking-widest uppercase drop-shadow-[0_0_10px_rgba(244,63,94,0.8)] flex items-center justify-center gap-2">
-                  <Zap className="w-4 h-4 text-rose-400 animate-bounce" />
-                  <span>
-                    {isSpy
-                      ? (lang === 'ar' ? 'رصد استخباري فائق السرعة للكلمة السرية!' : 'ULTRA-FAST INTEL FLASH: SECRET WORD!')
-                      : (lang === 'ar' ? 'رصد رادار خاطف لأسماء الجواسيس!' : 'ULTRA-FAST INTEL FLASH: IDENTIFIED SPIES!')}
-                  </span>
-                  <Zap className="w-4 h-4 text-rose-400 animate-bounce" />
-                </div>
-                {isSpy ? (
-                  <div className="text-4xl sm:text-6xl font-black font-heading tracking-wider text-white drop-shadow-[0_0_30px_rgba(244,63,94,1)] animate-pulse">
-                    {displayWord || (lang === 'ar' ? 'الكلمة السرية' : 'Secret Word')}
-                  </div>
-                ) : (
-                  <div className="text-3xl sm:text-5xl font-black font-heading tracking-wider text-rose-300 drop-shadow-[0_0_30px_rgba(244,63,94,1)] animate-pulse">
-                    {(room.spies || []).map(sUid => playersObj[sUid]?.name || 'Agent').join(' ، ')}
-                  </div>
-                )}
-                <div className="text-[11px] font-bold text-rose-300">
-                  {lang === 'ar' ? '⚡ رصد خاطف لجزء من الثانية فقط!' : '⚡ Split-second glimpse only!'}
-                </div>
-              </div>
-            ) : (
-              /* Atmospheric alert during the remaining blackout seconds */
-              <div className="p-5 rounded-3xl bg-black/90 border border-rose-500/60 shadow-[0_0_40px_rgba(244,63,94,0.5)] backdrop-blur-xl space-y-2">
-                <div className="text-xs font-mono font-black text-rose-400 tracking-widest uppercase">
-                  ⚡ {lang === 'ar' ? 'انقطاع تام للاتصالات والكهرباء' : 'TOTAL COMMS & POWER BLACKOUT'} ⚡
-                </div>
-                <div className="text-lg sm:text-xl font-black font-heading text-rose-200">
-                  {lang === 'ar' ? '⚠️ رادار المحطة يرصد تشويشاً عالي التردد' : '⚠️ Station radar detects high-frequency jamming!'}
-                </div>
-                <p className="text-[12px] text-slate-300">
-                  {lang === 'ar' ? 'انتبه للتلميحات.. الكاميرات والرادار تعود للعمل بعد لحظات!' : 'Stay focused.. Station feeds and radars restoring shortly!'}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom Alert */}
-          <div className="text-center text-[11px] font-bold text-rose-300 bg-black/85 px-4 py-1.5 rounded-full border border-rose-500/40 shadow-lg">
-            {lang === 'ar'
-              ? '⚡ تستأنف اتصالات ورادار المحطة خلال ثوانٍ معدودة... ⚡'
-              : '⚡ Comms and radar restoring in moments... ⚡'}
-          </div>
+          <span className="text-[11px] font-mono tabular-nums font-bold text-rose-300 shrink-0">
+            BLACKOUT
+          </span>
         </div>
       )}
 
-      {/* ============================================================== */}
-      {/* 🚀 TOP CLEAN STATUS BAR */}
-      {/* ============================================================== */}
-      <div className="flex items-center justify-between px-3 py-2 rounded-2xl bg-slate-900/90 border border-sky-500/25 backdrop-blur-xl shadow-lg gap-2 flex-wrap sm:flex-nowrap">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <div className="p-1 rounded-lg bg-sky-500/20 text-sky-400 shrink-0">
-            <Radar className="w-4 h-4 animate-spin" style={{ animationDuration: '6s' }} />
+      {/* Top Status Bar */}
+      <div className="flex items-center justify-between px-4 py-2.5 rounded-2xl bg-[#111827] border border-slate-800 gap-2 flex-wrap sm:flex-nowrap">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-sky-400 shrink-0">
+            <Radar className="w-4 h-4" />
           </div>
-          <div className="flex items-center gap-1 whitespace-nowrap min-w-0">
-            <span className="font-heading font-black text-xs sm:text-sm text-white">
+          <div className="flex items-center gap-1.5 whitespace-nowrap min-w-0">
+            <span className="font-heading font-bold text-xs sm:text-sm text-white">
               {t.lblStation}
             </span>
-            <span className="font-mono font-black text-xs sm:text-sm text-sky-400">
+            <span className="font-mono tabular-nums font-black text-xs sm:text-sm text-sky-400">
               #{roomCode}
             </span>
           </div>
-          <span className="px-1.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/30 text-sky-300 font-mono text-[10px] sm:text-[11px] shrink-0 font-bold whitespace-nowrap">
+          <span className="text-slate-600" aria-hidden="true">·</span>
+          <span className="text-xs font-mono tabular-nums font-bold text-slate-300 whitespace-nowrap">
             {t.lblRound} {currentRound}
           </span>
         </div>
 
-        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-          {/* Quick Voice Controls (Microphone + Headphone side-by-side) */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <QuickVoiceControls
             lang={lang}
             isJoined={isVoiceJoined}
@@ -501,50 +439,44 @@ export const GameScreen: React.FC<Props> = ({
             compact={true}
           />
 
-          {/* Dedicated Chat History Button */}
           <button
+            type="button"
             onClick={() => {
               sound.playClick();
               setIsHistoryOpen(true);
             }}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/40 text-sky-300 text-xs font-black transition cursor-pointer shadow-sm active:scale-95 shrink-0"
+            className="min-h-[36px] flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-sky-300 text-xs font-bold transition cursor-pointer shrink-0"
             title={t.btnChatHistory}
           >
             <MessageSquare className="w-3.5 h-3.5 text-sky-400" />
             <span className="hidden md:inline">{t.btnChatHistory}</span>
             {cluesList.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-sky-400 text-slate-950 text-[10px] font-mono font-black">
+              <span className="font-mono tabular-nums text-[11px] font-black text-sky-400">
                 {cluesList.length}
               </span>
             )}
           </button>
 
-          {/* Background Music (BGM) Toggle */}
           <button
-            onClick={() => {
-              const bgmMuted = sound.toggleBgm();
-              setIsBgmMuted(bgmMuted);
-            }}
-            className={`p-1.5 sm:p-2 rounded-xl border transition cursor-pointer shrink-0 ${
+            type="button"
+            onClick={() => setIsBgmMuted(sound.toggleBgm())}
+            className={`min-w-[36px] min-h-[36px] p-2 rounded-xl border transition cursor-pointer shrink-0 flex items-center justify-center ${
               isBgmMuted
-                ? 'bg-slate-800/80 border-slate-700 text-slate-500 hover:text-slate-300'
-                : 'bg-indigo-950/70 border-indigo-500/60 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.35)]'
+                ? 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                : 'bg-indigo-950/60 border-indigo-500/50 text-indigo-300'
             }`}
             title={isBgmMuted ? t.musicOn : t.musicOff}
           >
-            <Music className={`w-3.5 h-3.5 ${!isBgmMuted ? 'text-indigo-400 animate-pulse' : ''}`} />
+            <Music className="w-3.5 h-3.5" />
           </button>
 
-          {/* Game Sound SFX Toggle (Completely Independent from Voice Chat) */}
           <button
-            onClick={() => {
-              const muted = sound.toggleMute();
-              setIsMuted(muted);
-            }}
-            className={`p-1.5 sm:p-2 rounded-xl border transition cursor-pointer shrink-0 ${
+            type="button"
+            onClick={() => setIsMuted(sound.toggleMute())}
+            className={`min-w-[36px] min-h-[36px] p-2 rounded-xl border transition cursor-pointer shrink-0 flex items-center justify-center ${
               isMuted
                 ? 'bg-rose-950/40 border-rose-500/40 text-rose-400'
-                : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
             }`}
             title={isMuted ? t.sfxOn : t.sfxOff}
           >
@@ -552,16 +484,17 @@ export const GameScreen: React.FC<Props> = ({
           </button>
 
           {spectatorCount > 0 && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-full bg-slate-800 text-slate-300 text-[10px] shrink-0">
-              <Eye className="w-3 h-3 text-slate-400" />
+            <span className="flex items-center gap-1 px-2 text-slate-400 text-xs font-mono tabular-nums shrink-0">
+              <Eye className="w-3.5 h-3.5" />
               <span>{spectatorCount}</span>
             </span>
           )}
 
           {onLeaveRoom && (
             <button
+              type="button"
               onClick={onLeaveRoom}
-              className="p-1.5 sm:p-2 rounded-xl bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-400 text-xs font-bold transition cursor-pointer shrink-0"
+              className="min-w-[36px] min-h-[36px] p-2 rounded-xl bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/30 text-rose-400 transition cursor-pointer shrink-0 flex items-center justify-center"
               title={t.btnLeaveStation}
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -570,464 +503,457 @@ export const GameScreen: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Role Warnings (Undercover / Chameleon) */}
-      {isUndercover && (
-        <div className="p-2.5 rounded-2xl bg-cyan-950/60 border border-cyan-400/50 shadow-md text-xs text-cyan-200 flex items-center gap-2">
-          <Radar className="w-4 h-4 text-cyan-400 shrink-0 animate-pulse" />
-          <div>
-            <span className="font-bold text-cyan-300">{t.lblUndercoverTag}</span>
-            <span>{t.undercoverAlert.replace('{spyName}', spyNameForUndercover)}</span>
-          </div>
-        </div>
-      )}
-
-      {isChameleonSpy && (
-        <div className="p-2.5 rounded-2xl bg-emerald-950/50 border border-emerald-400/50 text-xs text-emerald-200 flex items-center gap-2 shadow-md">
-          <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{t.chameleonDecoyHint}</span>
-        </div>
-      )}
-
-      {/* ============================================================== */}
-      {/* 🎯 HERO TURN SPOTLIGHT & TIMER BANNER */}
-      {/* ============================================================== */}
-      <div
-        className={`p-4 rounded-3xl border-2 transition-all flex items-center justify-between gap-3 shadow-xl ${
-          isMyTurn
-            ? 'bg-gradient-to-r from-sky-950/90 via-indigo-950/80 to-sky-950/90 border-sky-400 shadow-[0_0_30px_rgba(56,189,248,0.3)] animate-pulse'
-            : 'bg-slate-900/85 border-slate-800'
-        }`}
-      >
-        <div className="flex items-center gap-3 min-w-0">
+      {/* Main 2-Column Gameplay Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        {/* Left Column: Turn Spotlight + Role Dossier Card */}
+        <div className="lg:col-span-5 space-y-4">
+          {/* Active Turn Banner */}
           <div
-            className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
+            className={`p-4 rounded-2xl border transition-colors flex items-center justify-between gap-3 ${
               isMyTurn
-                ? 'bg-sky-400 text-slate-950 border-sky-300 font-black shadow-md'
-                : 'bg-slate-800 text-sky-400 border-slate-700'
+                ? 'bg-sky-950/45 border-sky-400'
+                : 'bg-[#111827] border-slate-800'
             }`}
           >
-            <Mic className={`w-5 h-5 ${isMyTurn ? 'animate-bounce' : ''}`} />
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              {t.lblCurrentTurn || 'Current Speaking Turn'}
-            </div>
-            <div className="text-sm sm:text-base md:text-lg font-black text-white font-heading leading-tight break-words">
-              {isMyTurn ? (
-                <span className="text-sky-300 flex flex-wrap items-center gap-1">
-                  <span>{t.lblYourTurnGiveClue || '👉 YOUR TURN! Give your clue'}</span>
-                </span>
-              ) : (
-                <span className="break-words">{currentSpeaker}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Tactical HUD Circular & Digital Countdown Timer */}
-        <div
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border font-mono font-black text-sm shrink-0 transition-all ${
-            timeLeft <= 5
-              ? 'bg-rose-950/90 border-rose-500 text-rose-300 shadow-[0_0_20px_rgba(244,63,94,0.6)] animate-pulse ring-2 ring-rose-500/40'
-              : 'bg-slate-950/90 border-sky-500/40 text-sky-300 shadow-[0_0_12px_rgba(56,189,248,0.2)]'
-          }`}
-        >
-          {/* Mini Tactical Circular SVG Gauge */}
-          <div className="relative w-5 h-5 flex items-center justify-center shrink-0">
-            <svg className="w-5 h-5 -rotate-90" viewBox="0 0 24 24">
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                className="stroke-slate-800"
-                strokeWidth="2.5"
-                fill="none"
-              />
-              <circle
-                cx="12"
-                cy="12"
-                r="9"
-                className={`${timeLeft <= 5 ? 'stroke-rose-500' : 'stroke-sky-400'} transition-all duration-1000 ease-linear`}
-                strokeWidth="2.5"
-                strokeDasharray="56.5"
-                strokeDashoffset={56.5 * (1 - Math.max(0, Math.min(1, timeLeft / effectiveTurnDuration)))}
-                strokeLinecap="round"
-                fill="none"
-              />
-            </svg>
-            <Clock className={`w-2.5 h-2.5 absolute ${timeLeft <= 5 ? 'text-rose-400' : 'text-sky-400'}`} />
-          </div>
-
-          <span className="text-sm tracking-wider">00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</span>
-          {timeLeft <= 5 && (
-            <span className="text-[10px] px-1 py-0.2 rounded bg-rose-500 text-black font-extrabold tracking-tighter">
-              !
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ============================================================== */}
-      {/* 🪪 3D ROLE DOSSIER CARD (Tactile Card Flip & Thematic Reveal) */}
-      {/* ============================================================== */}
-      <RoleDossierCard
-        lang={lang}
-        isSpy={isSpy}
-        isChameleonSpy={isChameleonSpy}
-        amSpectator={amSpectator}
-        displayWord={displayWord || ''}
-        wordCategory={room.wordCategory}
-        roomGameMode={room.gameMode}
-        fellowSpiesNames={(room.spies || [])
-          .filter(sUid => sUid !== currentUserUid)
-          .map(sUid => playersObj[sUid]?.name || 'Agent')}
-        t={t as unknown as Record<string, string>}
-      />
-
-      {/* ============================================================== */}
-      {/* 👥 ASTRONAUT CREW ROSTER (Clean, comfortable grid) */}
-      {/* ============================================================== */}
-      <div className="p-4 sm:p-5 rounded-3xl bg-slate-900/85 border border-sky-500/25 backdrop-blur-xl shadow-xl space-y-3">
-        <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-          <span>{t.lblSpaceCrew || 'Space Crew Roster 🛸'}</span>
-          <span className="text-[11px] text-sky-400 font-mono">
-            {activeUids.length} {t.lblAstronautsCount || 'Astronauts'}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 pt-1">
-          {activeUids.map(uid => {
-            const p = playersObj[uid];
-            const isTurn = uid === currentTurnUid;
-            const bubble = speechBubbles[uid];
-            const isSilenced = !!p?.isSilenced;
-            const isMe = uid === currentUserUid;
-            const isBot = !!p?.isBot || uid.startsWith('bot_');
-
-            const userVoice = voiceUsers?.[uid];
-            const isVoiceSpeaking = !!userVoice?.speaking;
-            const isUserMuted = userVoice ? !!userVoice.muted : true;
-            const isUserDeafened = userVoice ? !!userVoice.deafened : false;
-            const isFellowMoleSpy = isSpy && room.gameMode === 'mole' && (room.spies || []).includes(uid) && !isMe;
-
-            return (
+            <div className="flex items-center gap-3 min-w-0">
               <div
-                key={uid}
-                className={`relative p-3 rounded-2xl border transition-all flex flex-col items-center justify-center text-center ${
-                  isVoiceSpeaking
-                    ? 'bg-emerald-950/40 border-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.4)] scale-105 z-20'
-                    : isTurn
-                    ? 'bg-sky-500/25 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.5)] scale-105 z-20'
-                    : isMe
-                    ? 'bg-slate-950/80 border-sky-500/40'
-                    : 'bg-slate-950/50 border-slate-800'
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                  isMyTurn
+                    ? 'bg-sky-400 text-slate-950 border-sky-300'
+                    : 'bg-slate-900 text-sky-400 border-slate-800'
                 }`}
               >
-                {/* Floating Speech Bubble Above Avatar */}
-                {bubble && (
-                  <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-in zoom-in-75 duration-200">
-                    <div className="relative px-2.5 py-1 rounded-2xl bg-white text-slate-950 text-[11px] font-black shadow-xl border-2 border-sky-400 text-center max-w-[160px] break-words leading-tight">
-                      {bubble.text}
-                      <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45 border-r-2 border-b-2 border-sky-400" />
-                    </div>
-                  </div>
-                )}
+                <Mic className="w-5 h-5" />
+              </div>
 
-                {/* Avatar Portrait - Clean with NO mic badge overlay */}
-                <div className="relative mb-1">
-                  <img
-                    src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
-                    alt={p?.name}
-                    className={`w-12 h-12 rounded-full object-cover border-2 transition-all ${
-                      isBlackoutActive
-                        ? 'opacity-20 grayscale brightness-50 border-rose-900 filter blur-[1px]'
-                        : isVoiceSpeaking
-                        ? 'border-emerald-300 ring-4 ring-emerald-400 animate-pulse'
-                        : isTurn
-                        ? 'border-sky-300 ring-4 ring-sky-400/40'
-                        : isMe
-                        ? 'border-sky-400'
-                        : 'border-slate-700'
-                    }`}
-                  />
-                  {isSilenced && (
-                    <div className="absolute -top-1 -right-1 p-1 rounded-full bg-rose-600 text-white shadow-md">
-                      <MuteIcon className="w-2.5 h-2.5" />
-                    </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold text-slate-400">
+                  {t.lblCurrentTurn}
+                </div>
+                <div className="text-sm sm:text-base font-black text-white font-heading leading-tight break-words">
+                  {isMyTurn ? (
+                    <span className="text-sky-300">{t.lblYourTurnGiveClue}</span>
+                  ) : (
+                    <span>{currentSpeaker}</span>
                   )}
                 </div>
+              </div>
+            </div>
 
-                {/* Player Name + Mole Badge (Hidden during blackout protocol) */}
-                <div className="flex items-center justify-center gap-1 max-w-[95px]">
-                  <span className={`text-[11px] font-bold text-center truncate leading-tight ${
-                    isBlackoutActive ? 'text-rose-500/40 tracking-widest' : 'text-white'
-                  }`}>
-                    {isBlackoutActive ? '██████' : (p?.name || 'Agent')}
+            <div
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border font-mono tabular-nums font-black text-sm shrink-0 ${
+                timeLeft <= 5
+                  ? 'bg-rose-950/90 border-rose-500 text-rose-300'
+                  : 'bg-slate-950 border-slate-800 text-sky-300'
+              }`}
+            >
+              <Clock className={`w-4 h-4 ${timeLeft <= 5 ? 'text-rose-400' : 'text-sky-400'}`} />
+              <span>00:{timeLeft < 10 ? `0${timeLeft}` : timeLeft}</span>
+            </div>
+          </div>
+
+          {/* Direct Secret Word & Role Card (no fingerprint scanner, no chameleon spoiler) */}
+          <RoleDossierCard
+            lang={lang}
+            isSpy={isSpy}
+            isChameleonSpy={isChameleonSpy}
+            amSpectator={amSpectator}
+            displayWord={displayWord || ''}
+            wordCategory={room.wordCategory}
+            roomGameMode={room.gameMode}
+            fellowSpiesNames={(room.spies || [])
+              .filter(sUid => sUid !== currentUserUid)
+              .map(sUid => playersObj[sUid]?.name || 'Agent')}
+            protectedSpyName={isUndercover ? spyNameForUndercover : null}
+            t={t as unknown as Record<string, string>}
+          />
+
+          {/* Undercover Alert (for Crew guardian) */}
+          {isUndercover && (
+            <div className="p-3 rounded-xl bg-indigo-950/45 border border-indigo-500/40 text-xs text-indigo-200 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span>{t.undercoverAlert.replace('{spyName}', spyNameForUndercover)}</span>
+            </div>
+          )}
+
+          {/* Mole Network Private Spy Comms */}
+          {isSpy && !amSpectator && room.gameMode === 'mole' && (
+            <div className="p-4 rounded-2xl bg-[#111827] border border-rose-500/35 space-y-2.5">
+              <div className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-rose-400" />
+                <span>{t.lblSpyNetwork}</span>
+              </div>
+
+              <div className="h-24 overflow-y-auto space-y-1 p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+                {room.spyChat && Object.values(room.spyChat).length > 0 ? (
+                  Object.values(room.spyChat).map((msg, i) => (
+                    <div key={i} className="p-1.5 rounded-lg bg-slate-900">
+                      <span className="font-bold text-rose-300 me-1.5">{msg.sender}:</span>
+                      <span className="text-slate-200">{msg.text}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center text-slate-500 py-4 text-xs">
+                    {t.lblSpyComms}
+                  </div>
+                )}
+              </div>
+
+              <form onSubmit={handleSpySubmit} className="flex gap-2">
+                <input
+                  type="text"
+                  value={spyInput}
+                  onChange={e => setSpyInput(e.target.value)}
+                  placeholder={t.lblSpyChatPlaceholder}
+                  className="flex-1 min-h-[40px] py-1.5 px-3 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs outline-none focus:border-rose-400"
+                />
+                <button
+                  type="submit"
+                  className="min-w-[44px] min-h-[40px] px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition flex items-center justify-center cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column: Crew Roster + Turn Input / Silent Canvas + Emergency Vote */}
+        <div className="lg:col-span-7 space-y-4">
+          {/* Crew Roster */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#111827] border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+              <span>{t.lblSpaceCrew}</span>
+              <span className="font-mono tabular-nums text-sky-400">
+                {activeUids.length} {t.lblAstronautsCount}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+              {activeUids.map((uid, seatIdx) => {
+                const p = playersObj[uid];
+                const isTurn = uid === currentTurnUid;
+                const hasPlayedTurn = !!room.completedTurnsThisRound?.[uid];
+                const bubble = speechBubbles[uid];
+                const isSilenced = !!p?.isSilenced;
+                const isMe = uid === currentUserUid;
+                const isBot = !!p?.isBot || uid.startsWith('bot_');
+
+                const userVoice = voiceUsers?.[uid];
+                const isUserSpeaking = !!userVoice?.speaking;
+                const isUserMuted = userVoice ? !!userVoice.muted : true;
+                const isUserDeafened = userVoice ? !!userVoice.deafened : false;
+                const isFellowMoleSpy = isSpy && room.gameMode === 'mole' && (room.spies || []).includes(uid) && !isMe;
+
+                // During Blackout jamming surge, briefly mask attribution visually on other players
+                const hideNameForBlackout = isBlackoutActive && !isMe;
+
+                return (
+                  <div
+                    key={uid}
+                    className={`relative p-3 rounded-xl border transition-colors flex flex-col items-center justify-center text-center ${
+                      isUserSpeaking
+                        ? 'bg-emerald-950/35 border-emerald-400 z-20'
+                        : isTurn
+                        ? 'bg-sky-500/15 border-sky-400 z-20'
+                        : isMe
+                        ? 'bg-slate-950/90 border-sky-500/40'
+                        : 'bg-slate-950/75 border-slate-800'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1.5 inset-inline-start-1.5 font-mono tabular-nums text-[10px] font-bold ${
+                        isTurn
+                          ? 'text-sky-300'
+                          : hasPlayedTurn
+                          ? 'text-emerald-400'
+                          : 'text-slate-500'
+                      }`}
+                    >
+                      #{seatIdx + 1}
+                    </span>
+
+                    {hasPlayedTurn && !isTurn && (
+                      <span
+                        title={lang === 'ar' ? 'أرسل تلميحه' : 'Clue submitted'}
+                        className="absolute top-1.5 inset-inline-end-1.5 text-emerald-400"
+                      >
+                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                      </span>
+                    )}
+
+                    {/* Floating Speech Bubble */}
+                    {bubble && (
+                      <div className="absolute -top-11 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+                        <div className="relative px-2.5 py-1 rounded-xl bg-white text-slate-950 text-xs font-black shadow-lg border border-sky-400 text-center max-w-[150px] break-words leading-tight">
+                          {bubble.text}
+                          <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2.5 h-2.5 bg-white rotate-45 border-r border-b border-sky-400" />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="relative mb-1.5 mt-2">
+                      <img
+                        src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
+                        alt={hideNameForBlackout ? 'Agent' : p?.name}
+                        referrerPolicy="no-referrer"
+                        className={`w-11 h-11 rounded-xl object-cover border transition-all ${
+                          hideNameForBlackout
+                            ? 'opacity-45 grayscale border-rose-800'
+                            : isUserSpeaking
+                            ? 'border-2 border-emerald-400'
+                            : isTurn
+                            ? 'border-2 border-sky-400'
+                            : 'border-slate-700'
+                        }`}
+                      />
+                      {isSilenced && (
+                        <div className="absolute -top-1 -right-1 p-1 rounded-full bg-rose-600 text-white">
+                          <MuteIcon className="w-2.5 h-2.5" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-center gap-1 max-w-[100px]">
+                      <span className={`text-xs font-bold text-center truncate leading-tight ${hideNameForBlackout ? 'text-rose-400/70' : 'text-white'}`}>
+                        {hideNameForBlackout ? '???' : (p?.name || 'Agent')}
+                      </span>
+                      {isFellowMoleSpy && !hideNameForBlackout && (
+                        <span title={t.lblFellowSpyBadge} className="shrink-0">
+                          <Shield className="w-3 h-3 text-rose-400" />
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-[10px] text-slate-400 mt-0.5 min-h-[14px]">
+                      {isMe ? t.lblYou : isBot ? t.botTag : ''}
+                    </div>
+
+                    {!isBot && (
+                      <div className="flex items-center justify-center gap-2 mt-1.5 pt-1 border-t border-slate-800/80 w-full">
+                        <button
+                          type="button"
+                          onClick={isMe ? onToggleVoiceMute : undefined}
+                          className={`p-1 ${isMe ? 'cursor-pointer hover:text-white' : 'cursor-default'}`}
+                        >
+                          {!isUserMuted ? (
+                            <Mic className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <MicOff className="w-3 h-3 text-rose-400/80" />
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={isMe ? onToggleVoiceDeafen : undefined}
+                          className={`p-1 ${isMe ? 'cursor-pointer hover:text-white' : 'cursor-default'}`}
+                        >
+                          {!isUserDeafened ? (
+                            <Headphones className="w-3 h-3 text-sky-400" />
+                          ) : (
+                            <HeadphoneOff className="w-3 h-3 text-rose-400/80" />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Bottom Action Console */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#111827] border border-slate-800 space-y-4">
+            {/* Silent Drawing Canvas */}
+            {room.gameMode === 'silent' && (
+              <div className="w-full space-y-3">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                  <span className="flex items-center gap-1.5">
+                    <Brush className="w-3.5 h-3.5 text-sky-400" />
+                    <span>{t.lblSilentDrawHint}</span>
                   </span>
-                  {isFellowMoleSpy && !isBlackoutActive && (
-                    <span title={t.lblFellowSpyBadge || 'Fellow Spy'} className="text-[10px]">
-                      🕵️
+                  {lastDrawingStrokes && (
+                    <span className="text-[11px] text-slate-400">
+                      {t.lastDrawingLabel}
                     </span>
                   )}
                 </div>
 
-                {isMe && (
-                  <span className="text-[9px] font-bold text-sky-400">
-                    ({t.lblYou || 'You'})
-                  </span>
-                )}
+                <div className="relative">
+                  <canvas
+                    ref={canvasRef}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={handlePointerMove}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                    onPointerLeave={handlePointerUp}
+                    className={`w-full aspect-[2/1] rounded-xl bg-slate-950 border touch-none block ${
+                      isMyTurn ? 'border-sky-400 cursor-crosshair' : 'border-slate-800 cursor-default'
+                    }`}
+                  />
 
-                {/* Voice Status Pill: Mic & Headphone for all real players */}
-                {!isBot && (
-                  <div className="flex items-center justify-center gap-1.5 mt-1 px-2 py-0.5 rounded-full bg-slate-900/90 border border-slate-800">
+                  {lastDrawingStrokes && !isMyTurn && (
+                    <svg
+                      viewBox="0 0 100 50"
+                      className="absolute inset-0 w-full h-full pointer-events-none opacity-65"
+                      preserveAspectRatio="none"
+                    >
+                      {lastDrawingStrokes.map((stroke, idx) => (
+                        <polyline
+                          key={idx}
+                          fill="none"
+                          stroke="#94a3b8"
+                          strokeWidth="1.2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          points={(stroke || []).map(pt => `${(pt.x * 100).toFixed(1)},${(pt.y * 50).toFixed(1)}`).join(' ')}
+                        />
+                      ))}
+                    </svg>
+                  )}
+                </div>
+
+                {isMyTurn ? (
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
-                      onClick={isMe ? onToggleVoiceMute : undefined}
-                      className={`flex items-center justify-center ${isMe ? 'cursor-pointer hover:scale-110 transition' : 'cursor-default'}`}
-                      title={
-                        isMe
-                          ? isUserMuted
-                            ? t.unmuteMicTooltip
-                            : t.muteMicTooltip
-                          : !isUserMuted
-                          ? t.micLive
-                          : t.micMuted
-                      }
+                      onClick={undoLastStroke}
+                      disabled={strokeCount === 0}
+                      className="min-h-[44px] py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                     >
-                      {!isUserMuted ? (
-                        <Mic className={`w-3 h-3 ${isVoiceSpeaking ? 'text-emerald-400 animate-bounce' : 'text-emerald-400'}`} />
-                      ) : (
-                        <MicOff className="w-3 h-3 text-rose-400/80" />
-                      )}
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{t.undoStroke}</span>
                     </button>
                     <button
                       type="button"
-                      onClick={isMe ? onToggleVoiceDeafen : undefined}
-                      className={`flex items-center justify-center ${isMe ? 'cursor-pointer hover:scale-110 transition' : 'cursor-default'}`}
-                      title={
-                        isMe
-                          ? isUserDeafened
-                            ? t.hearAudioTooltip
-                            : t.deafenTooltip
-                          : !isUserDeafened
-                          ? t.audioLive
-                          : t.audioDeafened
-                      }
+                      onClick={clearCanvas}
+                      className="min-h-[44px] py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
                     >
-                      {!isUserDeafened ? (
-                        <Headphones className="w-3 h-3 text-cyan-400" />
-                      ) : (
-                        <HeadphoneOff className="w-3 h-3 text-rose-400/80" />
-                      )}
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{t.btnClearDrawing}</span>
                     </button>
+                    <button
+                      type="button"
+                      onClick={finishDrawingTurn}
+                      className="min-h-[44px] py-2 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 text-xs font-black flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{t.btnDoneDrawing}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="py-2 px-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-sky-300 flex items-center justify-center gap-2">
+                    <Brush className="w-3.5 h-3.5 text-sky-400" />
+                    <span>
+                      {t.drawingLiveNotice ? t.drawingLiveNotice.replace('{name}', currentSpeaker) : `${currentSpeaker}...`}
+                    </span>
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
-      </div>
+            )}
 
-      {/* ============================================================== */}
-      {/* 🎮 BOTTOM ACTION CONSOLE (Clean, context-aware) */}
-      {/* ============================================================== */}
-      <div className="p-4 sm:p-5 rounded-3xl bg-slate-900/95 border border-sky-500/30 backdrop-blur-xl shadow-2xl space-y-3.5">
-        {/* Silent Drawing Canvas (If Silent Mode) */}
-        {room.gameMode === 'silent' && (
-          <div className="w-full space-y-2">
-            <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5 justify-center">
-              <Brush className="w-3.5 h-3.5 text-sky-400" />
-              <span>{t.lblSilentDrawHint}</span>
-            </div>
+            {/* Text Clue Input Bar */}
+            {room.gameMode !== 'silent' && (
+              <div>
+                {isMyTurn ? (
+                  <form onSubmit={handleClueSubmit} className="space-y-2.5">
+                    <div className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
+                      <Mic className="w-3.5 h-3.5 text-sky-400" />
+                      <span>{t.lblEnterClue}</span>
+                    </div>
 
-            <canvas
-              ref={canvasRef}
-              width={320}
-              height={150}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={handlePointerUp}
-              onPointerCancel={handlePointerUp}
-              onPointerLeave={handlePointerUp}
-              className={`w-full aspect-[2/1] rounded-2xl bg-slate-950/90 border border-sky-400/40 touch-none block ${
-                isMyTurn ? 'cursor-crosshair shadow-[0_0_15px_rgba(56,189,248,0.2)]' : 'cursor-default'
-              }`}
-            />
-
-            {isMyTurn ? (
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={clearCanvas}
-                  className="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{t.btnClearDrawing}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={finishDrawingTurn}
-                  className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 text-xs font-black flex items-center justify-center gap-1 transition cursor-pointer shadow-md"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>{t.btnDoneDrawing}</span>
-                </button>
-              </div>
-            ) : (
-              <div className="text-center py-1.5 px-3 rounded-xl bg-slate-950/60 border border-sky-500/20 text-xs font-bold text-sky-300 flex items-center justify-center gap-2 animate-pulse">
-                <Brush className="w-3.5 h-3.5 text-sky-400" />
-                <span>
-                  {t.drawingLiveNotice ? t.drawingLiveNotice.replace('{name}', currentSpeaker) : `${currentSpeaker}...`}
-                </span>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        disabled={!!myPlayer.isSilenced}
+                        value={clueInput}
+                        onChange={e => setClueInput(e.target.value)}
+                        placeholder={
+                          myPlayer.isSilenced
+                            ? t.msgSilenced
+                            : (t.lblChatPlaceholder || t.clueInputPlaceholder)
+                        }
+                        className="flex-1 min-w-0 min-h-[46px] py-2.5 px-3.5 rounded-xl bg-slate-950 border-2 border-sky-400 text-white font-bold text-sm outline-none transition placeholder:text-slate-500"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!!myPlayer.isSilenced}
+                        className="min-h-[46px] px-4 sm:px-5 py-2.5 rounded-xl bg-sky-400 hover:bg-sky-300 active:scale-[0.98] text-slate-950 font-black text-xs sm:text-sm transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        <Send className="w-4 h-4" />
+                        <span>{t.btnSend}</span>
+                      </button>
+                      {onSkipTurn && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            sound.playClick();
+                            onSkipTurn(currentRound, turnIndex);
+                          }}
+                          title={t.skipTurnTooltip}
+                          className="min-h-[46px] px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
+                        >
+                          <FastForward className="w-4 h-4" />
+                          <span className="hidden sm:inline">{t.btnPass}</span>
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                ) : (
+                  <div className="py-2.5 text-center text-xs text-slate-400 font-semibold flex items-center justify-center gap-2">
+                    <Clock className="w-4 h-4 text-sky-400" />
+                    <span>
+                      {t.lblListeningTo ? t.lblListeningTo.replace('{name}', currentSpeaker) : `Listening to ${currentSpeaker}...`}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {/* Input Bar or Waiting Message */}
-        {room.gameMode !== 'silent' && (
-          <div>
-            {isMyTurn ? (
-              <form onSubmit={handleClueSubmit} className="space-y-2">
-                <div className="text-xs font-bold text-sky-300 flex items-center gap-1.5">
-                  <Mic className="w-3.5 h-3.5 text-sky-400" />
-                  <span>{t.lblEnterClue || 'Enter your clue (one word only):'}</span>
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    disabled={!!myPlayer.isSilenced}
-                    value={clueInput}
-                    onChange={e => setClueInput(e.target.value)}
-                    placeholder={
-                      myPlayer.isSilenced
-                        ? t.msgSilenced
-                        : (t.lblChatPlaceholder || t.clueInputPlaceholder)
-                    }
-                    className="flex-1 min-w-0 py-3 px-3.5 rounded-2xl bg-slate-950/90 border-2 border-sky-400 text-white font-bold text-sm outline-none focus:ring-2 focus:ring-sky-400/50 transition placeholder:text-slate-500"
-                  />
+            {/* Forced Emoji Clues if Silenced */}
+            {isMyTurn && myPlayer.isSilenced && (
+              <div className="flex items-center gap-2 pt-1 justify-center flex-wrap">
+                <span className="text-xs font-bold text-rose-300">
+                  {t.lblForcedEmoji}
+                </span>
+                {['🍕', '⚽', '🚗', '🦁', '🎬', '🎮', '✈️', '⚡'].map(emoji => (
                   <button
-                    type="submit"
-                    disabled={!!myPlayer.isSilenced}
-                    className="px-4 sm:px-6 py-3 rounded-2xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 font-black text-xs uppercase tracking-wider hover:brightness-110 active:scale-95 transition shadow-lg shadow-sky-500/25 flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                    key={emoji}
+                    type="button"
+                    onClick={() => handleEmojiClue(emoji)}
+                    className="min-w-[40px] min-h-[40px] p-1.5 text-lg rounded-lg bg-slate-950 border border-slate-800 hover:border-sky-400 transition cursor-pointer"
                   >
-                    <Send className="w-4 h-4" />
-                    <span>{t.btnSend || 'Send'}</span>
+                    {emoji}
                   </button>
-                  {onSkipTurn && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        sound.playClick();
-                        onSkipTurn(currentRound, turnIndex);
-                      }}
-                      title={t.skipTurnTooltip}
-                      className="px-3 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer shrink-0"
-                    >
-                      <FastForward className="w-4 h-4" />
-                      <span className="hidden sm:inline">{t.btnPass}</span>
-                    </button>
-                  )}
-                </div>
-              </form>
-            ) : (
-              <div className="py-2 text-center text-xs text-slate-400 font-bold flex items-center justify-center gap-2">
-                <Clock className="w-4 h-4 text-sky-400 animate-pulse" />
-                <span>
-                  {t.lblListeningTo ? t.lblListeningTo.replace('{name}', currentSpeaker) : `Listening to ${currentSpeaker}...`}
-                </span>
+                ))}
+              </div>
+            )}
+
+            {/* Emergency Vote */}
+            {!amSpectator && (
+              <div className="pt-3 border-t border-slate-800">
+                {canEmergencyVote ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sound.playClick();
+                      onTriggerEmergencyVote();
+                    }}
+                    className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 active:scale-[0.99] text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>{t.lblEmergencyVoteBtn || t.btnEmergencyVote}</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-500 text-xs font-semibold">
+                    <Lock className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                    <span>{t.emergencyVoteOnlyMyTurn}</span>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        )}
-
-        {/* Forced Emoji Clues if Silenced */}
-        {isMyTurn && myPlayer.isSilenced && (
-          <div className="flex items-center gap-2 pt-1 justify-center">
-            <span className="text-[11px] font-bold text-rose-300">
-              {t.lblForcedEmoji}
-            </span>
-            {['🍕', '⚽', '🚗', '🦁', '🎬', '🎮', '✈️', '⚡'].map(emoji => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => handleEmojiClue(emoji)}
-                className="p-1.5 text-lg hover:scale-125 transition cursor-pointer"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* ============================================================== */}
-        {/* 🚨 EMERGENCY VOTE: ONLY ACTIVE ON PLAYER'S TURN! */}
-        {/* ============================================================== */}
-        {!amSpectator && (
-          <div className="pt-2 border-t border-slate-800/80">
-            {isMyTurn ? (
-              <button
-                onClick={() => {
-                  sound.playClick();
-                  onTriggerEmergencyVote();
-                }}
-                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:brightness-110 active:scale-95 text-white font-heading font-black text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(225,29,72,0.45)] transition cursor-pointer"
-              >
-                <AlertTriangle className="w-4 h-4 text-white animate-pulse" />
-                <span>{t.lblEmergencyVoteBtn || t.btnEmergencyVote}</span>
-              </button>
-            ) : (
-              <div className="flex items-center justify-center gap-2 py-2 px-3 rounded-2xl bg-slate-950/50 border border-slate-800 text-slate-500 text-xs font-bold">
-                <Lock className="w-3.5 h-3.5 text-slate-600" />
-                <span>{t.emergencyVoteOnlyMyTurn}</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Mole Network Private Spy Comms (If Mole Mode & User is Spy) */}
-      {isSpy && !amSpectator && room.gameMode === 'mole' && (
-        <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-500/40 space-y-2">
-          <div className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-purple-400" />
-            <span>{t.lblSpyNetwork}</span>
-          </div>
-
-          <div className="h-20 overflow-y-auto space-y-1 p-2 rounded-xl bg-slate-950/80 border border-purple-500/20 text-xs">
-            {room.spyChat && Object.values(room.spyChat).length > 0 ? (
-              Object.values(room.spyChat).map((msg, i) => (
-                <div key={i} className="p-1 rounded-lg bg-purple-900/20">
-                  <span className="font-bold text-purple-300 me-1.5">{msg.sender}:</span>
-                  <span className="text-slate-200">{msg.text}</span>
-                </div>
-              ))
-            ) : (
-              <div className="text-center text-slate-500 py-3 text-[11px]">
-                {t.lblSpyComms}
-              </div>
-            )}
-          </div>
-
-          <form onSubmit={handleSpySubmit} className="flex gap-2">
-            <input
-              type="text"
-              value={spyInput}
-              onChange={e => setSpyInput(e.target.value)}
-              placeholder={t.lblSpyChatPlaceholder}
-              className="flex-1 py-1.5 px-3 rounded-xl bg-slate-950/80 border border-purple-500/30 text-white text-xs outline-none focus:border-purple-400"
-            />
-            <button
-              type="submit"
-              className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition cursor-pointer"
-            >
-              🕵️
-            </button>
-          </form>
         </div>
-      )}
+      </div>
 
       {/* Chat & Clues History Modal */}
       <CluesHistoryModal

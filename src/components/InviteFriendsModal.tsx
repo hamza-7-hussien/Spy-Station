@@ -86,7 +86,7 @@ export const InviteFriendsModal: React.FC<Props> = ({
         </button>
 
         <h3 className="text-lg font-bold text-white text-center mb-4 font-heading">
-          {t.btnInviteFriends} 👥
+          {t.btnInviteFriends}
         </h3>
 
         <div

@@ -62,18 +62,36 @@ export interface RoomData {
   turnOrder?: string[];
   turnIndex?: number;
   turnTimeLeft?: number;
+  turnEndsAt?: number | null;
+  turnGraceUntil?: number | null;
   completedTurnsThisRound?: Record<string, boolean> | null; // uid -> true (strictly guarantees at most one turn per player/bot per round)
   voteTimeLeft?: number;
+  voteEndsAt?: number | null;
   votes?: Record<string, string> | null; // voterUid -> targetUid or 'SKIP'
   winnerTeam?: 'crew' | 'spies' | null;
   finalSpies?: string[];
   finalPlayers?: Record<string, PlayerData>;
   players?: Record<string, PlayerData>;
   lobbyChat?: Record<string, { sender: string; text: string }>;
-  gameChat?: Record<string, { uid?: string; sender: string; avatar?: string; text: string; round?: number; timestamp?: number }>;
+  gameChat?: Record<string, {
+    uid?: string;
+    sender: string;
+    avatar?: string;
+    text: string;
+    round?: number;
+    timestamp?: number;
+    drawingStrokes?: Array<Array<{ x: number; y: number }>> | null;
+  }>;
+  voteChat?: Record<string, { uid?: string; sender: string; avatar?: string; text: string; isBot?: boolean; timestamp?: number }> | null;
   spyChat?: Record<string, { sender: string; text: string }>;
   speechBubbles?: Record<string, { text: string; timestamp: number }>;
   currentDrawing?: Array<Array<{ x: number; y: number }>> | null;
+  lastDrawing?: {
+    uid: string;
+    sender: string;
+    strokes: Array<Array<{ x: number; y: number }>>;
+    timestamp: number;
+  } | null;
   scrambleActive?: boolean;
   joinRequests?: Record<string, JoinRequest>;
   announcement?: {

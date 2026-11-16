@@ -61,7 +61,7 @@ jobs:
             const path = require("path");
 
             const versionInfo = JSON.parse(fs.readFileSync("public/version.json", "utf8"));
-            const versionName = versionInfo.version || "2.5.1";
+            const versionName = versionInfo.version || "2.6.0";
             const buildNum = Number(process.env.BUILD_NUM || 1);
 
             // 1. Update build.gradle versionCode & versionName
@@ -121,7 +121,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
         run: |
-          VERSION=$(node -e 'console.log(require("./public/version.json").version || "2.5.1")')
+          VERSION=$(node -e 'console.log(require("./public/version.json").version || "2.6.0")')
           echo "APP_VERSION=$VERSION" >> "$GITHUB_ENV"
 
           cd android
@@ -177,6 +177,16 @@ jobs:
           cp "../release-apk/SpyStation.apk" "../release-apk/SpyStation-v${VERSION}.apk"
           rm -f release.keystore app-aligned.apk
 
+      - name: Clean old APK artifacts and upload latest APK artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OLD_ARTIFACT_IDS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" --jq '.artifacts[].id' || true)
+          for aid in $OLD_ARTIFACT_IDS; do
+            echo "Deleting old workflow artifact ID: $aid"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${aid}" >/dev/null 2>&1 || true
+          done
+
       - name: Upload APK as Workflow Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -202,16 +212,18 @@ jobs:
             --notes "Latest signed Android APK for Spy Station v${APP_VERSION} (compatible with APKPure, itch.io, and direct install). Previous APK releases were automatically cleaned up." \
             --latest
 
-      - name: Optional upload to itch.io via Butler
+      - name: Publish & Replace APK on itch.io via Butler
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
           ITCH_TARGET: ${{ secrets.ITCH_TARGET }}
         run: |
-          if [ -n "$BUTLER_API_KEY" ] && [ -n "$ITCH_TARGET" ]; then
-            curl -L -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          TARGET="${ITCH_TARGET:-hamza-hussien/spy-station:android}"
+          if [ -n "$BUTLER_API_KEY" ]; then
+            curl -L -sSf -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
             unzip -q butler.zip -d butler-bin
             chmod +x butler-bin/butler
-            ./butler-bin/butler push "release-apk/SpyStation.apk" "$ITCH_TARGET" --userversion "$APP_VERSION"
+            ./butler-bin/butler push "release-apk/SpyStation.apk" "$TARGET" --userversion "$APP_VERSION"
           else
-            echo "Skipping itch.io butler upload (BUTLER_API_KEY / ITCH_TARGET secrets not configured)."
+            echo "BUTLER_API_KEY secret is not configured!"
+            exit 1
           fi

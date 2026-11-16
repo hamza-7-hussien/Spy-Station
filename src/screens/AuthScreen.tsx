@@ -6,7 +6,7 @@ import { sound } from '../audio';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
-import { Globe, Mail, Lock, User as UserIcon, Sparkles, KeyRound, X, CheckCircle2 } from 'lucide-react';
+import { Globe, Mail, Lock, User as UserIcon, LogIn, KeyRound, X, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 
 interface Props {
   lang: Language;
@@ -24,10 +24,10 @@ export const AuthScreen: React.FC<Props> = ({
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Password reset modal state
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
@@ -37,33 +37,88 @@ export const AuthScreen: React.FC<Props> = ({
 
   const t = dictionary[lang];
 
+  const sanitizeRtdbKey = (raw: string): string => {
+    return raw
+      .trim()
+      .toLowerCase()
+      .replace(/[.#$[\]/\s]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'agent';
+  };
+
+  const syncUserProfileToDb = async (user: firebase.User | null, preferredName?: string) => {
+    if (!user) return;
+    try {
+      const snap = await db.ref(`users/${user.uid}`).once('value');
+      const existing = snap.val() || {};
+      const resolvedName =
+        preferredName ||
+        existing.name ||
+        user.displayName ||
+        (user.email ? user.email.split('@')[0] : 'Agent');
+      const resolvedAvatar =
+        existing.avatar ||
+        user.photoURL ||
+        `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(resolvedName || user.uid)}`;
+
+      const updates: Record<string, unknown> = {
+        name: resolvedName,
+        avatar: resolvedAvatar
+      };
+      if (!existing.createdAt) {
+        updates.createdAt = firebase.database.ServerValue.TIMESTAMP;
+      }
+      await db.ref(`users/${user.uid}`).update(updates);
+    } catch {
+      // Non-blocking
+    }
+  };
+
   const mapAuthError = (err: { code?: string; message?: string }): string => {
     const code = err.code || '';
-    if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-      return t.errWrongCredentials;
+    if (
+      code === 'auth/wrong-password' ||
+      code === 'auth/invalid-credential' ||
+      code === 'auth/invalid-login-credentials'
+    ) {
+      return lang === 'ar'
+        ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة. لو حسابك قديم أو مسجل بـ Google، سجل بـ Google أو أنشئ حساباً جديداً.'
+        : t.errWrongCredentials;
     }
-    if (code === 'auth/user-not-found') {
-      return t.errEmailNotFound;
+    if (code === 'auth/user-not-found') return t.errEmailNotFound;
+    if (code === 'auth/email-already-in-use') return t.errEmailInUse;
+    if (code === 'auth/weak-password') return t.errWeakPassword;
+    if (code === 'auth/invalid-email') return t.errInvalidEmail;
+    if (code === 'auth/network-request-failed') return t.errNoInternet;
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return t.googleCancelNotice;
     }
-    if (code === 'auth/email-already-in-use') {
-      return t.errEmailInUse;
+    if (code === 'auth/popup-blocked') {
+      return lang === 'ar'
+        ? 'المتصفح حظر نافذة Google المنبثقة. اسمح بالنوافذ المنبثقة أو افتح اللعبة في تبويب مستقل.'
+        : 'Popup blocked by browser. Please allow popups or open the app in a standalone tab.';
     }
-    if (code === 'auth/weak-password') {
-      return t.errWeakPassword;
+    if (code === 'auth/unauthorized-domain') {
+      return lang === 'ar'
+        ? 'هذا النطاق غير مضاف في Authorized Domains بـ Firebase Authentication.'
+        : 'This domain is not listed in Firebase Authorized Domains.';
     }
-    if (code === 'auth/invalid-email') {
-      return t.errInvalidEmail;
+    if (code === 'auth/operation-not-allowed') {
+      return lang === 'ar'
+        ? 'طريقة تسجيل الدخول هذه غير مفعلة في إعدادات Firebase Authentication.'
+        : 'This sign-in method is not enabled in Firebase Authentication.';
     }
-    if (code === 'auth/network-request-failed') {
-      return t.errNoInternet;
+    if (code === 'auth/operation-not-supported-in-this-environment' || code === 'auth/web-storage-unsupported') {
+      return lang === 'ar'
+        ? 'بيئة العرض الحالية لا تدعم نافذة Google هنا؛ سجل بالبريد وكلمة المرور أو افتح الرابط في المتصفح.'
+        : 'This embedded view restricts Google popups; sign in with email & password or open in your browser.';
     }
-    if (code === 'auth/popup-closed-by-user') {
-      return t.googleCancelNotice || (lang === 'ar' ? 'تم إلغاء نافذة الدخول عبر جوجل.' : 'Google sign-in popup was cancelled.');
+    if (code === 'auth/account-exists-with-different-credential') {
+      return lang === 'ar'
+        ? 'هذا البريد مسجل بطريقة دخول أخرى. جرب تسجيل الدخول عبر Google.'
+        : 'An account already exists with a different sign-in method. Try Google Sign-In.';
     }
     if (code === 'auth/too-many-requests') {
-      return t.tooManyAttemptsNotice || (lang === 'ar'
-        ? 'تم حظر المحاولات مؤقتاً لتكرارها. جرب تسجيل الدخول عبر Google أو انتظر دقيقة.'
-        : 'Too many attempts. Please try Google Sign-In or wait a moment.');
+      return t.tooManyAttemptsNotice;
     }
     return err.message || t.errActionFailed;
   };
@@ -72,11 +127,35 @@ export const AuthScreen: React.FC<Props> = ({
     try {
       sound.playTone(550, 'sine', 0.1);
       setLoading(true);
-      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
       const provider = new firebase.auth.GoogleAuthProvider();
-      await auth.signInWithPopup(provider);
+      provider.setCustomParameters({ prompt: 'select_account' });
+
+      const result = await auth.signInWithPopup(provider);
+      await syncUserProfileToDb(result.user);
     } catch (err: unknown) {
       const error = err as { code?: string; message?: string };
+      const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+      const isCapacitorNative =
+        typeof window !== 'undefined' &&
+        Boolean((window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
+
+      if (
+        !isInIframe &&
+        !isCapacitorNative &&
+        (error.code === 'auth/popup-blocked' || error.code === 'auth/operation-not-supported-in-this-environment')
+      ) {
+        try {
+          const provider = new firebase.auth.GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          await auth.signInWithRedirect(provider);
+          return;
+        } catch (redirectErr: unknown) {
+          onToast(mapAuthError(redirectErr as { code?: string; message?: string }), 'danger');
+          return;
+        }
+      }
+
       onToast(mapAuthError(error), 'danger');
     } finally {
       setLoading(false);
@@ -88,19 +167,21 @@ export const AuthScreen: React.FC<Props> = ({
     sound.triggerHaptic('medium');
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password.trim();
+    const cleanPassword = password;
     const cleanUsername = username.trim();
 
-    if (!cleanEmail || !cleanPassword) {
+    if (!cleanEmail || !cleanPassword.trim()) {
       return onToast(t.errFillFields, 'danger');
     }
 
-    const isGoogleEmail = cleanEmail.endsWith('@gmail.com') || cleanEmail.endsWith('@googlemail.com');
+    if (cleanPassword.length < 6) {
+      return onToast(t.errWeakPassword, 'danger');
+    }
 
     setLoading(true);
 
     try {
-      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
 
       if (isSignUp) {
         if (!cleanUsername) {
@@ -108,128 +189,32 @@ export const AuthScreen: React.FC<Props> = ({
           return onToast(t.errUsernameRequired, 'danger');
         }
 
-        const snap = await db.ref('usernames/' + cleanUsername.toLowerCase()).once('value');
-        if (snap.exists()) {
-          setLoading(false);
-          return onToast(t.errUsernameTaken, 'danger');
+        const safeUsernameKey = sanitizeRtdbKey(cleanUsername);
+        try {
+          const snap = await db.ref(`usernames/${safeUsernameKey}`).once('value');
+          if (snap.exists()) {
+            setLoading(false);
+            return onToast(t.errUsernameTaken, 'danger');
+          }
+        } catch {
+          // Best-effort uniqueness check
         }
 
-        if (isGoogleEmail) {
-          // Verify with Google authentication that user owns this Google account
-          const provider = new firebase.auth.GoogleAuthProvider();
-          provider.setCustomParameters({ login_hint: cleanEmail, prompt: 'select_account' });
-          const result = await auth.signInWithPopup(provider);
+        const res = await auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword);
+        const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanUsername)}`;
 
-          if (!result.user || result.user.email?.toLowerCase() !== cleanEmail) {
-            await auth.signOut();
-            setLoading(false);
-            return onToast(
-              lang === 'ar'
-                ? 'فشل التحقق: حساب Google لا يطابق البريد المدخل!'
-                : 'Verification failed: Google account does not match entered email.',
-              'danger'
-            );
-          }
-
-          if (cleanPassword.length >= 6) {
-            try {
-              const cred = firebase.auth.EmailAuthProvider.credential(cleanEmail, cleanPassword);
-              await result.user.linkWithCredential(cred);
-            } catch (linkErr) {
-              try {
-                await result.user.updatePassword(cleanPassword);
-              } catch (_) {}
-            }
-          }
-
-          const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`;
-          await db.ref('usernames/' + cleanUsername.toLowerCase()).set(true);
-          await result.user.updateProfile({ displayName: cleanUsername, photoURL: avatar });
-          await db.ref(`users/${result.user.uid}`).update({
-            name: cleanUsername,
-            avatar,
-            createdAt: firebase.database.ServerValue.TIMESTAMP
-          });
-        } else {
-          const res = await auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword);
-          const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`;
-          await db.ref('usernames/' + cleanUsername.toLowerCase()).set(true);
-          if (res.user) {
-            await res.user.updateProfile({ displayName: cleanUsername, photoURL: avatar });
-            await db.ref(`users/${res.user.uid}`).update({
-              name: cleanUsername,
-              avatar,
-              createdAt: firebase.database.ServerValue.TIMESTAMP
-            });
-          }
+        if (res.user) {
+          await res.user.updateProfile({ displayName: cleanUsername, photoURL: avatar }).catch(() => {});
+          await db.ref(`usernames/${safeUsernameKey}`).set(true).catch(() => {});
+          await syncUserProfileToDb(res.user, cleanUsername);
         }
       } else {
-        // Sign-in mode
-        try {
-          await auth.signInWithEmailAndPassword(cleanEmail, cleanPassword);
-        } catch (signInErr: unknown) {
-          const sErr = signInErr as { code?: string; message?: string };
-
-          // If Google email, conduct Google account verification
-          if (
-            isGoogleEmail &&
-            (sErr.code === 'auth/user-not-found' ||
-             sErr.code === 'auth/wrong-password' ||
-             sErr.code === 'auth/invalid-credential' ||
-             sErr.code === 'auth/account-exists-with-different-credential')
-          ) {
-            const provider = new firebase.auth.GoogleAuthProvider();
-            provider.setCustomParameters({ login_hint: cleanEmail, prompt: 'select_account' });
-            const result = await auth.signInWithPopup(provider);
-
-            if (!result.user || result.user.email?.toLowerCase() !== cleanEmail) {
-              await auth.signOut();
-              setLoading(false);
-              return onToast(
-                lang === 'ar'
-                  ? 'فشل التحقق: حساب Google لا يطابق البريد المدخل!'
-                  : 'Verification failed: Google account does not match entered email.',
-                'danger'
-              );
-            }
-
-            if (cleanPassword.length >= 6) {
-              try {
-                const cred = firebase.auth.EmailAuthProvider.credential(cleanEmail, cleanPassword);
-                await result.user.linkWithCredential(cred);
-              } catch (linkErr) {
-                try {
-                  await result.user.updatePassword(cleanPassword);
-                } catch (_) {}
-              }
-            }
-            return;
-          }
-
-          // Fallback check if user originally registered via Google
-          try {
-            const methods = await auth.fetchSignInMethodsForEmail(cleanEmail);
-            if (methods && methods.includes('google.com') && !methods.includes('password')) {
-              const provider = new firebase.auth.GoogleAuthProvider();
-              provider.setCustomParameters({ login_hint: cleanEmail });
-              const result = await auth.signInWithPopup(provider);
-              if (result.user && cleanPassword.length >= 6) {
-                try {
-                  const cred = firebase.auth.EmailAuthProvider.credential(cleanEmail, cleanPassword);
-                  await result.user.linkWithCredential(cred);
-                } catch (_) {}
-              }
-              return;
-            }
-          } catch (_) {}
-
-          throw sErr;
-        }
+        const res = await auth.signInWithEmailAndPassword(cleanEmail, cleanPassword);
+        await syncUserProfileToDb(res.user);
       }
     } catch (err: unknown) {
       const error = err as { code?: string; message?: string };
-      const msg = mapAuthError(error);
-      onToast(msg, 'danger');
+      onToast(mapAuthError(error), 'danger');
     } finally {
       setLoading(false);
     }
@@ -262,9 +247,9 @@ export const AuthScreen: React.FC<Props> = ({
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 relative z-10">
-      {/* Language switcher & PWA install header */}
-      <div className="fixed top-4 left-4 right-4 flex items-center justify-between z-20">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[#090d16] relative z-10">
+      {/* Header Controls */}
+      <div className="fixed top-4 left-4 right-4 flex items-center justify-between z-20 max-w-5xl mx-auto">
         <PWAInstallButton lang={lang} variant="compact" />
 
         {onChangeLanguage ? (
@@ -272,12 +257,13 @@ export const AuthScreen: React.FC<Props> = ({
             lang={lang}
             onChangeLanguage={onChangeLanguage}
             variant="inline"
-            className="bg-slate-900/90 border border-sky-400/30 px-3 py-1 rounded-full shadow-lg backdrop-blur-md"
+            className="bg-[#111827] border border-slate-800 px-3 py-1 rounded-xl"
           />
         ) : (
           <button
+            type="button"
             onClick={onToggleLanguage}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900/90 border border-sky-400/30 text-sky-400 text-xs font-bold shadow-lg shadow-sky-500/20 backdrop-blur-md hover:bg-slate-800 transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#111827] border border-slate-800 text-sky-400 text-xs font-bold hover:bg-slate-800 transition cursor-pointer"
           >
             <Globe className="w-3.5 h-3.5" />
             <span>{lang === 'ar' ? 'English' : 'العربية'}</span>
@@ -285,15 +271,10 @@ export const AuthScreen: React.FC<Props> = ({
         )}
       </div>
 
-      <div className="w-full max-w-sm rounded-[32px] bg-gradient-to-b from-slate-900/90 to-slate-950/95 border border-sky-500/30 p-7 shadow-2xl backdrop-blur-2xl relative overflow-hidden text-center">
-        {/* Glow backdrop inside card */}
-        <div className="absolute -top-24 -left-24 w-48 h-48 bg-sky-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
-
-        {/* Cyber Logo Badge */}
-        <div className="relative w-20 h-20 mx-auto mb-4 flex items-center justify-center rounded-full bg-slate-950 border-2 border-sky-400 shadow-[0_0_25px_rgba(56,189,248,0.45)]">
-          <div className="absolute inset-[-4px] rounded-full border border-dashed border-purple-400 animate-spin-slow pointer-events-none opacity-60" />
-          <svg viewBox="0 0 120 90" className="w-12 h-10" xmlns="http://www.w3.org/2000/svg">
+      {/* Main Auth Card */}
+      <div className="w-full max-w-sm rounded-2xl bg-[#111827] border border-slate-800 p-6 sm:p-7 shadow-2xl text-center">
+        <div className="w-16 h-16 mx-auto mb-4 flex items-center justify-center rounded-2xl bg-slate-950 border border-slate-800">
+          <svg viewBox="0 0 120 90" className="w-10 h-8" xmlns="http://www.w3.org/2000/svg">
             <ellipse cx="60" cy="56" rx="54" ry="14" fill="#6366f1" />
             <ellipse cx="60" cy="34" rx="26" ry="22" fill="#38bdf8" />
             <circle cx="24" cy="56" r="4" fill="#fef08a" />
@@ -302,10 +283,10 @@ export const AuthScreen: React.FC<Props> = ({
           </svg>
         </div>
 
-        <h1 className="text-2xl font-black font-heading text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-purple-300 to-sky-400 animate-shine tracking-wider mb-1">
+        <h1 className="text-2xl font-black font-heading text-white tracking-tight mb-1">
           {t.appTitle}
         </h1>
-        <p className="text-[11px] font-bold text-sky-400/80 tracking-widest uppercase mb-6">
+        <p className="text-xs font-semibold text-slate-400 mb-6">
           {t.appSub}
         </p>
 
@@ -317,24 +298,34 @@ export const AuthScreen: React.FC<Props> = ({
               value={email}
               onChange={e => setEmail(e.target.value)}
               placeholder="name@station.com"
+              autoComplete="email"
               required
-              className="w-full py-3 ps-10 pe-4 rounded-2xl bg-slate-950/80 border border-sky-400/25 focus:border-sky-400 text-white text-sm outline-none transition focus:shadow-[0_0_15px_rgba(56,189,248,0.25)]"
+              className="w-full min-h-[46px] py-2.5 ps-10 pe-4 rounded-xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
             />
           </div>
 
           <div className="relative">
             <Lock className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 inset-inline-start-3.5 pointer-events-none" />
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={e => setPassword(e.target.value)}
               placeholder="••••••••"
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
+              minLength={6}
               required
-              className="w-full py-3 ps-10 pe-4 rounded-2xl bg-slate-950/80 border border-sky-400/25 focus:border-sky-400 text-white text-sm outline-none transition focus:shadow-[0_0_15px_rgba(56,189,248,0.25)]"
+              className="w-full min-h-[46px] py-2.5 ps-10 pe-10 rounded-xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword(prev => !prev)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              className="absolute top-1/2 -translate-y-1/2 inset-inline-end-2.5 text-slate-400 hover:text-sky-300 transition cursor-pointer p-1.5"
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
           </div>
 
-          {/* Forgot / Set Password Link */}
           {!isSignUp && (
             <div className="flex justify-end">
               <button
@@ -343,7 +334,7 @@ export const AuthScreen: React.FC<Props> = ({
                   setResetEmail(email.trim());
                   setResetModalOpen(true);
                 }}
-                className="text-[11px] font-semibold text-sky-400/90 hover:text-sky-300 transition cursor-pointer flex items-center gap-1"
+                className="text-xs font-semibold text-sky-400 hover:text-sky-300 transition cursor-pointer flex items-center gap-1"
               >
                 <KeyRound className="w-3 h-3" />
                 <span>{t.forgotPassword}</span>
@@ -352,7 +343,7 @@ export const AuthScreen: React.FC<Props> = ({
           )}
 
           {isSignUp && (
-            <div className="relative animate-in fade-in duration-200">
+            <div className="relative">
               <UserIcon className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 inset-inline-start-3.5 pointer-events-none" />
               <input
                 type="text"
@@ -360,7 +351,7 @@ export const AuthScreen: React.FC<Props> = ({
                 onChange={e => setUsername(e.target.value)}
                 placeholder={t.lblUsernamePlaceholder}
                 required
-                className="w-full py-3 ps-10 pe-4 rounded-2xl bg-slate-950/80 border border-sky-400/25 focus:border-sky-400 text-white text-sm outline-none transition focus:shadow-[0_0_15px_rgba(56,189,248,0.25)]"
+                className="w-full min-h-[46px] py-2.5 ps-10 pe-4 rounded-xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
               />
             </div>
           )}
@@ -368,26 +359,24 @@ export const AuthScreen: React.FC<Props> = ({
           <button
             type="submit"
             disabled={loading}
-            className="w-full mt-2 py-3 rounded-2xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 font-black text-sm tracking-wide shadow-lg shadow-sky-500/25 hover:shadow-sky-500/40 hover:-translate-y-0.5 active:translate-y-0 transition cursor-pointer flex items-center justify-center gap-2"
+            className="w-full min-h-[46px] mt-2 py-2.5 rounded-xl bg-sky-400 hover:bg-sky-300 active:scale-[0.99] text-slate-950 font-black text-sm transition cursor-pointer flex items-center justify-center gap-2"
           >
-            <Sparkles className="w-4 h-4" />
+            <LogIn className="w-4 h-4" />
             <span>{isSignUp ? t.signup : t.loginBtn}</span>
           </button>
         </form>
 
-        {/* Divider */}
-        <div className="flex items-center gap-3 my-4 text-xs font-bold text-slate-500">
+        <div className="flex items-center gap-3 my-4 text-xs font-semibold text-slate-500">
           <div className="flex-1 h-px bg-slate-800" />
           <span>{lang === 'ar' ? 'أو الدخول عبر Google' : 'Or with Google'}</span>
           <div className="flex-1 h-px bg-slate-800" />
         </div>
 
-        {/* Google Sign In */}
         <button
           type="button"
           onClick={handleGoogleSignIn}
           disabled={loading}
-          className="w-full py-3 px-4 rounded-2xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm flex items-center justify-center gap-3 shadow-lg shadow-white/10 hover:-translate-y-0.5 active:translate-y-0 transition cursor-pointer"
+          className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-bold text-sm flex items-center justify-center gap-3 transition cursor-pointer"
         >
           <svg className="w-4 h-4" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
@@ -398,18 +387,19 @@ export const AuthScreen: React.FC<Props> = ({
           <span>{t.googleAuth}</span>
         </button>
 
-        <div
+        <button
+          type="button"
           onClick={() => setIsSignUp(!isSignUp)}
           className="mt-4 text-xs font-semibold text-slate-400 hover:text-sky-300 cursor-pointer underline underline-offset-4 transition"
         >
           {isSignUp ? t.toggleAuthToLogin : t.toggleAuthToSignup}
-        </div>
+        </button>
       </div>
 
       {/* Password Reset Modal */}
       {resetModalOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in overscroll-contain select-none"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overscroll-contain select-none"
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => {
             if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
@@ -419,17 +409,18 @@ export const AuthScreen: React.FC<Props> = ({
           }}
         >
           <div
-            className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 shadow-2xl relative text-start overscroll-contain"
+            className="w-full max-w-sm rounded-2xl bg-[#111827] border border-slate-800 p-6 shadow-2xl relative text-start overscroll-contain"
             onWheel={(e) => e.stopPropagation()}
           >
             <button
+              type="button"
               onClick={() => setResetModalOpen(false)}
-              className="absolute top-4 inset-inline-end-4 w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition"
+              className="absolute top-4 inset-inline-end-4 w-8 h-8 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-2.5 mb-2 text-sky-400 font-bold text-sm">
+            <div className="flex items-center gap-2 mb-2 text-sky-400 font-bold text-sm">
               <KeyRound className="w-4 h-4" />
               <span>{t.forgotPassword}</span>
             </div>
@@ -439,7 +430,7 @@ export const AuthScreen: React.FC<Props> = ({
             </p>
 
             {resetSent ? (
-              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2.5">
+              <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2.5">
                 <CheckCircle2 className="w-5 h-5 shrink-0" />
                 <span>{t.msgResetSent}</span>
               </div>
@@ -451,27 +442,27 @@ export const AuthScreen: React.FC<Props> = ({
                   onChange={e => setResetEmail(e.target.value)}
                   placeholder="name@station.com"
                   required
-                  className="w-full py-3 px-4 rounded-2xl bg-slate-950 border border-sky-400/30 text-white text-sm outline-none focus:border-sky-400"
+                  className="w-full min-h-[44px] py-2.5 px-3.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-sm outline-none focus:border-sky-400"
                 />
 
-                <p className="text-[11px] text-slate-400">
+                <p className="text-xs text-slate-400 leading-relaxed">
                   {lang === 'ar'
-                    ? '💡 إذا كنت أنشأت حسابك بجوجل، سيصلك رابط لإنشاء كلمة مرور لحسابك حتى تتمكن من الدخول بالإيميل والباسورد أيضاً.'
-                    : '💡 If you created your account with Google, this link allows you to create a password so you can sign in with email & password as well.'}
+                    ? 'إذا كنت أنشأت حسابك عبر Google، سيصلك رابط لإنشاء كلمة مرور للدخول بالبريد أيضاً.'
+                    : 'If you created your account with Google, this link lets you set a password for email sign-in too.'}
                 </p>
 
                 <div className="flex gap-2 pt-1">
                   <button
                     type="submit"
                     disabled={resetLoading}
-                    className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 font-bold text-xs shadow-lg shadow-sky-500/20 hover:opacity-90 transition cursor-pointer"
+                    className="flex-1 min-h-[42px] py-2.5 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold text-xs transition cursor-pointer"
                   >
                     {resetLoading ? '...' : t.btnSendReset}
                   </button>
                   <button
                     type="button"
                     onClick={() => setResetModalOpen(false)}
-                    className="py-3 px-4 rounded-2xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition cursor-pointer"
+                    className="min-h-[42px] py-2.5 px-4 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition cursor-pointer"
                   >
                     {t.btnCancel}
                   </button>

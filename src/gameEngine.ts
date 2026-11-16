@@ -2,8 +2,9 @@ import { CategoryKey, GameMode, PlayerData, RoomData } from './types';
 
 export const DEFAULT_TURN_SECONDS = 20;
 export const RAPID_TURN_SECONDS = 7;
-export const DEFAULT_VOTE_SECONDS = 80;
+export const DEFAULT_VOTE_SECONDS = 45;
 export const EJECTION_CINEMATIC_MS = 5000;
+export const ROUND_GRACE_MS = 2000;
 export const BLACKOUT_DURATION_MS = 3500;
 export const AFK_MAX_MISSED_TURNS = 3;
 
@@ -50,6 +51,28 @@ export function shuffleArray<T>(items: T[], randomFn: () => number = Math.random
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+/**
+ * Returns active (!isSpectator) player UIDs ordered deterministically by join/seat order
+ * (oldest joinedAt first, tie-broken by uid), optionally rotated by `rotateBy` seats.
+ */
+export function getOrderedActiveUids(
+  players?: Record<string, PlayerData>,
+  rotateBy: number = 0
+): string[] {
+  const ordered = Object.values(players || {})
+    .filter(p => p && !p.isSpectator)
+    .sort((a, b) => {
+      const diff = (a.joinedAt || 0) - (b.joinedAt || 0);
+      return diff !== 0 ? diff : a.uid.localeCompare(b.uid);
+    })
+    .map(p => p.uid);
+
+  const unique = Array.from(new Set(ordered));
+  if (unique.length <= 1) return unique;
+  const shift = ((rotateBy % unique.length) + unique.length) % unique.length;
+  return shift === 0 ? unique : [...unique.slice(shift), ...unique.slice(0, shift)];
 }
 
 export interface StartValidationResult {
@@ -151,7 +174,8 @@ export function computeInitialGameSetup(params: {
     resetPlayers[p.uid] = cleanPlayer;
   });
 
-  const turnOrder = shuffleArray(allUids, randomFn);
+  // Sequential turn order by join/seat order (while roles remain random)
+  const turnOrder = getOrderedActiveUids(resetPlayers, 0);
   const turnTimeLeft = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
 
   return {
@@ -175,9 +199,15 @@ export function computeNextTurnState(
   options: {
     expectedTurnIndex?: number;
     wasTimeout?: boolean;
+    now?: number;
+    completedDrawing?: {
+      uid: string;
+      sender: string;
+      strokes: Array<Array<{ x: number; y: number }>>;
+    } | null;
   } = {}
 ): TurnAdvanceResult {
-  const { expectedTurnIndex, wasTimeout = false } = options;
+  const { expectedTurnIndex, wasTimeout = false, now = Date.now(), completedDrawing } = options;
 
   if (!inputRoom || inputRoom.status !== 'playing' || !inputRoom.turnOrder || inputRoom.turnOrder.length === 0) {
     return { changed: false, room: inputRoom, afkKickedName: null, roundChanged: false };
@@ -217,14 +247,7 @@ export function computeNextTurnState(
 
   const defaultTurnSeconds = getEffectiveTurnSeconds(inputRoom.gameMode, inputRoom.turnSeconds);
 
-  const activeUids: string[] = Array.from(
-    new Set(
-      Object.values(playersObj)
-        .filter(p => !p.isSpectator)
-        .map(p => p.uid)
-    )
-  );
-
+  const activeUids = getOrderedActiveUids(playersObj, 0);
   const unplayedUids = activeUids.filter(uid => !completedTurns[uid]);
 
   let nextRound = inputRoom.round || 1;
@@ -241,10 +264,10 @@ export function computeNextTurnState(
     nextCompletedTurns = null;
     nextBlackoutActive = false;
 
-    let rotated = Array.from(new Set(activeUids));
-    if (rotated.length > 1 && currentSpeakerUid && rotated.includes(currentSpeakerUid)) {
-      const others = rotated.filter(u => u !== currentSpeakerUid);
-      rotated = [...others, currentSpeakerUid];
+    // Sequential seat order rotated cleanly for the new round so the last speaker doesn't go immediately twice
+    let rotated = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, activeUids.length));
+    if (rotated.length > 1 && currentSpeakerUid && rotated[0] === currentSpeakerUid) {
+      rotated = [...rotated.slice(1), currentSpeakerUid];
     }
     nextTurnOrder = rotated;
     nextTurnIndex = 0;
@@ -281,6 +304,20 @@ export function computeNextTurnState(
     nextTurnIndex = Math.max(0, nextFoundIndex);
   }
 
+  const nextGraceUntil = roundChanged ? now + ROUND_GRACE_MS : null;
+  const nextTurnEndsAt = (nextGraceUntil || now) + defaultTurnSeconds * 1000;
+  const nextLastDrawing =
+    roundChanged || inputRoom.gameMode !== 'silent'
+      ? null
+      : completedDrawing && completedDrawing.strokes.length > 0
+      ? {
+          uid: completedDrawing.uid,
+          sender: completedDrawing.sender,
+          strokes: completedDrawing.strokes,
+          timestamp: now
+        }
+      : inputRoom.lastDrawing ?? null;
+
   return {
     changed: true,
     afkKickedName,
@@ -293,8 +330,11 @@ export function computeNextTurnState(
       turnOrder: nextTurnOrder,
       turnIndex: nextTurnIndex,
       turnTimeLeft: defaultTurnSeconds,
+      turnGraceUntil: nextGraceUntil,
+      turnEndsAt: nextTurnEndsAt,
       votes: nextVotes,
       currentDrawing: null,
+      lastDrawing: nextLastDrawing,
       blackoutActive: nextBlackoutActive
     }
   };
@@ -376,13 +416,8 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
   const nextTurnTime = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
 
   if (!ejectedUid) {
-    const safeActiveUids = Array.from(
-      new Set(
-        Object.values(playersObj)
-          .filter(p => !p.isSpectator)
-          .map(p => p.uid)
-      )
-    );
+    const safeActiveUids = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, Object.keys(playersObj).length));
+    const graceUntil = now + ROUND_GRACE_MS;
     return {
       outcome: 'nobody_ejected',
       ejectedUid: null,
@@ -395,8 +430,13 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
         turnIndex: 0,
         completedTurnsThisRound: undefined,
         turnTimeLeft: nextTurnTime,
+        turnGraceUntil: graceUntil,
+        turnEndsAt: graceUntil + nextTurnTime * 1000,
+        voteEndsAt: null,
         votes: null,
+        voteChat: null,
         currentDrawing: null,
+        lastDrawing: null,
         blackoutActive: false,
         players: playersObj
       }
@@ -436,19 +476,14 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
           players: playersObj,
           spies: updatedSpies,
           votes: null,
+          voteChat: null,
           blackoutActive: false,
           ejectionEvent: ejectionPayload
         }
       };
     }
 
-    const safeActiveUids = Array.from(
-      new Set(
-        Object.values(playersObj)
-          .filter(p => !p.isSpectator)
-          .map(p => p.uid)
-      )
-    );
+    const safeActiveUids = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, Object.keys(playersObj).length));
     return {
       outcome: 'spy_ejected_continue',
       ejectedUid,
@@ -462,8 +497,13 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
         completedTurnsThisRound: undefined,
         turnTimeLeft: nextTurnTime,
         ejectionEndsAt,
+        turnGraceUntil: ejectionEndsAt,
+        turnEndsAt: ejectionEndsAt + nextTurnTime * 1000,
+        voteEndsAt: null,
         votes: null,
+        voteChat: null,
         currentDrawing: null,
+        lastDrawing: null,
         blackoutActive: false,
         players: playersObj,
         spies: updatedSpies,
@@ -472,13 +512,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
     };
   }
 
-  const remainingActiveUids = Array.from(
-    new Set(
-      Object.values(playersObj)
-        .filter(p => !p.isSpectator)
-        .map(p => p.uid)
-    )
-  );
+  const remainingActiveUids = getOrderedActiveUids(playersObj, (nextRound - 1) % Math.max(1, Object.keys(playersObj).length));
   const remainingSpiesCount = currentSpies.filter(uid => remainingActiveUids.includes(uid)).length;
   const remainingInnocentCount = remainingActiveUids.length - remainingSpiesCount;
 
@@ -500,6 +534,7 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
         finalPlayers: playersObj,
         players: playersObj,
         votes: null,
+        voteChat: null,
         blackoutActive: false,
         ejectionEvent: ejectionPayload
       }
@@ -519,8 +554,13 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
       completedTurnsThisRound: undefined,
       turnTimeLeft: nextTurnTime,
       ejectionEndsAt,
+      turnGraceUntil: ejectionEndsAt,
+      turnEndsAt: ejectionEndsAt + nextTurnTime * 1000,
+      voteEndsAt: null,
       votes: null,
+      voteChat: null,
       currentDrawing: null,
+      lastDrawing: null,
       blackoutActive: false,
       players: playersObj,
       ejectionEvent: ejectionPayload

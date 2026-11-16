@@ -1,5 +1,3 @@
-import fs from 'fs';
-
 // Complete, polished German and French dictionaries for 100% full localization coverage
 export const deTranslations: Record<string, string> = {
   appTitle: "Spy Station 🚀",

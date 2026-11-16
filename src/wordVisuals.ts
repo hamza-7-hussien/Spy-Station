@@ -297,14 +297,14 @@ export const WORD_IMAGE_REGISTRY: Record<string, string> = {
 
 // Category theme palette and icons
 export const CATEGORY_STYLES: Record<CategoryKey, { icon: string; titleAr: string; titleEn: string; glow: string; border: string }> = {
-  players: { icon: '⚽', titleAr: 'لاعب كرة قدم', titleEn: 'Football Star', glow: 'rgba(56,189,248,0.4)', border: 'border-sky-400' },
-  food: { icon: '🍕', titleAr: 'أكل ومأكولات', titleEn: 'Food & Cuisine', glow: 'rgba(251,146,60,0.4)', border: 'border-orange-400' },
-  animals: { icon: '🦁', titleAr: 'حيوان وكائنات', titleEn: 'Wildlife & Animal', glow: 'rgba(52,211,153,0.4)', border: 'border-emerald-400' },
-  movies: { icon: '🎬', titleAr: 'فيلم / مسلسل', titleEn: 'Movie & Series', glow: 'rgba(232,121,249,0.4)', border: 'border-fuchsia-400' },
-  games: { icon: '🎮', titleAr: 'لعبة فيديو', titleEn: 'Video Game', glow: 'rgba(168,85,247,0.4)', border: 'border-purple-400' },
-  singers: { icon: '🎤', titleAr: 'مغني / فنان', titleEn: 'Singer & Artist', glow: 'rgba(244,63,94,0.4)', border: 'border-rose-400' },
-  places: { icon: '🗺️', titleAr: 'مكان ومعلم', titleEn: 'Place & Landmark', glow: 'rgba(45,212,191,0.4)', border: 'border-teal-400' },
-  jobs: { icon: '💼', titleAr: 'مهنة ووظيفة', titleEn: 'Job & Profession', glow: 'rgba(148,163,184,0.3)', border: 'border-slate-500' }
+  players: { icon: '⚽', titleAr: 'لاعب كرة قدم', titleEn: 'Football Star', glow: 'rgba(56,189,248,0.22)', border: 'border-sky-500/40' },
+  food: { icon: '🍕', titleAr: 'أكل ومأكولات', titleEn: 'Food & Cuisine', glow: 'rgba(251,146,60,0.22)', border: 'border-amber-500/40' },
+  animals: { icon: '🦁', titleAr: 'حيوان وكائنات', titleEn: 'Wildlife & Animal', glow: 'rgba(52,211,153,0.22)', border: 'border-emerald-500/40' },
+  movies: { icon: '🎬', titleAr: 'فيلم / مسلسل', titleEn: 'Movie & Series', glow: 'rgba(192,132,252,0.22)', border: 'border-violet-500/40' },
+  games: { icon: '🎮', titleAr: 'لعبة فيديو', titleEn: 'Video Game', glow: 'rgba(129,140,248,0.22)', border: 'border-indigo-500/40' },
+  singers: { icon: '🎤', titleAr: 'مغني / فنان', titleEn: 'Singer & Artist', glow: 'rgba(244,63,94,0.22)', border: 'border-rose-500/40' },
+  places: { icon: '🗺️', titleAr: 'مكان ومعلم', titleEn: 'Place & Landmark', glow: 'rgba(45,212,191,0.22)', border: 'border-teal-500/40' },
+  jobs: { icon: '💼', titleAr: 'مهنة ووظيفة', titleEn: 'Job & Profession', glow: 'rgba(148,163,184,0.18)', border: 'border-slate-700' }
 };
 
 /**

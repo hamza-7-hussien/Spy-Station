@@ -2,17 +2,16 @@
 
 @layer base {
   :root {
-    --bg-primary: #030712;
-    --accent-blue: #38bdf8;
-    --accent-purple: #c084fc;
-    --neon-glow: 0 0 25px rgba(56, 189, 248, 0.45);
-    --purple-glow: 0 0 25px rgba(192, 132, 252, 0.45);
-    --danger-red: #ef4444;
+    --bg-primary: #090d16;
+    --bg-surface: #111827;
+    --border-subtle: rgba(148, 163, 184, 0.14);
+    --accent-sky: #38bdf8;
+    --danger-crimson: #e11d48;
   }
 
   body {
     background-color: var(--bg-primary);
-    color: #f3f4f6;
+    color: #f1f5f9;
     font-family: 'Cairo', 'Exo 2', sans-serif;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
@@ -36,11 +35,11 @@
   }
 }
 
-/* Global scrollbar hiding for app-like native feel */
 * {
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
 }
+
 *::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;
@@ -52,32 +51,22 @@
   font-family: 'Chakra Petch', 'Cairo', sans-serif;
 }
 
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
 .stars-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  inset: 0;
   background-image:
-    radial-gradient(2px 2px at 20px 30px, #fff, rgba(0,0,0,0)),
-    radial-gradient(2px 2px at 40px 70px, #38bdf8, rgba(0,0,0,0)),
-    radial-gradient(1px 1px at 90px 40px, #fff, rgba(0,0,0,0)),
-    radial-gradient(2px 2px at 160px 120px, #a855f7, rgba(0,0,0,0));
+    radial-gradient(1.5px 1.5px at 24px 36px, rgba(226, 232, 240, 0.32), transparent),
+    radial-gradient(1.5px 1.5px at 78px 92px, rgba(56, 189, 248, 0.25), transparent),
+    radial-gradient(1px 1px at 140px 44px, rgba(226, 232, 240, 0.22), transparent);
   background-repeat: repeat;
-  background-size: 200px 200px;
-  opacity: 0.6;
-  animation: starsAnimation 120s linear infinite;
+  background-size: 220px 220px;
+  opacity: 0.45;
   pointer-events: none;
   z-index: 0;
-}
-
-@keyframes starsAnimation {
-  from { background-position: 0 0; }
-  to { background-position: 1000px 1000px; }
-}
-
-@keyframes shine {
-  to { background-position: 200% center; }
 }
 
 @keyframes ejectionProgress {
@@ -87,76 +76,4 @@
 
 .animate-ejection-progress {
   animation: ejectionProgress 5s linear forwards;
-}
-
-@keyframes pulseGlow {
-  0%, 100% { opacity: 0.4; transform: scale(0.98); }
-  50% { opacity: 0.9; transform: scale(1.02); }
-}
-
-.pulse-glow {
-  animation: pulseGlow 2.5s ease-in-out infinite;
-}
-
-@keyframes neonFlicker {
-  0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% {
-    opacity: 1;
-    filter: drop-shadow(0 0 25px rgba(244, 63, 94, 0.9));
-  }
-  20%, 24%, 55% {
-    opacity: 0.4;
-    filter: drop-shadow(0 0 5px rgba(244, 63, 94, 0.3));
-  }
-}
-
-.animate-neon-flicker {
-  animation: neonFlicker 2s infinite alternate;
-}
-
-@keyframes scanlineSweep {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(1000%); }
-}
-
-.scanline-sweep {
-  animation: scanlineSweep 4s linear infinite;
-}
-
-
-/* 3D Card Flip & Juice Animations */
-.perspective-1000 {
-  perspective: 1000px;
-}
-.transform-style-preserve-3d {
-  transform-style: preserve-3d;
-}
-.backface-hidden {
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-}
-.rotate-y-180 {
-  transform: rotateY(180deg);
-}
-
-@keyframes glitchFlicker {
-  0% { transform: translate(0) scale(1); filter: hue-rotate(0deg); }
-  20% { transform: translate(-2px, 1px) scale(1.01); filter: hue-rotate(15deg); }
-  40% { transform: translate(2px, -1px) scale(0.99); filter: hue-rotate(-15deg); }
-  60% { transform: translate(-1px, 2px) scale(1.02); filter: hue-rotate(30deg); }
-  80% { transform: translate(1px, -2px) scale(1); filter: hue-rotate(0deg); }
-  100% { transform: translate(0) scale(1); }
-}
-
-.animate-glitch {
-  animation: glitchFlicker 1.8s infinite ease-in-out;
-}
-
-@keyframes redLaserSweep {
-  0% { top: 0%; opacity: 0.8; }
-  50% { top: 96%; opacity: 1; }
-  100% { top: 0%; opacity: 0.8; }
-}
-
-.animate-laser-sweep {
-  animation: redLaserSweep 1.8s infinite ease-in-out;
 }

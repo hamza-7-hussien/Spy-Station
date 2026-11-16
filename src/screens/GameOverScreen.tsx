@@ -24,7 +24,6 @@ export const GameOverScreen: React.FC<Props> = ({
   const winner = room.winnerTeam;
   const isCrewWinner = winner === 'crew';
 
-  // Real-time merge: always reflect live player state (like postGame: 'inLobby')
   const currentPlayers = room.players || {};
   const finalPlayers = room.finalPlayers || {};
   const allPlayers: Record<string, PlayerData> = {};
@@ -39,7 +38,6 @@ export const GameOverScreen: React.FC<Props> = ({
   const spyUids = room.finalSpies || room.spies || [];
 
   useEffect(() => {
-    // Distinct thematic audio: Victory fanfare for crew vs dramatic sting for spies
     if (isCrewWinner) {
       sound.playVictoryCelebration();
     } else {
@@ -48,7 +46,7 @@ export const GameOverScreen: React.FC<Props> = ({
 
     try {
       confetti({
-        particleCount: isCrewWinner ? 100 : 50,
+        particleCount: isCrewWinner ? 90 : 45,
         spread: 70,
         origin: { y: 0.6 }
       });
@@ -57,146 +55,146 @@ export const GameOverScreen: React.FC<Props> = ({
     }
   }, [isCrewWinner]);
 
+  const catStyle = room.wordCategory ? CATEGORY_STYLES[room.wordCategory] : undefined;
+  const chameleonSpy =
+    room.gameMode === 'chameleon'
+      ? spyUids.map(uid => allPlayers[uid]).find(p => p && (p.chameleonWord || p.chameleonWordAr))
+      : null;
+  const decoyDisplay = chameleonSpy
+    ? getSecretWordDisplay(chameleonSpy.chameleonWord, chameleonSpy.chameleonWordAr, room.wordCategory, lang)
+    : '';
+
   return (
-    <div className="w-full max-w-xl mx-auto space-y-4 pb-20 pt-4 text-start">
-      <div className="p-6 rounded-3xl bg-slate-900/90 border border-sky-500/30 backdrop-blur-2xl shadow-2xl space-y-5 text-center">
-        <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center bg-gradient-to-tr from-sky-500 to-purple-500 shadow-[0_0_30px_rgba(56,189,248,0.5)]">
-          <Trophy className="w-8 h-8 text-slate-950 fill-current" />
+    <div className="w-full max-w-2xl mx-auto space-y-4 pb-20 pt-4 text-start">
+      <div className="p-6 rounded-2xl bg-[#111827] border border-slate-800 shadow-2xl space-y-5 text-center">
+        <div
+          className={`w-16 h-16 rounded-2xl mx-auto flex items-center justify-center border ${
+            isCrewWinner
+              ? 'bg-sky-400/15 border-sky-400/40 text-sky-400'
+              : 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+          }`}
+        >
+          <Trophy className="w-8 h-8" />
         </div>
 
-        <h2 className="text-2xl sm:text-3xl font-black font-heading text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-purple-300 to-sky-400 animate-shine">
+        <h2 className="text-2xl sm:text-3xl font-black font-heading text-white">
           {isCrewWinner ? t.crewWonTitle : t.spiesWonTitle}
         </h2>
 
-        {/* Revealed Secret Word Card */}
-        {(room.word || room.wordAr) && (() => {
-          const chameleonSpy = room.gameMode === 'chameleon'
-            ? spyUids.map(uid => allPlayers[uid]).find(p => p && (p.chameleonWord || p.chameleonWordAr))
-            : null;
-          const decoyDisplay = chameleonSpy
-            ? getSecretWordDisplay(chameleonSpy.chameleonWord, chameleonSpy.chameleonWordAr, room.wordCategory, lang)
-            : '';
-
-          return (
-            <div className="p-4 rounded-2xl bg-slate-950/70 border border-sky-500/30 flex flex-col items-center justify-center gap-1.5 shadow-inner text-center">
-              <span className="text-[11px] uppercase tracking-widest text-sky-400 font-bold block">
-                {t.secretWordWas || 'Mission secret word was:'}
-              </span>
-              <div className="flex items-center justify-center gap-2 flex-wrap">
-                {room.wordCategory && (
-                  <span className="text-sm text-sky-300 font-bold">
-                    {CATEGORY_STYLES[room.wordCategory]?.icon}
-                  </span>
-                )}
-                <span className="text-2xl sm:text-3xl font-black text-white font-heading break-words">
-                  {getSecretWordDisplay(room.word, room.wordAr, room.wordCategory, lang)}
+        {/* Revealed Secret Word */}
+        {(room.word || room.wordAr) && (
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center gap-1.5 text-center">
+            <span className="text-xs text-sky-400 font-bold">
+              {t.secretWordWas}
+            </span>
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              {catStyle?.icon && (
+                <span className="text-xl leading-none" aria-hidden="true">
+                  {catStyle.icon}
                 </span>
-              </div>
-              {decoyDisplay && (
-                <div className="mt-1 px-3 py-1 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-xs text-emerald-300 font-bold flex items-center gap-1.5">
-                  <span>🦎</span>
-                  <span>
-                    {lang === 'ar' ? `كلمة الحرباء التمويهية: ${decoyDisplay}` : `Chameleon decoy word: ${decoyDisplay}`}
-                  </span>
-                </div>
               )}
+              <span className="text-2xl sm:text-3xl font-black text-white font-heading break-words">
+                {getSecretWordDisplay(room.word, room.wordAr, room.wordCategory, lang)}
+              </span>
             </div>
-          );
-        })()}
-
-        {/* Spies Team */}
-        <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-500/30 text-start space-y-2">
-          <div className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5" />
-            <span>{t.spiesTeamLabel}</span>
+            {decoyDisplay && (
+              <div className="mt-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/50 border border-emerald-500/35 text-xs text-emerald-300 font-bold">
+                {t.decoyWordLabel} {decoyDisplay}
+              </div>
+            )}
           </div>
+        )}
 
-          <div className="flex flex-wrap gap-2">
-            {spyUids.map(uid => {
-              const p = allPlayers[uid];
-              if (!p) return null;
-              const isInLobby = p.postGame === 'inLobby';
-              return (
-                <div
-                  key={uid}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-950/80 border border-rose-500/30 text-xs"
-                >
-                  <img
-                    src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
-                    alt={p.name}
-                    className="w-5 h-5 rounded-full object-cover"
-                  />
-                  <span className="font-bold text-slate-200">{p.name}</span>
-                  <span
-                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 ${
-                      isInLobby
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                    }`}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${isInLobby ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                    <span>{isInLobby ? t.lblInLobbyTag : t.lblInGameTag}</span>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        {/* Teams Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-start">
+          {/* Spies Team */}
+          <div className="p-4 rounded-xl bg-rose-950/25 border border-rose-500/30 space-y-2.5">
+            <div className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5" />
+              <span>{t.spiesTeamLabel}</span>
+            </div>
 
-        {/* Crew Team */}
-        <div className="p-4 rounded-2xl bg-sky-950/30 border border-sky-500/30 text-start space-y-2">
-          <div className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5" />
-            <span>{t.crewTeamLabel}</span>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {Object.keys(allPlayers)
-              .filter(uid => !spyUids.includes(uid))
-              .map(uid => {
+            <div className="space-y-2">
+              {spyUids.map(uid => {
                 const p = allPlayers[uid];
                 if (!p) return null;
                 const isInLobby = p.postGame === 'inLobby';
                 return (
                   <div
                     key={uid}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-950/80 border border-sky-500/30 text-xs"
+                    className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-800 text-xs"
                   >
-                    <img
-                      src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
-                      alt={p.name}
-                      className="w-5 h-5 rounded-full object-cover"
-                    />
-                    <span className="font-bold text-slate-200">{p.name}</span>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 ${
-                        isInLobby
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${isInLobby ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-                      <span>{isInLobby ? t.lblInLobbyTag : t.lblInGameTag}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <img
+                        src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
+                        alt={p.name}
+                        referrerPolicy="no-referrer"
+                        className="w-7 h-7 rounded-lg object-cover shrink-0"
+                      />
+                      <span className="font-bold text-slate-100 truncate">{p.name}</span>
+                    </div>
+                    <span className={`text-[11px] font-semibold shrink-0 ${isInLobby ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {isInLobby ? t.lblInLobbyTag : t.lblInGameTag}
                     </span>
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Crew Team */}
+          <div className="p-4 rounded-xl bg-sky-950/25 border border-sky-500/30 space-y-2.5">
+            <div className="text-xs font-bold text-sky-400 flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5" />
+              <span>{t.crewTeamLabel}</span>
+            </div>
+
+            <div className="space-y-2">
+              {Object.keys(allPlayers)
+                .filter(uid => !spyUids.includes(uid))
+                .map(uid => {
+                  const p = allPlayers[uid];
+                  if (!p) return null;
+                  const isInLobby = p.postGame === 'inLobby';
+                  return (
+                    <div
+                      key={uid}
+                      className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-950/80 border border-slate-800 text-xs"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <img
+                          src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
+                          alt={p.name}
+                          referrerPolicy="no-referrer"
+                          className="w-7 h-7 rounded-lg object-cover shrink-0"
+                        />
+                        <span className="font-bold text-slate-100 truncate">{p.name}</span>
+                      </div>
+                      <span className={`text-[11px] font-semibold shrink-0 ${isInLobby ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {isInLobby ? t.lblInLobbyTag : t.lblInGameTag}
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {/* Actions */}
         <div className="pt-2 grid grid-cols-2 gap-3">
           <button
+            type="button"
             onClick={onReturnToLobby}
-            className="py-3 px-4 rounded-2xl bg-gradient-to-r from-sky-400 to-indigo-500 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 hover:brightness-110 active:scale-95 transition shadow-lg shadow-sky-500/20 cursor-pointer"
+            className="min-h-[46px] py-2.5 px-4 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition cursor-pointer"
           >
             <RotateCcw className="w-4 h-4" />
             <span>{t.btnReturnLobby}</span>
           </button>
 
           <button
+            type="button"
             onClick={onLeaveRoom}
-            className="py-3 px-4 rounded-2xl bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition cursor-pointer"
+            className="min-h-[46px] py-2.5 px-4 rounded-xl bg-rose-600/15 hover:bg-rose-600/25 border border-rose-500/35 text-rose-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition cursor-pointer"
           >
             <LogOut className="w-4 h-4" />
             <span>{t.btnLeaveGame}</span>

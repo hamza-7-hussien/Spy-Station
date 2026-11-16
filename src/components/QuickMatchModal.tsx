@@ -2,8 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { db, firebase } from '../firebase';
 import { sound } from '../audio';
 import { Language, PlayerData } from '../types';
-import { dictionary } from '../translations';
-import { Zap, X, Users, Radio, CheckCircle2, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Zap, X, Users, Radio, Loader2 } from 'lucide-react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 interface Props {
@@ -27,23 +26,20 @@ export const QuickMatchModal: React.FC<Props> = ({
   onMatchFound,
   onToast
 }) => {
-  const t = dictionary[lang];
   const [searchingSeconds, setSearchingSeconds] = useState(0);
   const [statusText, setStatusText] = useState<'scanning' | 'room_found' | 'launching'>('scanning');
-  const [matchedRoomCode, setMatchedRoomCode] = useState<string | null>(null);
   const [joinedPlayers, setJoinedPlayers] = useState<PlayerData[]>([]);
   const [targetPlayersCount] = useState<number>(4);
   const [countdown, setCountdown] = useState<number | null>(null);
 
   const activeRoomRef = useRef<string | null>(null);
   const isHostRef = useRef<boolean>(false);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const searchPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const searchPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const roomListenerRef = useRef<(() => void) | null>(null);
   const hasLaunchedRef = useRef<boolean>(false);
   const countdownStartedRef = useRef<boolean>(false);
 
-  // Clean exit helper
   const cleanUpMatchmaking = async () => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     if (searchPollIntervalRef.current) clearInterval(searchPollIntervalRef.current);
@@ -58,7 +54,6 @@ export const QuickMatchModal: React.FC<Props> = ({
         const playerRef = db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}`);
         await playerRef.remove();
 
-        // Check if room became empty
         const snap = await db.ref(`spy_rooms/${roomCode}/players`).once('value');
         if (!snap.exists() || Object.keys(snap.val() || {}).length === 0) {
           await db.ref(`spy_rooms/${roomCode}`).remove();
@@ -78,7 +73,6 @@ export const QuickMatchModal: React.FC<Props> = ({
       cleanUpMatchmaking();
       setSearchingSeconds(0);
       setStatusText('scanning');
-      setMatchedRoomCode(null);
       setJoinedPlayers([]);
       setCountdown(null);
       hasLaunchedRef.current = false;
@@ -89,13 +83,11 @@ export const QuickMatchModal: React.FC<Props> = ({
     sound.playTone(600, 'triangle', 0.15);
     sound.triggerHaptic('medium');
 
-    // 1. Timer ticker
     setSearchingSeconds(0);
     timerIntervalRef.current = setInterval(() => {
       setSearchingSeconds(prev => prev + 1);
     }, 1000);
 
-    // 2. Start Matchmaking algorithm
     startMatchmaking();
 
     return () => {
@@ -107,18 +99,15 @@ export const QuickMatchModal: React.FC<Props> = ({
     try {
       setStatusText('scanning');
 
-      // Step A: Search for active quick match queue rooms in Firebase
       const queueSnap = await db.ref('spy_quick_match_queue').once('value');
       const queueRooms = queueSnap.val() || {};
       const now = Date.now();
 
       let targetCode: string | null = null;
 
-      // Find an existing quick match room created in the last 2 minutes that is still waiting and not full
       for (const code in queueRooms) {
         const info = queueRooms[code];
         if (now - (info.createdAt || 0) < 120000) {
-          // Check actual room
           const rSnap = await db.ref(`spy_rooms/${code}`).once('value');
           const rData = rSnap.val();
           if (rData && rData.status === 'waiting') {
@@ -132,7 +121,6 @@ export const QuickMatchModal: React.FC<Props> = ({
         }
       }
 
-      // If no queue room, also check public rooms waiting for players
       if (!targetCode) {
         const publicSnap = await db.ref('spy_rooms').orderByChild('visibility').equalTo('public').limitToLast(10).once('value');
         const pubRooms = publicSnap.val() || {};
@@ -149,10 +137,8 @@ export const QuickMatchModal: React.FC<Props> = ({
       }
 
       if (targetCode) {
-        // Found an open room! Join as player
         joinExistingRoom(targetCode);
       } else {
-        // No room available: create a new Quick Match queue room and wait for others
         createNewQueueRoom();
       }
     } catch (err) {
@@ -165,7 +151,6 @@ export const QuickMatchModal: React.FC<Props> = ({
   const joinExistingRoom = async (code: string) => {
     activeRoomRef.current = code;
     isHostRef.current = false;
-    setMatchedRoomCode(code);
     setStatusText('room_found');
 
     const playerData: PlayerData = {
@@ -184,7 +169,6 @@ export const QuickMatchModal: React.FC<Props> = ({
   };
 
   const createNewQueueRoom = async () => {
-    // Generate clean alphanumeric code
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < 6; i++) {
@@ -193,7 +177,6 @@ export const QuickMatchModal: React.FC<Props> = ({
 
     activeRoomRef.current = code;
     isHostRef.current = true;
-    setMatchedRoomCode(code);
     setStatusText('room_found');
 
     const playerData: PlayerData = {
@@ -244,7 +227,6 @@ export const QuickMatchModal: React.FC<Props> = ({
       const playersList = Object.values(playersObj) as PlayerData[];
       setJoinedPlayers(playersList);
 
-      // Check if room has been launched or reached required players
       if (room.status === 'playing') {
         hasLaunchedRef.current = true;
         sound.playMatchFound();
@@ -253,7 +235,6 @@ export const QuickMatchModal: React.FC<Props> = ({
         return;
       }
 
-      // If we have enough players (4 or targetPlayersCount), start countdown once
       if (playersList.length >= targetPlayersCount) {
         setStatusText('launching');
         if (!countdownStartedRef.current) {
@@ -268,7 +249,6 @@ export const QuickMatchModal: React.FC<Props> = ({
     roomListenerRef.current = () => roomRef.off('value', onRoomChange);
   };
 
-  // Launch countdown effect
   useEffect(() => {
     if (countdown === null) return;
 
@@ -281,7 +261,6 @@ export const QuickMatchModal: React.FC<Props> = ({
     }
 
     if (countdown === 0) {
-      // Launch game!
       hasLaunchedRef.current = true;
       if (activeRoomRef.current) {
         onMatchFound(activeRoomRef.current);
@@ -290,7 +269,6 @@ export const QuickMatchModal: React.FC<Props> = ({
     }
   }, [countdown, onMatchFound, onClose]);
 
-  // Lock background scroll when matchmaking modal is open
   useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
@@ -303,32 +281,27 @@ export const QuickMatchModal: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-200 select-none overscroll-contain"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 animate-in fade-in duration-200 select-none overscroll-contain"
       onWheel={(e) => e.stopPropagation()}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget && e.cancelable) e.preventDefault();
       }}
     >
       <div
-        className="relative w-full max-w-md p-6 rounded-3xl bg-slate-900 border-2 border-amber-500/40 shadow-[0_0_50px_rgba(245,158,11,0.25)] space-y-6 text-center overflow-hidden overscroll-contain"
+        className="relative w-full max-w-md p-6 rounded-2xl bg-[#111827] border border-slate-700 shadow-2xl space-y-5 text-center overflow-hidden overscroll-contain"
         onWheel={(e) => e.stopPropagation()}
       >
-        {/* Radar Background Glow */}
-        <div className="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-amber-400">
               <Zap className="w-4 h-4 fill-amber-400" />
             </div>
             <div className="text-start">
-              <h3 className="font-heading font-black text-base sm:text-lg text-white">
+              <h3 className="font-heading font-black text-base text-white">
                 {lang === 'ar' ? 'انطلاق: لعب سريع أونلاين' : 'Quick Matchmaking'}
               </h3>
               <p className="text-[11px] font-mono text-slate-400">
-                {lang === 'ar' ? 'مطابقة تلقائية مع لاعبين حقيقيين' : 'Auto-match with real astronauts'}
+                {lang === 'ar' ? 'مطابقة تلقائية مع لاعبين حقيقيين' : 'Auto-match with real players'}
               </p>
             </div>
           </div>
@@ -338,39 +311,25 @@ export const QuickMatchModal: React.FC<Props> = ({
               sound.playClick();
               onClose();
             }}
-            className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition"
+            className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Central Animated Sci-Fi Radar */}
-        <div className="relative w-40 h-40 mx-auto flex items-center justify-center">
-          {/* Outer Rotating Radar Ring */}
-          <div className="absolute inset-0 rounded-full border border-amber-500/30 animate-ping opacity-25" />
-          <div className="absolute inset-2 rounded-full border border-sky-400/20" />
-          <div className="absolute inset-6 rounded-full border border-amber-400/40 animate-spin duration-[4000ms]" />
-
-          {/* Radar Sweep Line */}
-          <div className="absolute inset-0 flex items-center justify-center animate-spin duration-[2500ms]">
-            <div className="w-1/2 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-amber-300 origin-right ml-auto shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
-          </div>
-
-          {/* Center Avatar or Pulse */}
-          <div className="relative z-10 flex flex-col items-center justify-center">
-            <div className="w-16 h-16 rounded-full p-1 bg-gradient-to-tr from-amber-500 to-sky-400 shadow-[0_0_20px_rgba(245,158,11,0.5)]">
-              <img
-                src={currentUserAvatar}
-                alt={currentUserName}
-                className="w-full h-full rounded-full bg-slate-900 object-cover"
-              />
-            </div>
-          </div>
+        {/* Radar Indicator */}
+        <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+          <div className="absolute inset-0 rounded-full border border-amber-500/25" />
+          <div className="absolute inset-3 rounded-full border border-sky-500/20" />
+          <img
+            src={currentUserAvatar}
+            alt={currentUserName}
+            className="w-16 h-16 rounded-2xl bg-slate-900 border-2 border-amber-500/60 object-cover relative z-10"
+          />
         </div>
 
-        {/* Searching Status & Timer */}
-        <div className="space-y-1">
-          <div className="font-mono text-2xl font-black text-amber-400 tracking-wider">
+        <div className="space-y-1.5">
+          <div className="font-mono text-2xl font-black text-amber-400 tracking-wider tabular-nums">
             {formatTimer(searchingSeconds)}
           </div>
           <div className="flex items-center justify-center gap-2 text-xs font-bold text-slate-300">
@@ -386,19 +345,18 @@ export const QuickMatchModal: React.FC<Props> = ({
                   : 'Scanning frequencies for active players...'
                 : lang === 'ar'
                 ? 'تم العثور على الغرفة! بانتظار اكتمال الطاقم...'
-                : 'Room found! Waiting for astronauts...'}
+                : 'Room found! Waiting for players...'}
             </span>
           </div>
         </div>
 
-        {/* Real-Time Astronauts Found Slots */}
-        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+        <div className="p-4 rounded-xl bg-[#090d16] border border-slate-800 space-y-3">
           <div className="flex items-center justify-between text-xs font-bold text-slate-400">
             <span className="flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5 text-sky-400" />
-              <span>{lang === 'ar' ? 'طاقم الرحلة' : 'Astronaut Squad'}</span>
+              <span>{lang === 'ar' ? 'طاقم الرحلة' : 'Squad Slots'}</span>
             </span>
-            <span className="font-mono text-amber-400">
+            <span className="font-mono text-amber-400 tabular-nums">
               {joinedPlayers.length} / {targetPlayersCount}
             </span>
           </div>
@@ -409,10 +367,10 @@ export const QuickMatchModal: React.FC<Props> = ({
               return (
                 <div
                   key={slotIdx}
-                  className={`p-2 rounded-xl flex flex-col items-center justify-center gap-1 border transition-all ${
+                  className={`p-2 rounded-xl flex flex-col items-center justify-center gap-1 border transition ${
                     player
                       ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
-                      : 'bg-slate-900 border-slate-800/80 text-slate-500 border-dashed'
+                      : 'bg-slate-900 border-slate-800 text-slate-500 border-dashed'
                   }`}
                 >
                   {player ? (
@@ -420,7 +378,7 @@ export const QuickMatchModal: React.FC<Props> = ({
                       <img
                         src={player.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${player.uid}`}
                         alt={player.name}
-                        className="w-8 h-8 rounded-full border border-amber-400 shadow-sm"
+                        className="w-8 h-8 rounded-full border border-amber-400"
                       />
                       <span className="text-[10px] font-bold truncate max-w-full">
                         {player.name}
@@ -428,11 +386,11 @@ export const QuickMatchModal: React.FC<Props> = ({
                     </>
                   ) : (
                     <>
-                      <div className="w-8 h-8 rounded-full bg-slate-800/80 flex items-center justify-center text-xs">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
                       </div>
-                      <span className="text-[9px] font-mono opacity-50">
-                        {lang === 'ar' ? 'بحث...' : 'Search...'}
+                      <span className="text-[9px] font-mono opacity-60">
+                        {lang === 'ar' ? 'بحث...' : 'Wait...'}
                       </span>
                     </>
                   )}
@@ -442,16 +400,15 @@ export const QuickMatchModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Cancel Button */}
         <button
           type="button"
           onClick={() => {
             sound.playClick();
             onClose();
           }}
-          className="w-full py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-98 text-slate-300 font-bold text-xs sm:text-sm transition cursor-pointer border border-slate-700"
+          className="w-full min-h-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs sm:text-sm transition cursor-pointer border border-slate-700"
         >
-          {lang === 'ar' ? 'إلغاء البحث عن مباراة' : 'Cancel Matchmaking'}
+          {lang === 'ar' ? 'إلغاء البحث' : 'Cancel Matchmaking'}
         </button>
       </div>
     </div>
