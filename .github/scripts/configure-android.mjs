@@ -55,13 +55,11 @@ if (fs.existsSync(stylesPath)) {
   }
 }
 
-// 4. Write enhanced MainActivity.java for Immersive Sticky Fullscreen, single clean native Google account picker, dark OAuth popup Dialog, zero scrollbars/overscroll, clean Chrome UA, and 3P cookies
+// 4. Write enhanced MainActivity.java for Immersive Sticky Fullscreen, sleek dark OAuth popup Dialog, zero scrollbars/overscroll, clean Chrome UA, and 3P cookies
 const mainActivityPath = 'android/app/src/main/java/com/spystation/game/MainActivity.java';
 const mainActivityJava = `package com.spystation.game;
 
-import android.accounts.AccountManager;
 import android.app.Dialog;
-import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
@@ -75,7 +73,6 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
-import android.webkit.JavascriptInterface;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
@@ -92,65 +89,8 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
-import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
-    private static final int RC_ACCOUNT_PICKER = 9002;
-
-    private class SpyStationNativeBridge {
-        @JavascriptInterface
-        public void signInWithGoogle() {
-            signInWithGoogle("");
-        }
-
-        @JavascriptInterface
-        public void signInWithGoogle(final String loginHint) {
-            runOnUiThread(() -> launchNativeGoogleAccountPicker(loginHint));
-        }
-    }
-
-    private void launchNativeGoogleAccountPicker(final String loginHint) {
-        if (loginHint != null && !loginHint.trim().isEmpty()) {
-            notifyNativeGoogleAuth("loginHint", null, loginHint.trim(), null);
-            return;
-        }
-        launchSystemAccountManagerPicker();
-    }
-
-    private void launchSystemAccountManagerPicker() {
-        try {
-            Intent intent = AccountManager.newChooseAccountIntent(
-                null,
-                null,
-                new String[]{"com.google"},
-                null,
-                null,
-                null,
-                null
-            );
-            startActivityForResult(intent, RC_ACCOUNT_PICKER);
-        } catch (Exception ex) {
-            notifyNativeGoogleAuth("error", null, null, ex.getMessage());
-        }
-    }
-
-    private void notifyNativeGoogleAuth(final String status, final String idToken, final String email, final String message) {
-        runOnUiThread(() -> {
-            final WebView wv = getBridge() != null ? getBridge().getWebView() : null;
-            if (wv == null) return;
-            try {
-                JSONObject json = new JSONObject();
-                json.put("status", status);
-                if (idToken != null) json.put("idToken", idToken);
-                if (email != null) json.put("email", email);
-                if (message != null) json.put("message", message);
-                final String js = "if (window.__onNativeGoogleAuthResult) { window.__onNativeGoogleAuthResult(" + json.toString() + "); }";
-                wv.evaluateJavascript(js, null);
-            } catch (Exception ignored) {
-            }
-        });
-    }
-
     private String buildCleanChromeUserAgent(String rawUa) {
         if (rawUa == null || rawUa.isEmpty()) return rawUa;
         return rawUa
@@ -191,7 +131,6 @@ public class MainActivity extends BridgeActivity {
         final WebView webView = getBridge().getWebView();
         if (webView == null) return;
 
-        webView.addJavascriptInterface(new SpyStationNativeBridge(), "SpyStationNative");
         webView.setBackgroundColor(Color.parseColor("#030712"));
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);
@@ -280,14 +219,14 @@ public class MainActivity extends BridgeActivity {
                 header.setGravity(Gravity.CENTER_VERTICAL);
                 header.setBackgroundColor(Color.parseColor("#0f172a"));
                 final float density = getResources().getDisplayMetrics().density;
-                final int padH = Math.round(14 * density);
-                final int padV = Math.round(10 * density);
+                final int padH = Math.round(16 * density);
+                final int padV = Math.round(12 * density);
                 header.setPadding(padH, padV, padH, padV);
 
                 final TextView titleView = new TextView(MainActivity.this);
-                titleView.setText("Google Sign-In");
-                titleView.setTextColor(Color.parseColor("#e2e8f0"));
-                titleView.setTextSize(14f);
+                titleView.setText("Spy Station · Google");
+                titleView.setTextColor(Color.parseColor("#f8fafc"));
+                titleView.setTextSize(15f);
                 titleView.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
                 header.addView(titleView);
 
@@ -295,14 +234,14 @@ public class MainActivity extends BridgeActivity {
                 closeBtn.setText("✕");
                 closeBtn.setTextColor(Color.parseColor("#94a3b8"));
                 closeBtn.setTextSize(18f);
-                closeBtn.setPadding(Math.round(10 * density), Math.round(4 * density), Math.round(4 * density), Math.round(4 * density));
+                closeBtn.setPadding(Math.round(12 * density), Math.round(4 * density), Math.round(4 * density), Math.round(4 * density));
                 closeBtn.setOnClickListener(v -> popupDialog.dismiss());
                 header.addView(closeBtn);
                 container.addView(header);
 
                 final ProgressBar progressBar = new ProgressBar(MainActivity.this, null, android.R.attr.progressBarStyleHorizontal);
                 progressBar.setMax(100);
-                progressBar.setProgress(10);
+                progressBar.setProgress(15);
                 progressBar.setLayoutParams(new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     Math.max(4, Math.round(3 * density))
@@ -378,22 +317,6 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == RC_ACCOUNT_PICKER) {
-            if (resultCode == RESULT_OK && data != null) {
-                String chosenEmail = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME);
-                if (chosenEmail != null && !chosenEmail.isEmpty()) {
-                    notifyNativeGoogleAuth("loginHint", null, chosenEmail, null);
-                    return;
-                }
-            }
-            notifyNativeGoogleAuth("cancelled", null, null, null);
-            return;
-        }
-        super.onActivityResult(requestCode, resultCode, data);
-    }
-
-    @Override
     public void onResume() {
         super.onResume();
         applyImmersiveFullscreen();
@@ -431,4 +354,4 @@ for (const [folder, src] of Object.entries(iconMap)) {
     fs.copyFileSync(src, path.join(dir, 'ic_launcher_round.png'));
   }
 }
-console.log(`Configured Spy Station Android v${versionName} (build ${buildNum}) with single clean Google account picker, dark OAuth dialog, and immersive fullscreen`);
+console.log(`Configured Spy Station Android v${versionName} (build ${buildNum}) with single-step dark OAuth modal and immersive fullscreen`);

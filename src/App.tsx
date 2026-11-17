@@ -70,7 +70,7 @@ function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, u
   return out;
 }
 
-const CURRENT_APP_VERSION = '2.8.0';
+const CURRENT_APP_VERSION = '2.9.0';
 const ROUND_ANNOUNCE_MS = 2400;
 
 export default function App() {
