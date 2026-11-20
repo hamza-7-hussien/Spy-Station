@@ -192,6 +192,8 @@ export const GoogleSignInSheet: React.FC<Props> = ({
                         <img
                           src={acc.avatar}
                           alt={acc.name}
+                          loading="lazy"
+                          decoding="async"
                           referrerPolicy="no-referrer"
                           className="w-11 h-11 rounded-full object-cover bg-slate-900 border border-slate-700"
                         />

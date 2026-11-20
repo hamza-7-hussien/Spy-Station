@@ -34,6 +34,7 @@ export const InviteFriendsModal: React.FC<Props> = ({
   onToast
 }) => {
   const [invited, setInvited] = useState<Record<string, boolean>>({});
+  const [visibleLimit, setVisibleLimit] = useState(15);
 
   // Lock background scroll when invite friends modal is open
   useBodyScrollLock(isOpen);
@@ -62,6 +63,7 @@ export const InviteFriendsModal: React.FC<Props> = ({
   };
 
   const friendUids = Object.keys(friends || {}).filter(uid => !currentRoomPlayers[uid]);
+  const visibleFriendUids = friendUids.slice(0, visibleLimit);
 
   return (
     <div
@@ -95,22 +97,25 @@ export const InviteFriendsModal: React.FC<Props> = ({
           onWheel={(e) => e.stopPropagation()}
         >
           {friendUids.length > 0 ? (
-            friendUids.map(uid => {
-              const friend = friends[uid];
-              const isOnline = friendStatuses[uid] === 'online';
-              const isPending = !!invited[uid];
+            <>
+              {visibleFriendUids.map(uid => {
+                const friend = friends[uid];
+                const isOnline = friendStatuses[uid] === 'online';
+                const isPending = !!invited[uid];
 
-              return (
-                <div
-                  key={uid}
-                  className="flex items-center justify-between p-3 rounded-2xl bg-slate-950/60 border border-slate-800"
-                >
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={friend.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
-                      alt="avatar"
-                      className="w-9 h-9 rounded-full object-cover border border-sky-400/40"
-                    />
+                return (
+                  <div
+                    key={uid}
+                    className="flex items-center justify-between p-3 rounded-2xl bg-slate-950/60 border border-slate-800"
+                  >
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={friend.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
+                        alt="avatar"
+                        loading="lazy"
+                        decoding="async"
+                        className="w-9 h-9 rounded-full object-cover border border-sky-400/40"
+                      />
                     <div>
                       <div className="font-bold text-sm text-slate-200">{friend.name || 'Friend'}</div>
                       <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
@@ -147,7 +152,17 @@ export const InviteFriendsModal: React.FC<Props> = ({
                   </button>
                 </div>
               );
-            })
+            })}
+              {friendUids.length > visibleLimit && (
+                <button
+                  type="button"
+                  onClick={() => setVisibleLimit(l => l + 15)}
+                  className="w-full py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-sky-300 text-xs font-bold transition cursor-pointer"
+                >
+                  {lang === 'ar' ? `عرض المزيد (+${friendUids.length - visibleLimit})` : `Show more (+${friendUids.length - visibleLimit})`}
+                </button>
+              )}
+            </>
           ) : (
             <div className="py-8 text-center text-sm text-slate-500">
               {t.lblNoFriendsToInvite}

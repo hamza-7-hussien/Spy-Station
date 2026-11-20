@@ -78,6 +78,7 @@ export const LobbyScreen: React.FC<Props> = ({
 }) => {
   const [chatMsg, setChatMsg] = useState('');
   const [isStartingGame, setIsStartingGame] = useState(false);
+  const [chatLimit, setChatLimit] = useState(30);
   const t = dictionary[lang];
 
   const playersObj = room.players || {};
@@ -346,6 +347,8 @@ export const LobbyScreen: React.FC<Props> = ({
                     <img
                       src={req.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${req.uid}`}
                       alt={req.name}
+                      loading="lazy"
+                      decoding="async"
                       className="w-10 h-10 rounded-full object-cover border-2 border-sky-400/50 shrink-0"
                     />
                     <div className="min-w-0">
@@ -415,6 +418,8 @@ export const LobbyScreen: React.FC<Props> = ({
                       <img
                         src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`}
                         alt="avatar"
+                        loading="lazy"
+                        decoding="async"
                         className={`w-8 h-8 rounded-full object-cover transition-all ${
                           !isInLobby
                             ? 'opacity-40 grayscale border border-slate-800'
@@ -513,12 +518,29 @@ export const LobbyScreen: React.FC<Props> = ({
         <div className="space-y-2 pt-2 border-t border-slate-800">
           <div className="h-28 overflow-y-auto space-y-1.5 p-2 rounded-2xl bg-slate-950/80 border border-slate-800 text-xs">
             {room.lobbyChat && Object.values(room.lobbyChat).length > 0 ? (
-              Object.values(room.lobbyChat).map((msg, i) => (
-                <div key={i} className="p-1.5 rounded-xl bg-slate-900/60 leading-relaxed">
-                  <span className="font-bold text-sky-400 me-1.5">{msg.sender}:</span>
-                  <span className="text-slate-200">{msg.text}</span>
-                </div>
-              ))
+              (() => {
+                const msgs = Object.values(room.lobbyChat);
+                const visibleMsgs = msgs.slice(-chatLimit);
+                return (
+                  <>
+                    {msgs.length > chatLimit && (
+                      <button
+                        type="button"
+                        onClick={() => setChatLimit(l => l + 30)}
+                        className="w-full py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-[11px] font-bold text-sky-400 cursor-pointer"
+                      >
+                        {lang === 'ar' ? `عرض رسائل أقدم (${msgs.length - chatLimit})` : `Load older (${msgs.length - chatLimit})`}
+                      </button>
+                    )}
+                    {visibleMsgs.map((msg, i) => (
+                      <div key={i} className="p-1.5 rounded-xl bg-slate-900/60 leading-relaxed">
+                        <span className="font-bold text-sky-400 me-1.5">{msg.sender}:</span>
+                        <span className="text-slate-200">{msg.text}</span>
+                      </div>
+                    ))}
+                  </>
+                );
+              })()
             ) : (
               <div className="text-center text-slate-500 py-6 text-xs">
                 {t.stationCommsHint}

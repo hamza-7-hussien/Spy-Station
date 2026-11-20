@@ -166,6 +166,8 @@ export const VotingScreen: React.FC<Props> = ({
                   <img
                     src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${p.uid}`}
                     alt="avatar"
+                    loading="lazy"
+                    decoding="async"
                     className="w-10 h-10 rounded-full object-cover border border-purple-400/40"
                   />
                   <div className="flex items-center gap-1.5">
@@ -185,6 +187,8 @@ export const VotingScreen: React.FC<Props> = ({
                       src={v.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${v.uid}`}
                       alt={v.name}
                       title={v.name}
+                      loading="lazy"
+                      decoding="async"
                       className="w-7 h-7 rounded-full border-2 border-purple-400 object-cover shadow-md"
                     />
                   ))}

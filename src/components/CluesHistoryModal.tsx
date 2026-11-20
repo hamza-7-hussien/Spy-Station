@@ -145,6 +145,8 @@ export const CluesHistoryModal: React.FC<Props> = ({
                           <img
                             src={clue.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${clue.uid || clue.sender}`}
                             alt={clue.sender}
+                            loading="lazy"
+                            decoding="async"
                             className={`w-9 h-9 rounded-full object-cover border shrink-0 ${
                               isMe ? 'border-sky-400 ring-2 ring-sky-400/30' : 'border-slate-700'
                             }`}

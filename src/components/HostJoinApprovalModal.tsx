@@ -54,6 +54,8 @@ export const HostJoinApprovalModal: React.FC<Props> = ({
           <img
             src={request.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${request.uid}`}
             alt={request.name}
+            loading="lazy"
+            decoding="async"
             className="w-20 h-20 rounded-full mx-auto object-cover border-4 border-sky-400 shadow-[0_0_20px_rgba(56,189,248,0.5)]"
           />
           <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-sky-500 text-slate-950 flex items-center justify-center font-bold text-xs">

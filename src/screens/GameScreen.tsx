@@ -501,6 +501,8 @@ export const GameScreen: React.FC<Props> = ({
                   <img
                     src={p?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
                     alt={p?.name}
+                    loading="lazy"
+                    decoding="async"
                     className={`w-12 h-12 rounded-full object-cover border-2 transition-all ${
                       isVoiceSpeakingNow
                         ? 'border-emerald-300 ring-2 ring-emerald-400'

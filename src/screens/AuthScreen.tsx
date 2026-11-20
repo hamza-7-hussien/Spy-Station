@@ -7,7 +7,7 @@ import { PWAInstallButton } from '../components/PWAInstallButton';
 import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
 import { GoogleSignInSheet, GoogleLogoSvg } from '../components/GoogleSignInSheet';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
-import spyStationBanner from '../assets/images/spy_station_banner_1790955326030.jpg';
+import spyStationBanner from '../assets/images/spy_station_banner_1790955326030.webp';
 import {
   getSavedAccounts,
   saveAccountProfile,
@@ -601,6 +601,7 @@ export const AuthScreen: React.FC<Props> = ({
               src={spyStationBanner}
               alt="Spy Station Orbital Deck"
               referrerPolicy="no-referrer"
+              decoding="async"
               onError={() => setBannerError(true)}
               className="absolute inset-0 w-full h-full object-cover"
             />
@@ -672,6 +673,7 @@ export const AuthScreen: React.FC<Props> = ({
                         src={primarySaved.avatar}
                         alt={primarySaved.name}
                         referrerPolicy="no-referrer"
+                        decoding="async"
                         className="w-20 h-20 rounded-full object-cover bg-slate-950 border-2 border-slate-900"
                       />
                     </div>

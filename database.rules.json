@@ -1,0 +1,35 @@
+{
+  "rules": {
+    "users": {
+      ".indexOn": ["friendCode"],
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "usernames": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "friendCodes": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "status": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    },
+    "spy_rooms": {
+      ".indexOn": ["visibility", "status", "createdAt"],
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "spy_quick_match_queue": {
+      ".indexOn": ["createdAt"],
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
+  }
+}

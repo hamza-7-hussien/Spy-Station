@@ -66,7 +66,10 @@ function compressImageToDataUrl(file: File, maxSize = 256): Promise<string> {
         const startY = (img.height - minDim) / 2;
 
         ctx.drawImage(img, startX, startY, minDim, minDim, 0, 0, maxSize, maxSize);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const webpDataUrl = canvas.toDataURL('image/webp', 0.82);
+        const dataUrl = webpDataUrl.startsWith('data:image/webp')
+          ? webpDataUrl
+          : canvas.toDataURL('image/jpeg', 0.82);
         resolve(dataUrl);
       };
       img.onerror = reject;
@@ -179,6 +182,7 @@ export const SettingsTab: React.FC<Props> = ({
             <img
               src={avatarUrl || `https://api.dicebear.com/7.x/bottts/svg?seed=agent`}
               alt="Avatar"
+              decoding="async"
               className="w-24 h-24 rounded-full object-cover border-2 border-purple-400 shadow-[0_0_20px_rgba(192,132,252,0.4)] bg-slate-950"
               onError={e => {
                 const target = e.target as HTMLImageElement;
@@ -240,6 +244,8 @@ export const SettingsTab: React.FC<Props> = ({
                       <img
                         src={preset.url}
                         alt={preset.label}
+                        loading="lazy"
+                        decoding="async"
                         className="w-9 h-9 mx-auto rounded-lg object-cover"
                       />
                     </button>

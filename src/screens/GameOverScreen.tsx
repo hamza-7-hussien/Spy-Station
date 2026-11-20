@@ -113,6 +113,8 @@ export const GameOverScreen: React.FC<Props> = ({
                   <img
                     src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
                     alt={p.name}
+                    loading="lazy"
+                    decoding="async"
                     className="w-5 h-5 rounded-full object-cover"
                   />
                   <span className="font-bold text-slate-200">{p.name}</span>
@@ -154,6 +156,8 @@ export const GameOverScreen: React.FC<Props> = ({
                     <img
                       src={p.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${uid}`}
                       alt={p.name}
+                      loading="lazy"
+                      decoding="async"
                       className="w-5 h-5 rounded-full object-cover"
                     />
                     <span className="font-bold text-slate-200">{p.name}</span>

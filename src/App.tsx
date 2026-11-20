@@ -35,10 +35,11 @@ import { TopNotification } from './components/TopNotification';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { InviteFriendsModal } from './components/InviteFriendsModal';
 import { RankModal } from './components/RankModal';
-import { UfoLoader } from './components/UfoLoader';
+import { AppBootSkeleton, RoomLobbySkeleton } from './components/Skeletons';
 import { HostJoinApprovalModal } from './components/HostJoinApprovalModal';
 import { ApplicantWaitingApprovalModal } from './components/ApplicantWaitingApprovalModal';
 import { QuickMatchModal } from './components/QuickMatchModal';
+import { friendCodeCache, publicRoomsCache, userProfileCache } from './utils/cache';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
 import {
   generateSmartBotClue,
@@ -70,7 +71,7 @@ function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, u
   return out;
 }
 
-const CURRENT_APP_VERSION = '2.9.0';
+const CURRENT_APP_VERSION = '2.9.1';
 const ROUND_ANNOUNCE_MS = 2400;
 
 export default function App() {
@@ -114,13 +115,17 @@ export default function App() {
   // Friends & Presence
   const [myFriendCode, setMyFriendCode] = useState('--------');
   const [friends, setFriends] = useState<Record<string, FriendEntry>>({});
+  const [friendsLoading, setFriendsLoading] = useState(true);
   const [friendStatuses, setFriendStatuses] = useState<Record<string, 'online' | 'offline'>>({});
   const [friendRequests, setFriendRequests] = useState<Record<string, FriendRequest>>({});
   const [sentRequests, setSentRequests] = useState<Record<string, boolean>>({});
   const [roomInvites, setRoomInvites] = useState<Record<string, RoomInvite>>({});
 
-  // Public rooms
-  const [publicRooms, setPublicRooms] = useState<Record<string, RoomData>>({});
+  // Public rooms (SWR-cached + indexed + paginated)
+  const [publicRooms, setPublicRooms] = useState<Record<string, RoomData>>(() => publicRoomsCache.get('latest') || {});
+  const [publicRoomsLoading, setPublicRoomsLoading] = useState(true);
+  const [stationsLimit, setStationsLimit] = useState(12);
+  const [hasMoreStations, setHasMoreStations] = useState(false);
 
   // Modals
   const [rankModalOpen, setRankModalOpen] = useState(false);
@@ -409,6 +414,11 @@ export default function App() {
       if (data) {
         if (data.name) setProfileName(data.name);
         if (data.avatar) setProfileAvatar(data.avatar);
+        userProfileCache.set(currentUser.uid, {
+          name: data.name,
+          avatar: data.avatar,
+          friendCode: data.friendCode
+        });
         if (currentUser.email) {
           saveAccountProfile({
             uid: currentUser.uid,
@@ -482,16 +492,36 @@ export default function App() {
       }
     }).catch(() => {});
 
-    // Friends list
+    // Friends list (TTL-cached profile hydration + bounded presence subscriptions to eliminate N+1 reads)
+    setFriendsLoading(true);
     const friendsRef = db.ref(`users/${currentUser.uid}/friends`);
     const onFriendsChange = (snap: firebase.database.DataSnapshot) => {
-      const f = snap.val() || {};
-      setFriends(f);
+      const f = (snap.val() || {}) as Record<string, FriendEntry>;
+      const friendUids = Object.keys(f);
+
+      // Apply cached friend profiles synchronously first
+      const hydrated: Record<string, FriendEntry> = { ...f };
+      const staleUids: string[] = [];
+      for (const fUid of friendUids) {
+        const cached = userProfileCache.get(fUid);
+        if (cached) {
+          hydrated[fUid] = {
+            ...hydrated[fUid],
+            name: cached.name || hydrated[fUid].name,
+            avatar: cached.avatar || hydrated[fUid].avatar
+          };
+        } else {
+          staleUids.push(fUid);
+        }
+      }
+      setFriends(hydrated);
+      setFriendsLoading(false);
 
       activeFriendListenersRef.current.forEach(cleanup => cleanup());
       activeFriendListenersRef.current = [];
 
-      Object.keys(f).forEach(fUid => {
+      // Bound live presence listeners to active set to prevent listener explosion
+      friendUids.slice(0, 40).forEach(fUid => {
         const sRef = db.ref(`status/${fUid}`);
         const onStatus = (s: firebase.database.DataSnapshot) => {
           const val = s.val();
@@ -502,28 +532,51 @@ export default function App() {
         };
         sRef.on('value', onStatus);
         activeFriendListenersRef.current.push(() => sRef.off('value', onStatus));
+      });
 
-        const uRef = db.ref(`users/${fUid}`);
-        const onProfile = (uSnap: firebase.database.DataSnapshot) => {
-          const uData = uSnap.val();
-          if (uData && (uData.name || uData.avatar)) {
+      // Batch fetch only uncached/expired friend profiles in parallel (instead of N persistent profile listeners)
+      if (staleUids.length > 0) {
+        Promise.all(
+          staleUids.slice(0, 30).map(fUid =>
+            db
+              .ref(`users/${fUid}`)
+              .once('value')
+              .then(uSnap => ({ fUid, uData: uSnap.val() }))
+              .catch(() => null)
+          )
+        ).then(results => {
+          if (isCancelled) return;
+          const patches: Record<string, { name?: string; avatar?: string }> = {};
+          for (const res of results) {
+            if (!res || !res.uData) continue;
+            userProfileCache.set(res.fUid, {
+              name: res.uData.name,
+              avatar: res.uData.avatar,
+              friendCode: res.uData.friendCode
+            });
+            patches[res.fUid] = {
+              name: res.uData.name,
+              avatar: res.uData.avatar
+            };
+          }
+          if (Object.keys(patches).length > 0) {
             setFriends(prev => {
-              if (!prev[fUid]) return prev;
-              if (prev[fUid].name === uData.name && prev[fUid].avatar === uData.avatar) return prev;
-              return {
-                ...prev,
-                [fUid]: {
-                  ...prev[fUid],
-                  name: uData.name || prev[fUid].name,
-                  avatar: uData.avatar || prev[fUid].avatar
+              let changed = false;
+              const next = { ...prev };
+              for (const [fUid, patch] of Object.entries(patches)) {
+                if (!next[fUid]) continue;
+                const nextName = patch.name || next[fUid].name;
+                const nextAvatar = patch.avatar || next[fUid].avatar;
+                if (next[fUid].name !== nextName || next[fUid].avatar !== nextAvatar) {
+                  next[fUid] = { ...next[fUid], name: nextName, avatar: nextAvatar };
+                  changed = true;
                 }
-              };
+              }
+              return changed ? next : prev;
             });
           }
-        };
-        uRef.on('value', onProfile);
-        activeFriendListenersRef.current.push(() => uRef.off('value', onProfile));
-      });
+        });
+      }
     };
     friendsRef.on('value', onFriendsChange);
 
@@ -575,16 +628,31 @@ export default function App() {
     };
   }, [currentUser]);
 
-  // Scoped Public Stations listener: only active while browsing Stations tab (not in-game)
+  // Indexed, paginated, SWR-cached Public Stations listener (only active while browsing Stations tab)
   useEffect(() => {
     if (!currentUser || currentRoomCode || activeTab !== 'stations') {
       return;
     }
 
-    const roomsRef = db.ref('spy_rooms');
+    const cachedRooms = publicRoomsCache.get('latest');
+    if (cachedRooms && Object.keys(cachedRooms).length > 0) {
+      setPublicRooms(cachedRooms);
+      setPublicRoomsLoading(false);
+    } else {
+      setPublicRoomsLoading(true);
+    }
+
+    const roomsQuery = db
+      .ref('spy_rooms')
+      .orderByChild('visibility')
+      .equalTo('public')
+      .limitToLast(stationsLimit);
+
     const onRoomsChange = (snap: firebase.database.DataSnapshot) => {
       const all = snap.val() || {};
+      const rawCount = Object.keys(all).length;
       const validRooms: Record<string, RoomData> = {};
+      const staleDeletePaths: Record<string, null> = {};
       const now = Date.now();
 
       Object.keys(all).forEach(code => {
@@ -603,18 +671,10 @@ export default function App() {
         const lastPurge = purgedRoomsRef.current.get(code) || 0;
         const canAttemptPurge = now - lastPurge > 10000;
 
-        if (isBotHost) {
+        if (isBotHost || (humanList.length === 0 && ageMs > 25000)) {
           if (canAttemptPurge) {
             purgedRoomsRef.current.set(code, now);
-            db.ref(`spy_rooms/${code}`).remove().catch(() => {});
-          }
-          return;
-        }
-
-        if (humanList.length === 0 && ageMs > 25000) {
-          if (canAttemptPurge) {
-            purgedRoomsRef.current.set(code, now);
-            db.ref(`spy_rooms/${code}`).remove().catch(() => {});
+            staleDeletePaths[`spy_rooms/${code}`] = null;
           }
           return;
         }
@@ -624,14 +684,23 @@ export default function App() {
         }
       });
 
+      if (Object.keys(staleDeletePaths).length > 0) {
+        db.ref().update(staleDeletePaths).catch(() => {});
+      }
+
+      setHasMoreStations(rawCount >= stationsLimit);
       setPublicRooms(validRooms);
+      setPublicRoomsLoading(false);
+      publicRoomsCache.set('latest', validRooms);
     };
 
-    roomsRef.on('value', onRoomsChange);
+    roomsQuery.on('value', onRoomsChange, () => {
+      setPublicRoomsLoading(false);
+    });
     return () => {
-      roomsRef.off('value', onRoomsChange);
+      roomsQuery.off('value', onRoomsChange);
     };
-  }, [currentUser, currentRoomCode, activeTab]);
+  }, [currentUser, currentRoomCode, activeTab, stationsLimit]);
 
   // Handle Host watchdog
   const isHost = !!(roomData && currentUser && roomData.hostUid === currentUser.uid);
@@ -969,21 +1038,32 @@ export default function App() {
     };
   }, [isHost, currentRoomCode, roomData?.status]);
 
-  // Award XP at game end
+  // Award XP at game end (batched parallel reads + single atomic multi-path write)
   const awardXP = async (playersObj: Record<string, PlayerData>, spies: string[], winner: 'crew' | 'spies') => {
+    const humanUids = Object.keys(playersObj).filter(
+      uid => !uid.startsWith('bot_') && !playersObj[uid]?.isBot
+    );
+    if (humanUids.length === 0) return;
+
+    const scoreResults = await Promise.all(
+      humanUids.map(uid =>
+        db
+          .ref(`users/${uid}/score`)
+          .once('value')
+          .then(snap => ({ uid, currentScore: Number(snap.val()) || 0 }))
+          .catch(() => null)
+      )
+    );
+
     const updates: Record<string, number> = {};
-    for (const uid in playersObj) {
-      if (uid.startsWith('bot_') || playersObj[uid]?.isBot) continue;
-      const isSpy = spies.includes(uid);
+    for (const res of scoreResults) {
+      if (!res) continue;
+      const isSpy = spies.includes(res.uid);
       const isWinner = (winner === 'crew' && !isSpy) || (winner === 'spies' && isSpy);
       const gain = 10 + (isWinner ? 25 : 0);
-      try {
-        const snap = await db.ref(`users/${uid}/score`).once('value');
-        updates[`users/${uid}/score`] = (snap.val() || 0) + gain;
-      } catch {
-        // ignore
-      }
+      updates[`users/${res.uid}/score`] = res.currentScore + gain;
     }
+
     if (Object.keys(updates).length > 0) {
       db.ref().update(updates).catch(() => {});
     }
@@ -1931,16 +2011,9 @@ export default function App() {
     }
   };
 
-  // Loading state
+  // Loading state: render structured Skeleton UI instead of blank wait
   if (loading) {
-    return (
-      <div className="h-[100dvh] w-full overflow-hidden flex flex-col items-center justify-center p-4 bg-[#030712] text-slate-100">
-        <UfoLoader />
-        <div className="mt-4 text-xs font-bold text-sky-400 font-heading tracking-widest uppercase animate-pulse">
-          SPY STATION INITIALIZING...
-        </div>
-      </div>
-    );
+    return <AppBootSkeleton lang={lang} />;
   }
 
   // Not logged in -> Auth Screen
@@ -2002,6 +2075,11 @@ export default function App() {
         />
       </div>
     );
+  }
+
+  // Joining room transition skeleton (prevents flicker back to HomeTab before RTDB room snapshot arrives)
+  if (currentRoomCode && !roomData) {
+    return <RoomLobbySkeleton lang={lang} roomCode={currentRoomCode} />;
   }
 
   // In Room Flow
@@ -2365,6 +2443,9 @@ export default function App() {
         <StationsTab
           lang={lang}
           publicRooms={publicRooms}
+          isLoading={publicRoomsLoading}
+          hasMore={hasMoreStations}
+          onLoadMore={() => setStationsLimit(l => l + 12)}
           onJoinRoom={handleRequestJoinRoom}
         />
       )}
@@ -2377,6 +2458,7 @@ export default function App() {
           friendStatuses={friendStatuses}
           friendRequests={friendRequests}
           roomInvites={roomInvites}
+          isLoading={friendsLoading}
           onCopyCode={() => {
             if (navigator.clipboard) {
               navigator.clipboard.writeText(myFriendCode);
@@ -2384,9 +2466,14 @@ export default function App() {
             }
           }}
           onSendRequest={async code => {
-            const codeSnap = await db.ref(`friendCodes/${code}`).once('value');
-            if (!codeSnap.exists()) return showToast(t.errFriendCodeNotFound, 'danger');
-            const targetUid = codeSnap.val();
+            let targetUid = friendCodeCache.get(code);
+            if (!targetUid) {
+              const codeSnap = await db.ref(`friendCodes/${code}`).once('value');
+              if (!codeSnap.exists()) return showToast(t.errFriendCodeNotFound, 'danger');
+              targetUid = codeSnap.val();
+              if (targetUid) friendCodeCache.set(code, targetUid);
+            }
+            if (!targetUid) return showToast(t.errFriendCodeNotFound, 'danger');
             if (targetUid === currentUser.uid) return showToast(t.errCannotAddSelf, 'danger');
             if (friends[targetUid]) return showToast(t.errAlreadyFriends, 'danger');
             if (sentRequests[targetUid]) return showToast(t.errRequestAlreadySent, 'danger');
@@ -2454,22 +2541,26 @@ export default function App() {
               console.warn('Firebase Auth profile update notice:', authErr);
             }
 
-            // 1. Update user profile in RTDB
+            // 1. Update user profile in RTDB & refresh local cache
             await db.ref(`users/${currentUser.uid}`).update({
               name: newName,
               avatar: newAvatar
             });
+            userProfileCache.set(currentUser.uid, { name: newName, avatar: newAvatar, friendCode: myFriendCode });
 
-            // 2. Synchronize new name/avatar to all friends' records so it updates for everyone
+            // 2. Synchronize new name/avatar to all friends' records in a SINGLE atomic multi-path write (no N+1 loop)
             try {
-              const friendsSnap = await db.ref(`users/${currentUser.uid}/friends`).once('value');
-              const fList = friendsSnap.val() || {};
-              const friendUids = Object.keys(fList);
-              for (const fUid of friendUids) {
-                db.ref(`users/${fUid}/friends/${currentUser.uid}`).update({
-                  name: newName,
-                  avatar: newAvatar
-                }).catch(() => {});
+              const friendUids = Object.keys(friends || {});
+              const targetUids = friendUids.length > 0
+                ? friendUids
+                : Object.keys((await db.ref(`users/${currentUser.uid}/friends`).once('value')).val() || {});
+              if (targetUids.length > 0) {
+                const multiUpdates: Record<string, string> = {};
+                for (const fUid of targetUids) {
+                  multiUpdates[`users/${fUid}/friends/${currentUser.uid}/name`] = newName;
+                  multiUpdates[`users/${fUid}/friends/${currentUser.uid}/avatar`] = newAvatar;
+                }
+                await db.ref().update(multiUpdates);
               }
             } catch (syncErr) {
               console.warn('Friends sync notice:', syncErr);

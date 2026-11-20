@@ -48,6 +48,7 @@ export const HomeTab: React.FC<Props> = ({
           <img
             src={userAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=agent`}
             alt="avatar"
+            decoding="async"
             className="w-11 h-11 rounded-full object-cover border-2 border-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.4)]"
           />
           <div>

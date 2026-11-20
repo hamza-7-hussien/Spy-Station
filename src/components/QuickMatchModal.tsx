@@ -107,34 +107,48 @@ export const QuickMatchModal: React.FC<Props> = ({
     try {
       setStatusText('scanning');
 
-      // Step A: Search for active quick match queue rooms in Firebase
-      const queueSnap = await db.ref('spy_quick_match_queue').once('value');
-      const queueRooms = queueSnap.val() || {};
+      // Step A: Indexed & bounded query for active quick match queue rooms (prevents full-table scan)
+      const queueSnap = await db
+        .ref('spy_quick_match_queue')
+        .orderByChild('createdAt')
+        .limitToLast(12)
+        .once('value');
+      const queueRooms = (queueSnap.val() || {}) as Record<string, { createdAt?: number }>;
       const now = Date.now();
+
+      const freshQueueCodes = Object.keys(queueRooms).filter(
+        code => now - (queueRooms[code]?.createdAt || 0) < 120000
+      );
 
       let targetCode: string | null = null;
 
-      // Find an existing quick match room created in the last 2 minutes that is still waiting and not full
-      for (const code in queueRooms) {
-        const info = queueRooms[code];
-        if (now - (info.createdAt || 0) < 120000) {
-          // Check actual room
-          const rSnap = await db.ref(`spy_rooms/${code}`).once('value');
-          const rData = rSnap.val();
+      // Batch room lookups in parallel instead of sequential N+1 awaiting inside a loop
+      if (freshQueueCodes.length > 0) {
+        const roomSnaps = await Promise.all(
+          freshQueueCodes.map(code =>
+            db.ref(`spy_rooms/${code}`).once('value').then(s => ({ code, data: s.val() })).catch(() => null)
+          )
+        );
+        for (const item of roomSnaps) {
+          const rData = item?.data;
           if (rData && rData.status === 'waiting') {
-            const players = rData.players || {};
-            const pCount = Object.keys(players).length;
+            const pCount = Object.keys(rData.players || {}).length;
             if (pCount < (rData.maxPlayers || 4)) {
-              targetCode = code;
+              targetCode = item.code;
               break;
             }
           }
         }
       }
 
-      // If no queue room, also check public rooms waiting for players
+      // If no queue room, check indexed public rooms waiting for players (bounded limit)
       if (!targetCode) {
-        const publicSnap = await db.ref('spy_rooms').orderByChild('visibility').equalTo('public').limitToLast(10).once('value');
+        const publicSnap = await db
+          .ref('spy_rooms')
+          .orderByChild('visibility')
+          .equalTo('public')
+          .limitToLast(12)
+          .once('value');
         const pubRooms = publicSnap.val() || {};
         for (const code in pubRooms) {
           const rData = pubRooms[code];
@@ -416,6 +430,8 @@ export const QuickMatchModal: React.FC<Props> = ({
                       <img
                         src={player.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${player.uid}`}
                         alt={player.name}
+                        loading="lazy"
+                        decoding="async"
                         className="w-8 h-8 rounded-full border border-amber-400 shadow-sm"
                       />
                       <span className="text-[10px] font-bold truncate max-w-full">
