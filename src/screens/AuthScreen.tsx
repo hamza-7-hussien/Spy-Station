@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { dictionary } from '../translations';
 import { Language } from '../types';
 import { auth, db, firebase } from '../firebase';
+import firebaseAppletConfig from '../../firebase-applet-config.json';
 import { sound } from '../audio';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
@@ -325,8 +326,68 @@ export const AuthScreen: React.FC<Props> = ({
     return { msg: err.message || t.errActionFailed };
   };
 
-  // Clean, single-step Firebase Google Auth (popup-first for iframe & modern WebView compatibility)
-  const signInWithGoogleAccount = async (loginHint?: string, trackingKey = '__new_google__') => {
+  const triggerNativeAndroidGoogleSignIn = (): Promise<
+    | { status: 'success'; idToken: string }
+    | { status: 'cancel' }
+    | { status: 'error'; code: number; message?: string }
+  > => {
+    return new Promise((resolve) => {
+      const nativeAuth = (
+        window as unknown as {
+          SpyStationNativeAuth?: {
+            isSupported?: () => boolean;
+            signInWithGoogle?: (webClientId: string) => void;
+          };
+        }
+      ).SpyStationNativeAuth;
+
+      if (!nativeAuth?.isSupported?.() || !nativeAuth?.signInWithGoogle) {
+        resolve({ status: 'error', code: -99, message: 'Native auth unavailable' });
+        return;
+      }
+
+      let settled = false;
+      const cleanup = () => {
+        window.removeEventListener('spy-native-google-result', onResult as EventListener);
+        clearTimeout(timeoutId);
+      };
+
+      const onResult = (ev: CustomEvent<{ status?: string; idToken?: string; code?: number; message?: string }>) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const detail = ev.detail || {};
+        if (detail.status === 'success' && detail.idToken) {
+          resolve({ status: 'success', idToken: detail.idToken });
+        } else if (detail.status === 'cancel') {
+          resolve({ status: 'cancel' });
+        } else {
+          resolve({
+            status: 'error',
+            code: typeof detail.code === 'number' ? detail.code : -1,
+            message: detail.message
+          });
+        }
+      };
+
+      const timeoutId = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve({ status: 'cancel' });
+      }, 120000);
+
+      window.addEventListener('spy-native-google-result', onResult as EventListener);
+      nativeAuth.signInWithGoogle(firebaseAppletConfig.oAuthClientId);
+    });
+  };
+
+  // Single-step Google Auth: uses Native Android Account Picker inside APK (choose account -> Continue, zero password/2FA) and Popup/Redirect on Web
+  const signInWithGoogleAccount = async (
+    loginHint?: string,
+    trackingKey = '__new_google__',
+    forceWebFallback = false
+  ) => {
     if (loading || googleLoading) return;
     try {
       sound.playTone(560, 'sine', 0.08);
@@ -337,6 +398,29 @@ export const AuthScreen: React.FC<Props> = ({
       setLoadingAccountKey(trackingKey);
 
       await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+      const nativeAuth = (
+        window as unknown as {
+          SpyStationNativeAuth?: { isSupported?: () => boolean };
+        }
+      ).SpyStationNativeAuth;
+
+      if (!forceWebFallback && nativeAuth?.isSupported?.() && firebaseAppletConfig.oAuthClientId) {
+        const nativeRes = await triggerNativeAndroidGoogleSignIn();
+        if (nativeRes.status === 'success') {
+          const cred = firebase.auth.GoogleAuthProvider.credential(nativeRes.idToken);
+          const credentialResult = await auth.signInWithCredential(cred);
+          if (credentialResult?.user) {
+            await syncUserProfileToDb(credentialResult.user, undefined, 'google');
+            setAccountSheetOpen(false);
+          }
+          return;
+        }
+        if (nativeRes.status === 'cancel') {
+          return;
+        }
+        // If Play Services throws DEVELOPER_ERROR (10) because SHA-1 isn't registered in Firebase yet, fall back to browser/WebView OAuth cleanly
+      }
 
       const provider = new firebase.auth.GoogleAuthProvider();
       provider.addScope('profile');
@@ -375,9 +459,6 @@ export const AuthScreen: React.FC<Props> = ({
         kind: error.code === 'auth/popup-closed-by-user' ? 'info' : 'error',
         showGoogleRetry: mapped.showGoogleRetry
       });
-      if (error.code !== 'auth/popup-closed-by-user') {
-        onToast(mapped.msg, 'danger');
-      }
     } finally {
       setGoogleLoading(false);
       setLoading(false);
@@ -534,6 +615,16 @@ export const AuthScreen: React.FC<Props> = ({
   };
 
   const handleGoogleButtonTap = () => {
+    const nativeAuth = (
+      window as unknown as {
+        SpyStationNativeAuth?: { isSupported?: () => boolean };
+      }
+    ).SpyStationNativeAuth;
+    if (nativeAuth?.isSupported?.()) {
+      signInWithGoogleAccount();
+      return;
+    }
+
     const savedGoogleAccounts = savedAccounts.filter((a) => a.provider === 'google');
     if (savedGoogleAccounts.length > 0 && mode !== 'saved') {
       sound.playClick();
@@ -699,7 +790,7 @@ export const AuthScreen: React.FC<Props> = ({
                 {inlinePasswordAccount && inlinePasswordAccount.uid === primarySaved.uid ? (
                   <form onSubmit={handleInlinePasswordSubmit} className="space-y-3 text-start">
                     <div className="relative">
-                      <Lock className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 inset-inline-start-3.5 pointer-events-none" />
+                      <Lock className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
                       <input
                         type={showInlinePassword ? 'text' : 'password'}
                         value={inlinePassword}
@@ -707,12 +798,12 @@ export const AuthScreen: React.FC<Props> = ({
                         placeholder={copy.passwordPlaceholder}
                         autoFocus
                         required
-                        className="w-full min-h-[48px] py-3 ps-10 pe-12 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
+                        className="w-full min-h-[48px] py-3 ps-11 pe-12 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
                       />
                       <button
                         type="button"
                         onClick={() => setShowInlinePassword((s) => !s)}
-                        className="absolute top-1/2 -translate-y-1/2 inset-inline-end-1.5 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-500 hover:text-sky-400 cursor-pointer"
+                        className="absolute top-1/2 -translate-y-1/2 end-1.5 w-10 h-10 flex items-center justify-center text-slate-400 hover:text-sky-400 cursor-pointer"
                         aria-label="Toggle password visibility"
                       >
                         {showInlinePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -887,7 +978,7 @@ export const AuthScreen: React.FC<Props> = ({
                 <form onSubmit={handleEmailAuthSubmit} className="space-y-3 text-start">
                   {mode === 'signup' && (
                     <div className="relative">
-                      <UserIcon className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 inset-inline-start-3.5 pointer-events-none" />
+                      <UserIcon className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
                       <input
                         type="text"
                         value={username}
@@ -895,25 +986,25 @@ export const AuthScreen: React.FC<Props> = ({
                         placeholder={t.lblUsernamePlaceholder}
                         required
                         maxLength={32}
-                        className="w-full min-h-[48px] py-3 ps-10 pe-4 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
+                        className="w-full min-h-[48px] py-3 ps-11 pe-4 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
                       />
                     </div>
                   )}
 
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 inset-inline-start-3.5 pointer-events-none" />
+                    <Mail className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
                     <input
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder={copy.emailPlaceholder}
                       required
-                      className="w-full min-h-[48px] py-3 ps-10 pe-4 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
+                      className="w-full min-h-[48px] py-3 ps-11 pe-4 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
                     />
                   </div>
 
                   <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 inset-inline-start-3.5 pointer-events-none" />
+                    <Lock className="w-4 h-4 text-slate-500 absolute top-1/2 -translate-y-1/2 start-3.5 pointer-events-none" />
                     <input
                       type={showPassword ? 'text' : 'password'}
                       value={password}
@@ -921,12 +1012,12 @@ export const AuthScreen: React.FC<Props> = ({
                       placeholder={copy.passwordPlaceholder}
                       required
                       minLength={6}
-                      className="w-full min-h-[48px] py-3 ps-10 pe-12 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
+                      className="w-full min-h-[48px] py-3 ps-11 pe-12 rounded-2xl bg-slate-950 border border-slate-800 focus:border-sky-400 text-white text-sm outline-none transition"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((s) => !s)}
-                      className="absolute top-1/2 -translate-y-1/2 inset-inline-end-1.5 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-500 hover:text-sky-400 cursor-pointer"
+                      className="absolute top-1/2 -translate-y-1/2 end-1.5 w-10 h-10 flex items-center justify-center text-slate-400 hover:text-sky-400 cursor-pointer"
                       tabIndex={-1}
                       aria-label="Toggle password visibility"
                     >
@@ -1028,7 +1119,7 @@ export const AuthScreen: React.FC<Props> = ({
               type="button"
               onClick={() => setResetModalOpen(false)}
               aria-label="Close"
-              className="absolute top-3.5 inset-inline-end-3.5 min-w-[44px] min-h-[44px] rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+              className="absolute top-3.5 end-3.5 min-w-[44px] min-h-[44px] rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>

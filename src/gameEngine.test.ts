@@ -22,11 +22,15 @@ import { CategoryKey, GameMode, PlayerData, RoomData } from './types';
 import { CATEGORY_META, getSmartTwinWord, wordsDB } from './words';
 import { CATEGORY_STYLES } from './wordVisuals';
 import {
+  detectClueScriptLanguage,
   evaluatePlayerSuspicionScores,
   generateBotLobbyGreeting,
   generateBotVoteDiscussionLine,
   generateSmartBotClue,
-  generateSmartBotVote
+  generateSmartBotCluePair,
+  generateSmartBotVote,
+  resolveBotClueText,
+  resolveViewerClueLanguage
 } from './aiBot';
 
 function makePlayers(count: number, botIndices: number[] = []): Record<string, PlayerData> {
@@ -557,4 +561,76 @@ describe('Expanded word banks, category emojis, and Turn Timer deadlines', () =>
     assert.deepEqual(step1.room.turnOrder, ['u_0', 'u_1', 'u_2', 'u_3']);
   });
 });
+
+describe('Bilingual AI Bot clue pairs & per-player per-round script detection', () => {
+  it('generates paired Arabic & English single-word clues without leaking secret or duplicate words', () => {
+    const pair = generateSmartBotCluePair({
+      isSpy: false,
+      word: 'Messi',
+      wordAr: 'ميسي',
+      category: 'players',
+      language: 'en',
+      previousClues: ['dribbler', 'مراوغ']
+    });
+    assert.ok(pair.ar.length > 0);
+    assert.ok(pair.en.length > 0);
+    assert.equal(/\s/.test(pair.ar), false);
+    assert.equal(/\s/.test(pair.en), false);
+    assert.match(pair.ar, /[\u0600-\u06FF]/);
+    assert.match(pair.en, /[A-Za-z]/);
+    assert.notEqual(pair.en.toLowerCase(), 'dribbler');
+    assert.notEqual(pair.ar, 'مراوغ');
+  });
+
+  it('detects clue writing language per player per round independently of each player UI language', () => {
+    const botClueR1 = {
+      uid: 'bot_1',
+      isBot: true,
+      text: 'legend',
+      translations: { ar: 'أسطورة', en: 'legend' },
+      round: 1,
+      timestamp: 300
+    };
+    const botClueR2 = {
+      uid: 'bot_1',
+      isBot: true,
+      text: 'trophy',
+      translations: { ar: 'بطولة', en: 'trophy' },
+      round: 2,
+      timestamp: 600
+    };
+
+    const gameChat = {
+      // Round 1: Player A (UI = en) writes Arabic, Player B (UI = ar) writes English
+      c1: { uid: 'u_A', text: 'لاعب', isBot: false, round: 1, timestamp: 100 },
+      c2: { uid: 'u_B', text: 'goal', isBot: false, round: 1, timestamp: 200 },
+      c3: botClueR1,
+      // Round 2: Player A switches to English, Player B switches to Arabic
+      c4: { uid: 'u_A', text: 'striker', isBot: false, round: 2, timestamp: 400 },
+      c5: { uid: 'u_B', text: 'كأس', isBot: false, round: 2, timestamp: 500 },
+      c6: botClueR2
+    };
+
+    assert.equal(detectClueScriptLanguage('أسطورة'), 'ar');
+    assert.equal(detectClueScriptLanguage('legend'), 'en');
+    assert.equal(detectClueScriptLanguage('⏩'), null);
+
+    // Round 1: A wrote Arabic -> sees أسطورة; B wrote English -> sees legend
+    const r1LangA = resolveViewerClueLanguage({ viewerUid: 'u_A', round: 1, gameChat, fallbackLang: 'en' });
+    const r1LangB = resolveViewerClueLanguage({ viewerUid: 'u_B', round: 1, gameChat, fallbackLang: 'ar' });
+    assert.equal(r1LangA, 'ar');
+    assert.equal(r1LangB, 'en');
+    assert.equal(resolveBotClueText(botClueR1, r1LangA), 'أسطورة');
+    assert.equal(resolveBotClueText(botClueR1, r1LangB), 'legend');
+
+    // Round 2: A switched to English -> sees trophy; B switched to Arabic -> sees بطولة
+    const r2LangA = resolveViewerClueLanguage({ viewerUid: 'u_A', round: 2, gameChat, fallbackLang: 'en' });
+    const r2LangB = resolveViewerClueLanguage({ viewerUid: 'u_B', round: 2, gameChat, fallbackLang: 'ar' });
+    assert.equal(r2LangA, 'en');
+    assert.equal(r2LangB, 'ar');
+    assert.equal(resolveBotClueText(botClueR2, r2LangA), 'trophy');
+    assert.equal(resolveBotClueText(botClueR2, r2LangB), 'بطولة');
+  });
+});
+
 

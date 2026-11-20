@@ -76,13 +76,20 @@ export interface RoomData {
     sender: string;
     avatar?: string;
     text: string;
+    translations?: { ar: string; en: string };
+    isBot?: boolean;
     round?: number;
     timestamp?: number;
     drawingStrokes?: Array<Array<{ x: number; y: number }>> | null;
   }>;
   voteChat?: Record<string, { uid?: string; sender: string; avatar?: string; text: string; isBot?: boolean; timestamp?: number }> | null;
   spyChat?: Record<string, { sender: string; text: string }>;
-  speechBubbles?: Record<string, { text: string; timestamp: number }>;
+  speechBubbles?: Record<string, {
+    text: string;
+    translations?: { ar: string; en: string };
+    isBot?: boolean;
+    timestamp: number;
+  }>;
   currentDrawing?: Array<Array<{ x: number; y: number }>> | null;
   lastDrawing?: {
     uid: string;

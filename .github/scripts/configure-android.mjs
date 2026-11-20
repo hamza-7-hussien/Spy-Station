@@ -5,11 +5,17 @@ const versionInfo = JSON.parse(fs.readFileSync('public/version.json', 'utf8'));
 const versionName = versionInfo.version || '2.8.0';
 const buildNum = Number(process.env.BUILD_NUM || 1);
 
-// 1. Update build.gradle versionCode & versionName
+// 1. Update build.gradle versionCode, versionName, and native Google Sign-In dependency
 const gradlePath = 'android/app/build.gradle';
 let gradle = fs.readFileSync(gradlePath, 'utf8');
 gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${buildNum}`);
 gradle = gradle.replace(/versionName\s+"[^"]+"/, `versionName "${versionName}"`);
+if (!gradle.includes('com.google.android.gms:play-services-auth')) {
+  gradle = gradle.replace(
+    'dependencies {',
+    'dependencies {\n    implementation "com.google.android.gms:play-services-auth:21.2.0"'
+  );
+}
 fs.writeFileSync(gradlePath, gradle);
 
 // 2. Add WebRTC voice, network & wake-lock permissions and disable HyperOS/MIUI auto force-dark in AndroidManifest.xml
@@ -55,11 +61,12 @@ if (fs.existsSync(stylesPath)) {
   }
 }
 
-// 4. Write enhanced MainActivity.java for Immersive Sticky Fullscreen, sleek dark OAuth popup Dialog, zero scrollbars/overscroll, clean Chrome UA, and 3P cookies
+// 4. Write enhanced MainActivity.java with Native Android Google Account Picker, Immersive Sticky Fullscreen, sleek dark OAuth popup Dialog, and 3P cookies
 const mainActivityPath = 'android/app/src/main/java/com/spystation/game/MainActivity.java';
 const mainActivityJava = `package com.spystation.game;
 
 import android.app.Dialog;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.net.Uri;
@@ -73,6 +80,7 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
@@ -89,8 +97,81 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes;
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.common.api.CommonStatusCodes;
+import com.google.android.gms.tasks.Task;
+import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
+    private static final int RC_GOOGLE_SIGN_IN = 9001;
+    private GoogleSignInClient googleSignInClient;
+
+    private void emitNativeGoogleResult(JSONObject payload) {
+        final WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+        if (webView == null) return;
+        final String js = "window.dispatchEvent(new CustomEvent('spy-native-google-result', { detail: " + payload.toString() + " }));";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
+    public class SpyStationNativeAuth {
+        @JavascriptInterface
+        public boolean isSupported() {
+            return true;
+        }
+
+        @JavascriptInterface
+        public void signInWithGoogle(final String webClientId) {
+            runOnUiThread(() -> {
+                try {
+                    if (webClientId == null || webClientId.trim().isEmpty()) {
+                        JSONObject err = new JSONObject();
+                        err.put("status", "error");
+                        err.put("code", -1);
+                        err.put("message", "Missing Web OAuth Client ID");
+                        emitNativeGoogleResult(err);
+                        return;
+                    }
+
+                    GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                        .requestIdToken(webClientId.trim())
+                        .requestEmail()
+                        .requestProfile()
+                        .build();
+
+                    googleSignInClient = GoogleSignIn.getClient(MainActivity.this, gso);
+                    // Sign out cached Play Services choice so the native Android account picker always lists device accounts
+                    googleSignInClient.signOut().addOnCompleteListener(MainActivity.this, task -> {
+                        try {
+                            Intent signInIntent = googleSignInClient.getSignInIntent();
+                            startActivityForResult(signInIntent, RC_GOOGLE_SIGN_IN);
+                        } catch (Exception launchEx) {
+                            try {
+                                JSONObject err = new JSONObject();
+                                err.put("status", "error");
+                                err.put("code", -2);
+                                err.put("message", String.valueOf(launchEx.getMessage()));
+                                emitNativeGoogleResult(err);
+                            } catch (Exception ignored) {}
+                        }
+                    });
+                } catch (Exception ex) {
+                    try {
+                        JSONObject err = new JSONObject();
+                        err.put("status", "error");
+                        err.put("code", -3);
+                        err.put("message", String.valueOf(ex.getMessage()));
+                        emitNativeGoogleResult(err);
+                    } catch (Exception ignored) {}
+                }
+            });
+        }
+    }
+
     private String buildCleanChromeUserAgent(String rawUa) {
         if (rawUa == null || rawUa.isEmpty()) return rawUa;
         return rawUa
@@ -124,6 +205,57 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == RC_GOOGLE_SIGN_IN) {
+            try {
+                Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
+                GoogleSignInAccount account = task.getResult(ApiException.class);
+                String idToken = account != null ? account.getIdToken() : null;
+                if (idToken != null && !idToken.isEmpty()) {
+                    JSONObject ok = new JSONObject();
+                    ok.put("status", "success");
+                    ok.put("idToken", idToken);
+                    ok.put("email", account.getEmail() != null ? account.getEmail() : "");
+                    emitNativeGoogleResult(ok);
+                } else {
+                    JSONObject err = new JSONObject();
+                    err.put("status", "error");
+                    err.put("code", -4);
+                    err.put("message", "No Google ID token returned");
+                    emitNativeGoogleResult(err);
+                }
+            } catch (ApiException apiEx) {
+                int code = apiEx.getStatusCode();
+                try {
+                    if (code == CommonStatusCodes.CANCELED
+                        || code == GoogleSignInStatusCodes.SIGN_IN_CANCELLED
+                        || code == 12501) {
+                        JSONObject canceled = new JSONObject();
+                        canceled.put("status", "cancel");
+                        emitNativeGoogleResult(canceled);
+                    } else {
+                        JSONObject err = new JSONObject();
+                        err.put("status", "error");
+                        err.put("code", code);
+                        err.put("message", String.valueOf(apiEx.getMessage()));
+                        emitNativeGoogleResult(err);
+                    }
+                } catch (Exception ignored) {}
+            } catch (Exception ex) {
+                try {
+                    JSONObject err = new JSONObject();
+                    err.put("status", "error");
+                    err.put("code", -5);
+                    err.put("message", String.valueOf(ex.getMessage()));
+                    emitNativeGoogleResult(err);
+                } catch (Exception ignored) {}
+            }
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         applyImmersiveFullscreen();
@@ -131,6 +263,7 @@ public class MainActivity extends BridgeActivity {
         final WebView webView = getBridge().getWebView();
         if (webView == null) return;
 
+        webView.addJavascriptInterface(new SpyStationNativeAuth(), "SpyStationNativeAuth");
         webView.setBackgroundColor(Color.parseColor("#030712"));
         webView.setVerticalScrollBarEnabled(false);
         webView.setHorizontalScrollBarEnabled(false);

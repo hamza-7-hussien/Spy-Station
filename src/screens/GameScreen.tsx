@@ -11,6 +11,7 @@ import { getEffectiveTurnSeconds } from '../gameEngine';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
 import { QuickVoiceControls } from '../components/QuickVoiceControls';
 import { VoiceUserState } from '../types';
+import { resolveBotClueText, resolveViewerClueLanguage } from '../aiBot';
 import {
   Clock,
   Mic,
@@ -76,11 +77,14 @@ export const GameScreen: React.FC<Props> = ({
   onLeaveRoom
 }) => {
   const [clueInput, setClueInput] = useState('');
+  const [clueError, setClueError] = useState<string | null>(null);
   const [spyInput, setSpyInput] = useState('');
   const [isMuted, setIsMuted] = useState(sound.isMuted());
   const [isBgmMuted, setIsBgmMuted] = useState(sound.isBgmMuted());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [speechBubbles, setSpeechBubbles] = useState<Record<string, { text: string; timestamp: number }>>({});
+  const [speechBubbles, setSpeechBubbles] = useState<
+    Record<string, { text: string; translations?: { ar?: string; en?: string }; isBot?: boolean; timestamp: number }>
+  >({});
   const [nowTs, setNowTs] = useState(() => Date.now() + serverTimeOffsetMs);
   const lastPulseSecondRef = useRef<number>(-1);
   const bubbleCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,6 +109,12 @@ export const GameScreen: React.FC<Props> = ({
 
   const currentRound = room.round || 1;
   const effectiveTurnDuration = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
+  const viewerClueLang = resolveViewerClueLanguage({
+    viewerUid: currentUserUid,
+    round: currentRound,
+    gameChat: room.gameChat,
+    fallbackLang: lang
+  });
 
   useEffect(() => {
     setNowTs(Date.now() + serverTimeOffsetMs);
@@ -179,6 +189,7 @@ export const GameScreen: React.FC<Props> = ({
   useEffect(() => {
     if (!isMyTurn) {
       setClueInput('');
+      setClueError(null);
     }
   }, [isMyTurn, turnIndex, currentRound]);
 
@@ -187,14 +198,18 @@ export const GameScreen: React.FC<Props> = ({
     if (!isMyTurn) return;
 
     if (myPlayer.isSilenced) {
-      return onToast(t.msgSilenced, 'danger');
+      setClueError(t.msgSilenced);
+      onToast(t.msgSilenced, 'danger');
+      return;
     }
 
     const clean = clueInput.trim();
     if (!clean) return;
 
     if (/\s/.test(clean)) {
-      return onToast(t.errOneWordOnly, 'danger');
+      setClueError(t.errOneWordOnly);
+      onToast(t.errOneWordOnly, 'danger');
+      return;
     }
 
     if (!isSpy) {
@@ -204,7 +219,9 @@ export const GameScreen: React.FC<Props> = ({
         (secretWordEn && clean.toLowerCase() === secretWordEn) ||
         (secretWordAr && clean === secretWordAr)
       ) {
-        return onToast(t.errCannotTypeSecretWord, 'danger');
+        setClueError(t.errCannotTypeSecretWord);
+        onToast(t.errCannotTypeSecretWord, 'danger');
+        return;
       }
     } else if (isChameleonSpy) {
       const decoyEn = (myPlayer.chameleonWord || '').trim().toLowerCase();
@@ -213,10 +230,13 @@ export const GameScreen: React.FC<Props> = ({
         (decoyEn && clean.toLowerCase() === decoyEn) ||
         (decoyAr && clean === decoyAr)
       ) {
-        return onToast(t.errCannotTypeSecretWord, 'danger');
+        setClueError(t.errCannotTypeSecretWord);
+        onToast(t.errCannotTypeSecretWord, 'danger');
+        return;
       }
     }
 
+    setClueError(null);
     sendSpeechBubble(clean);
     onSendGameClue(clean, currentRound, turnIndex);
     setClueInput('');
@@ -491,7 +511,7 @@ export const GameScreen: React.FC<Props> = ({
                 {bubble && (
                   <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-in zoom-in-75 duration-200">
                     <div className="relative px-2.5 py-1 rounded-2xl bg-white text-slate-950 text-[11px] font-black shadow-xl border-2 border-sky-400 text-center max-w-[160px] break-words leading-tight">
-                      {bubble.text}
+                      {resolveBotClueText(bubble, viewerClueLang)}
                       <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-white rotate-45 border-r-2 border-b-2 border-sky-400" />
                     </div>
                   </div>
@@ -602,7 +622,10 @@ export const GameScreen: React.FC<Props> = ({
                   type="text"
                   disabled={!!myPlayer.isSilenced}
                   value={clueInput}
-                  onChange={e => setClueInput(e.target.value)}
+                  onChange={e => {
+                    setClueInput(e.target.value);
+                    if (clueError) setClueError(null);
+                  }}
                   placeholder={
                     myPlayer.isSilenced
                       ? t.msgSilenced
@@ -619,6 +642,9 @@ export const GameScreen: React.FC<Props> = ({
                   <span>{t.btnSend || 'Send'}</span>
                 </button>
               </div>
+              {clueError && (
+                <p className="text-[11px] font-bold text-rose-400 px-1 pt-0.5">{clueError}</p>
+              )}
             </form>
           ) : (
             <div className="py-2 text-center text-xs text-slate-400 font-bold flex items-center justify-center gap-2">

@@ -31,7 +31,6 @@ import { VotingScreen } from './screens/VotingScreen';
 import { GameOverScreen } from './screens/GameOverScreen';
 import { RoundAnnounceModal } from './screens/RoundAnnounceModal';
 import { BottomNav } from './components/BottomNav';
-import { TopNotification } from './components/TopNotification';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { InviteFriendsModal } from './components/InviteFriendsModal';
 import { RankModal } from './components/RankModal';
@@ -42,7 +41,7 @@ import { QuickMatchModal } from './components/QuickMatchModal';
 import { friendCodeCache, publicRoomsCache, userProfileCache } from './utils/cache';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
 import {
-  generateSmartBotClue,
+  generateSmartBotCluePair,
   generateSmartBotVote,
   generateUniqueBotName
 } from './aiBot';
@@ -71,12 +70,13 @@ function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, u
   return out;
 }
 
-const CURRENT_APP_VERSION = '2.9.1';
+const CURRENT_APP_VERSION = '2.9.2';
 const ROUND_ANNOUNCE_MS = 2400;
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => {
-    return (localStorage.getItem('spy_station_lang') as Language) || 'ar';
+    const saved = localStorage.getItem('spy_station_lang') as Language | null;
+    return saved && ['en', 'ar', 'es', 'fr', 'de'].includes(saved) ? saved : 'en';
   });
 
   // Mandatory update check: seed current version on fresh visit so new players aren't blocked
@@ -175,13 +175,6 @@ export default function App() {
     setActiveEjection(null);
   }, []);
 
-  // Toast
-  const [toast, setToast] = useState<{
-    message: string;
-    type: 'normal' | 'danger' | 'success';
-  } | null>(null);
-
-  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roundAnnounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const roomListenerRef = useRef<(() => void) | null>(null);
   const annListenerRef = useRef<(() => void) | null>(null);
@@ -223,17 +216,8 @@ export default function App() {
 
   const t = dictionary[lang];
 
-  const showToast = (message: string, type: 'normal' | 'danger' | 'success' = 'normal') => {
-    if (type === 'danger') sound.playChime([[380, 0, 0.12], [300, 90, 0.18]], 'triangle');
-    else if (type === 'success') sound.playChime([[600, 0, 0.1], [880, 90, 0.18]], 'sine');
-    else sound.playTone(540, 'sine', 0.1);
-
-    setToast({ message, type });
-    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
-    toastTimeoutRef.current = setTimeout(() => {
-      setToast(null);
-    }, 3500);
-  };
+  // In-game floating top notifications are disabled per user preference
+  const showToast = (_message: string, _type: 'normal' | 'danger' | 'success' = 'normal') => {};
 
   const voice = useVoiceChat({
     roomCode: currentRoomCode || '',
@@ -313,10 +297,8 @@ export default function App() {
         }
       })
       .catch(err => {
-        const msg = err?.message;
-        if (msg) {
+        if (err?.message) {
           console.warn('Redirect sign-in notice:', err);
-          setToast({ message: msg, type: 'danger' });
         }
       });
 
@@ -1144,8 +1126,14 @@ export default function App() {
         const latestSpeaker = latest.players?.[currentSpeakerUid];
         const isBotSpy = (latest.spies || []).includes(currentSpeakerUid);
 
-        const prevClues = Object.values(latest.gameChat || {}).map(c => c.text || '');
-        const smartClue = generateSmartBotClue({
+        const prevClues: string[] = [];
+        Object.values(latest.gameChat || {}).forEach(c => {
+          if (c?.text) prevClues.push(c.text);
+          if (c?.translations?.ar) prevClues.push(c.translations.ar);
+          if (c?.translations?.en) prevClues.push(c.translations.en);
+        });
+
+        const cluePair = generateSmartBotCluePair({
           isSpy: isBotSpy,
           word: latest.word || '',
           wordAr: latest.wordAr || '',
@@ -1157,15 +1145,10 @@ export default function App() {
           chameleonWordAr: latestSpeaker?.chameleonWordAr
         });
 
-        const singleWordClue =
-          (smartClue || '')
-            .trim()
-            .split(/\s+/)[0]
-            .replace(/[،,.:;!?"'()[\]{}<>\\/]/g, '')
-            .trim() || (lang === 'ar' ? 'معروف' : 'known');
-
         await db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).set({
-          text: singleWordClue,
+          text: cluePair.en,
+          translations: { ar: cluePair.ar, en: cluePair.en },
+          isBot: true,
           timestamp: firebase.database.ServerValue.TIMESTAMP
         });
         await db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
@@ -1175,7 +1158,9 @@ export default function App() {
             latestSpeaker?.avatar ||
             speaker?.avatar ||
             `https://api.dicebear.com/7.x/bottts/svg?seed=${currentSpeakerUid}`,
-          text: singleWordClue,
+          text: cluePair.en,
+          translations: { ar: cluePair.ar, en: cluePair.en },
+          isBot: true,
           round: targetRound,
           timestamp: firebase.database.ServerValue.TIMESTAMP
         });
@@ -1476,16 +1461,10 @@ export default function App() {
     // On disconnect remove
     playerRef.onDisconnect().remove();
 
-    // Announcement listener
-    if (annListenerRef.current) annListenerRef.current();
-    const annRef = db.ref(`spy_rooms/${cleanCode}/announcement`);
-    annRef.on('value', snap => {
-      const ann = snap.val();
-      if (ann && ann.msg && ann.timestamp && Date.now() - ann.timestamp < 3500) {
-        showToast(ann.msg, ann.type);
-      }
-    });
-    annListenerRef.current = () => annRef.off();
+    if (annListenerRef.current) {
+      annListenerRef.current();
+      annListenerRef.current = null;
+    }
 
     // Main room data listener
     if (roomListenerRef.current) roomListenerRef.current();
@@ -2022,7 +2001,6 @@ export default function App() {
       <>
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
-        <TopNotification toast={toast} />
         <AuthScreen
           lang={lang}
           onToggleLanguage={() => setLang(l => (l === 'ar' ? 'en' : 'ar'))}
@@ -2046,7 +2024,6 @@ export default function App() {
       <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative">
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
-        <TopNotification toast={toast} />
         <CreateRoomScreen
           lang={lang}
           initialCategory={createInitialCategory}
@@ -2093,7 +2070,6 @@ export default function App() {
       <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative selection:bg-sky-500/30">
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
-        <TopNotification toast={toast} />
 
         {/* Modals for In-Room */}
         <InviteFriendsModal
@@ -2180,6 +2156,7 @@ export default function App() {
                 sender: senderName,
                 avatar: senderAvatar,
                 text: word,
+                isBot: false,
                 round: targetRound,
                 timestamp: firebase.database.ServerValue.TIMESTAMP
               });
@@ -2385,7 +2362,6 @@ export default function App() {
     <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col overflow-hidden bg-[#030712] relative selection:bg-sky-500/30">
       <div className="stars-overlay" />
       <OfflineIndicator lang={lang} />
-      <TopNotification toast={toast} />
 
       <RankModal
         lang={lang}

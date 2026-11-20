@@ -65,7 +65,7 @@ export const RankModal: React.FC<Props> = ({ lang, xp, isOpen, onClose }) => {
       >
         <button
           onClick={onClose}
-          className="absolute top-4 inset-inline-end-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
+          className="absolute top-4 end-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
         >
           <X className="w-5 h-5" />
         </button>

@@ -4,6 +4,7 @@ import { Language } from '../types';
 import { MessageSquare, X, Clock } from 'lucide-react';
 import { sound } from '../audio';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import { resolveBotClueText, resolveViewerClueLanguage } from '../aiBot';
 
 interface ClueEntry {
   uid?: string;
@@ -12,6 +13,11 @@ interface ClueEntry {
   text: string;
   round?: number;
   timestamp?: number;
+  translations?: {
+    ar?: string;
+    en?: string;
+  };
+  isBot?: boolean;
 }
 
 interface Props {
@@ -115,71 +121,81 @@ export const CluesHistoryModal: React.FC<Props> = ({
               </div>
             </div>
           ) : (
-            rounds.map(roundNum => (
-              <div key={roundNum} className="space-y-2.5">
-                <div className="flex items-center gap-3">
-                  <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
-                  <span className="px-3 py-1 rounded-full bg-sky-950/80 border border-sky-400/40 text-sky-300 font-heading font-black text-xs uppercase tracking-wider shadow-sm">
-                    {lang === 'ar' ? `الجولة ${roundNum}` : `Round ${roundNum}`}
-                  </span>
-                  <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
-                </div>
+            rounds.map(roundNum => {
+              const roundViewerLang = resolveViewerClueLanguage({
+                viewerUid: currentUserUid,
+                round: roundNum,
+                gameChat,
+                fallbackLang: lang
+              });
 
-                <div className="space-y-2">
-                  {groupedByRound[roundNum].map((clue, idx) => {
-                    const isMe = clue.uid === currentUserUid;
-                    const timeStr = clue.timestamp
-                      ? new Date(clue.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : '';
+              return (
+                <div key={roundNum} className="space-y-2.5">
+                  <div className="flex items-center gap-3">
+                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
+                    <span className="px-3 py-1 rounded-full bg-sky-950/80 border border-sky-400/40 text-sky-300 font-heading font-black text-xs uppercase tracking-wider shadow-sm">
+                      {lang === 'ar' ? `الجولة ${roundNum}` : `Round ${roundNum}`}
+                    </span>
+                    <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent via-sky-500/30 to-transparent" />
+                  </div>
 
-                    return (
-                      <div
-                        key={clue.id || idx}
-                        className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
-                          isMe
-                            ? 'bg-sky-950/40 border-sky-500/40 shadow-[0_0_15px_rgba(56,189,248,0.15)]'
-                            : 'bg-slate-950/70 border-slate-800'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <img
-                            src={clue.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${clue.uid || clue.sender}`}
-                            alt={clue.sender}
-                            loading="lazy"
-                            decoding="async"
-                            className={`w-9 h-9 rounded-full object-cover border shrink-0 ${
-                              isMe ? 'border-sky-400 ring-2 ring-sky-400/30' : 'border-slate-700'
-                            }`}
-                          />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-heading font-black text-xs text-white truncate">
-                                {clue.sender}
-                              </span>
-                              {isMe && (
-                                <span className="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-400 border border-sky-400/40 text-[9px] font-bold">
-                                  {t.lblYou || (lang === 'ar' ? 'أنت' : 'You')}
+                  <div className="space-y-2">
+                    {groupedByRound[roundNum].map((clue, idx) => {
+                      const isMe = clue.uid === currentUserUid;
+                      const displayClueText = resolveBotClueText(clue, roundViewerLang);
+                      const timeStr = clue.timestamp
+                        ? new Date(clue.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : '';
+
+                      return (
+                        <div
+                          key={clue.id || idx}
+                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                            isMe
+                              ? 'bg-sky-950/40 border-sky-500/40 shadow-[0_0_15px_rgba(56,189,248,0.15)]'
+                              : 'bg-slate-950/70 border-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <img
+                              src={clue.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${clue.uid || clue.sender}`}
+                              alt={clue.sender}
+                              loading="lazy"
+                              decoding="async"
+                              className={`w-9 h-9 rounded-full object-cover border shrink-0 ${
+                                isMe ? 'border-sky-400 ring-2 ring-sky-400/30' : 'border-slate-700'
+                              }`}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-heading font-black text-xs text-white truncate">
+                                  {clue.sender}
                                 </span>
+                                {isMe && (
+                                  <span className="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-400 border border-sky-400/40 text-[9px] font-bold">
+                                    {t.lblYou || (lang === 'ar' ? 'أنت' : 'You')}
+                                  </span>
+                                )}
+                              </div>
+                              {timeStr && (
+                                <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  <span>{timeStr}</span>
+                                </div>
                               )}
                             </div>
-                            {timeStr && (
-                              <div className="text-[10px] text-slate-500 font-mono flex items-center gap-1">
-                                <Clock className="w-2.5 h-2.5" />
-                                <span>{timeStr}</span>
-                              </div>
-                            )}
+                          </div>
+
+                          <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-sky-400/40 text-sky-200 text-xs sm:text-sm font-black tracking-wide shadow-inner max-w-[200px] break-words text-center">
+                            "{displayClueText}"
                           </div>
                         </div>
-
-                        <div className="px-3.5 py-1.5 rounded-xl bg-slate-900/90 border border-sky-400/40 text-sky-200 text-xs sm:text-sm font-black tracking-wide shadow-inner max-w-[200px] break-words text-center">
-                          "{clue.text}"
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

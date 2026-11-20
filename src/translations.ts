@@ -12,8 +12,8 @@ export interface LanguageMeta {
 }
 
 export const SUPPORTED_LANGUAGES: LanguageMeta[] = [
-  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: 'AR', dir: 'rtl', label: 'اللغة' },
   { code: 'en', name: 'English', nativeName: 'English', flag: 'EN', dir: 'ltr', label: 'Language' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: 'AR', dir: 'rtl', label: 'اللغة' },
   { code: 'es', name: 'Spanish', nativeName: 'Español', flag: 'ES', dir: 'ltr', label: 'Idioma' },
   { code: 'fr', name: 'French', nativeName: 'Français', flag: 'FR', dir: 'ltr', label: 'Langue' },
   { code: 'de', name: 'German', nativeName: 'Deutsch', flag: 'DE', dir: 'ltr', label: 'Sprache' }

@@ -5,6 +5,7 @@ import {
   normalizeArabicText,
   resolveWordAssociation
 } from './aiBotKnowledge';
+import { translateBotClueWord } from './aiBotCluePairs';
 
 const ARABIC_BOT_NAMES = [
   'فارس', 'زياد', 'مريم', 'طارق', 'ندى', 'يوسف', 'كريم', 'نور',
@@ -45,6 +46,70 @@ export function generateUniqueBotName(
   return `${fallbackBase} ${nextNum}`;
 }
 
+export function detectClueScriptLanguage(text: string): 'ar' | 'en' | null {
+  const raw = (text || '').trim();
+  if (!raw || raw.includes('⏩')) return null;
+  const arMatches = raw.match(/[\u0600-\u06FF]/g) || [];
+  const enMatches = raw.match(/[A-Za-z]/g) || [];
+  if (arMatches.length === 0 && enMatches.length === 0) return null;
+  return arMatches.length >= enMatches.length ? 'ar' : 'en';
+}
+
+export interface ChatClueLike {
+  uid?: string;
+  text?: string;
+  round?: number;
+  timestamp?: number;
+  isBot?: boolean;
+  translations?: {
+    ar?: string;
+    en?: string;
+  };
+}
+
+export function resolveViewerClueLanguage(params: {
+  viewerUid: string;
+  round?: number;
+  gameChat?: Record<string, ChatClueLike>;
+  fallbackLang?: Language;
+}): 'ar' | 'en' {
+  const { viewerUid, round, gameChat, fallbackLang = 'en' } = params;
+  const entries = Object.values(gameChat || {})
+    .filter(c => c && c.uid === viewerUid && !c.isBot && !c.uid?.startsWith('bot_'))
+    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+  if (typeof round === 'number') {
+    const currentRoundEntries = entries.filter(c => (c.round || 1) === round);
+    for (let i = currentRoundEntries.length - 1; i >= 0; i--) {
+      const detected = detectClueScriptLanguage(currentRoundEntries[i].text || '');
+      if (detected) return detected;
+    }
+
+    const priorEntries = entries.filter(c => (c.round || 1) < round);
+    for (let i = priorEntries.length - 1; i >= 0; i--) {
+      const detected = detectClueScriptLanguage(priorEntries[i].text || '');
+      if (detected) return detected;
+    }
+  } else {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const detected = detectClueScriptLanguage(entries[i].text || '');
+      if (detected) return detected;
+    }
+  }
+
+  return fallbackLang === 'ar' ? 'ar' : 'en';
+}
+
+export function resolveBotClueText(
+  entry: { text?: string; translations?: { ar?: string; en?: string } } | null | undefined,
+  targetLang: 'ar' | 'en'
+): string {
+  if (!entry) return '';
+  const translated = entry.translations?.[targetLang];
+  if (translated && translated.trim()) return translated;
+  return entry.text || '';
+}
+
 export const SPY_CAMOUFLAGE_CLUES = {
   ar: ['مشهور', 'معروف', 'محبوب', 'قديم', 'حديث', 'مميز', 'كلاسيكي', 'مألوف', 'منتشر', 'رائع', 'أساسي', 'بارز', 'ممتع'],
   en: ['famous', 'popular', 'classic', 'common', 'known', 'essential', 'iconic', 'special', 'familiar', 'modern', 'notable', 'prominent', 'standard']
@@ -75,6 +140,18 @@ function toSingleWord(raw: string, isAr: boolean): string {
     .replace(/[،,.:;!?"'()[\]{}<>\\/]/g, '')
     .trim();
   return clean || (isAr ? 'معروف' : 'known');
+}
+
+function buildCluePair(candidate: string, sourceIsAr: boolean): { ar: string; en: string } {
+  const single = toSingleWord(candidate, sourceIsAr);
+  if (sourceIsAr) {
+    const ar = single;
+    const en = toSingleWord(translateBotClueWord(ar, 'en'), false);
+    return { ar, en };
+  }
+  const en = single;
+  const ar = toSingleWord(translateBotClueWord(en, 'ar'), true);
+  return { ar, en };
 }
 
 function pickSmartSpyClue(
@@ -112,7 +189,13 @@ function pickSmartSpyClue(
   const baseCamo = SPY_CAMOUFLAGE_CLUES[isAr ? 'ar' : 'en'];
   const combined = [...contextualCandidates, ...bridges, ...baseCamo];
 
-  const available = combined.filter(c => !usedClues.has(normalizeArabicText(toSingleWord(c, isAr))));
+  const available = combined.filter(c => {
+    const pair = buildCluePair(c, isAr);
+    return (
+      !usedClues.has(normalizeArabicText(pair.ar)) &&
+      !usedClues.has(normalizeArabicText(pair.en))
+    );
+  });
   if (available.length > 0) {
     const topSlice = contextualCandidates.length > 0
       ? available.slice(0, Math.max(2, contextualCandidates.length))
@@ -122,6 +205,99 @@ function pickSmartSpyClue(
   }
 
   return isAr ? 'معروف' : 'popular';
+}
+
+export function generateSmartBotCluePair(params: {
+  isSpy: boolean;
+  gameMode?: GameMode;
+  chameleonWord?: string;
+  chameleonWordAr?: string;
+  word: string;
+  wordAr: string;
+  category: CategoryKey;
+  language?: Language;
+  previousClues: string[];
+}): { ar: string; en: string; text: string } {
+  const {
+    isSpy,
+    gameMode,
+    chameleonWord,
+    chameleonWordAr,
+    word,
+    wordAr,
+    category,
+    language = 'en',
+    previousClues
+  } = params;
+  const isAr = language === 'ar';
+  const usedClues = new Set<string>();
+  previousClues.forEach(c => {
+    const singleAr = toSingleWord(c, true);
+    const singleEn = toSingleWord(c, false);
+    if (singleAr) usedClues.add(normalizeArabicText(singleAr));
+    if (singleEn) usedClues.add(normalizeArabicText(singleEn));
+  });
+
+  const isChameleonSpy = isSpy && gameMode === 'chameleon' && !!(chameleonWord || chameleonWordAr);
+
+  if (isSpy && !isChameleonSpy) {
+    const picked = pickSmartSpyClue(category, previousClues, usedClues, isAr);
+    const pair = buildCluePair(picked, isAr);
+    return {
+      ...pair,
+      text: isAr ? pair.ar : pair.en
+    };
+  }
+
+  const effectiveWordEn = isChameleonSpy ? (chameleonWord || '') : (word || '');
+  const effectiveWordAr = isChameleonSpy ? (chameleonWordAr || '') : (wordAr || '');
+  const cleanEn = effectiveWordEn.toLowerCase().trim();
+  const normAr = normalizeArabicText(effectiveWordAr);
+  const forbiddenEn = (word || '').toLowerCase().trim();
+  const forbiddenAr = normalizeArabicText(wordAr || '');
+
+  const isForbiddenNormalized = (norm: string): boolean => {
+    if (!norm || usedClues.has(norm)) return true;
+    if (norm === cleanEn || norm === normAr || norm === forbiddenEn || norm === forbiddenAr) return true;
+    if (cleanEn && (cleanEn.includes(norm) || norm.includes(cleanEn))) return true;
+    if (normAr && (normAr.includes(norm) || norm.includes(normAr))) return true;
+    if (forbiddenEn && (forbiddenEn.includes(norm) || norm.includes(forbiddenEn))) return true;
+    if (forbiddenAr && (forbiddenAr.includes(norm) || norm.includes(forbiddenAr))) return true;
+    return false;
+  };
+
+  const pickValidPairFromPool = (pool: string[], poolIsAr: boolean): { ar: string; en: string } | null => {
+    const validPairs = pool
+      .map(candidate => buildCluePair(candidate, poolIsAr))
+      .filter(pair => {
+        const nAr = normalizeArabicText(pair.ar);
+        const nEn = normalizeArabicText(pair.en);
+        return !isForbiddenNormalized(nAr) && !isForbiddenNormalized(nEn);
+      });
+
+    if (validPairs.length === 0) return null;
+    return validPairs[Math.floor(Math.random() * validPairs.length)];
+  };
+
+  const directMatch = resolveWordAssociation(effectiveWordEn, effectiveWordAr);
+  if (directMatch) {
+    const pair = pickValidPairFromPool(isAr ? directMatch.ar : directMatch.en, isAr);
+    if (pair) return { ...pair, text: isAr ? pair.ar : pair.en };
+  }
+
+  const clusterClues = inferWordSubClusterClues(effectiveWordEn, effectiveWordAr, category, isAr);
+  const clusterPair = pickValidPairFromPool(clusterClues, isAr);
+  if (clusterPair) return { ...clusterPair, text: isAr ? clusterPair.ar : clusterPair.en };
+
+  const categoryPool = CATEGORY_ASSOCIATIONS[category] || CATEGORY_ASSOCIATIONS.places;
+  const catPair = pickValidPairFromPool(isAr ? categoryPool.ar : categoryPool.en, isAr);
+  if (catPair) return { ...catPair, text: isAr ? catPair.ar : catPair.en };
+
+  return {
+    ar: 'مميز',
+    en: 'special',
+    text: isAr ? 'مميز' : 'special'
+  };
 }
 
 export function generateSmartBotClue(params: {
@@ -135,69 +311,13 @@ export function generateSmartBotClue(params: {
   language: Language;
   previousClues: string[];
 }): string {
-  const {
-    isSpy,
-    gameMode,
-    chameleonWord,
-    chameleonWordAr,
-    word,
-    wordAr,
-    category,
-    language,
-    previousClues
-  } = params;
-  const isAr = language === 'ar';
-  const usedClues = new Set(previousClues.map(c => normalizeArabicText(toSingleWord(c, isAr))));
-
-  const isChameleonSpy = isSpy && gameMode === 'chameleon' && !!(chameleonWord || chameleonWordAr);
-
-  if (isSpy && !isChameleonSpy) {
-    return pickSmartSpyClue(category, previousClues, usedClues, isAr);
-  }
-
-  const effectiveWordEn = isChameleonSpy ? (chameleonWord || '') : (word || '');
-  const effectiveWordAr = isChameleonSpy ? (chameleonWordAr || '') : (wordAr || '');
-  const cleanEn = effectiveWordEn.toLowerCase().trim();
-  const normAr = normalizeArabicText(effectiveWordAr);
-  const forbiddenEn = (word || '').toLowerCase().trim();
-  const forbiddenAr = normalizeArabicText(wordAr || '');
-
-  const isValidClue = (candidate: string): boolean => {
-    const single = toSingleWord(candidate, isAr);
-    const norm = normalizeArabicText(single);
-    if (!norm || usedClues.has(norm)) return false;
-    if (norm === cleanEn || norm === normAr || norm === forbiddenEn || norm === forbiddenAr) return false;
-    if (cleanEn && (cleanEn.includes(norm) || norm.includes(cleanEn))) return false;
-    if (normAr && (normAr.includes(norm) || norm.includes(normAr))) return false;
-    return true;
-  };
-
-  const directMatch = resolveWordAssociation(effectiveWordEn, effectiveWordAr);
-  if (directMatch) {
-    const specificList = (isAr ? directMatch.ar : directMatch.en).filter(isValidClue);
-    if (specificList.length > 0) {
-      return toSingleWord(specificList[Math.floor(Math.random() * specificList.length)], isAr);
-    }
-  }
-
-  const clusterClues = inferWordSubClusterClues(effectiveWordEn, effectiveWordAr, category, isAr).filter(isValidClue);
-  if (clusterClues.length > 0) {
-    return toSingleWord(clusterClues[Math.floor(Math.random() * clusterClues.length)], isAr);
-  }
-
-  const categoryPool = CATEGORY_ASSOCIATIONS[category] || CATEGORY_ASSOCIATIONS.places;
-  const filtered = (isAr ? categoryPool.ar : categoryPool.en).filter(isValidClue);
-  if (filtered.length > 0) {
-    return toSingleWord(filtered[Math.floor(Math.random() * filtered.length)], isAr);
-  }
-
-  return isAr ? 'مميز' : 'special';
+  return generateSmartBotCluePair(params).text;
 }
 
 export function evaluatePlayerSuspicionScores(params: {
   activePlayers: PlayerData[];
   spies: string[];
-  gameChat?: Record<string, { uid?: string; text?: string }>;
+  gameChat?: Record<string, ChatClueLike>;
   word?: string;
   wordAr?: string;
   wordCategory?: CategoryKey;
@@ -224,29 +344,33 @@ export function evaluatePlayerSuspicionScores(params: {
   Object.values(gameChat || {}).forEach(entry => {
     const uid = entry?.uid;
     const raw = (entry?.text || '').trim();
-    if (!uid || scores[uid] === undefined || !raw) return;
+    if (!uid || scores[uid] === undefined || (!raw && !entry?.translations?.ar && !entry?.translations?.en)) return;
 
     playersWithClues.add(uid);
-    const norm = normalizeArabicText(raw);
+    const variants = [raw, entry?.translations?.ar || '', entry?.translations?.en || '']
+      .map(v => v.trim())
+      .filter(Boolean);
+    const normVariants = variants.map(normalizeArabicText);
+    const norm = normVariants[0] || '';
 
-    if (raw.includes('⏩') || /تفويت|pass/i.test(raw)) {
+    if (variants.some(v => v.includes('⏩') || /تفويت|pass/i.test(v))) {
       scores[uid] += 25;
       return;
     }
 
-    if (GENERIC_CAMO_SET.has(norm)) {
+    if (normVariants.some(n => GENERIC_CAMO_SET.has(n))) {
       scores[uid] += 35;
     }
 
-    if (seenClues.has(norm)) {
+    if (normVariants.some(n => seenClues.has(n))) {
       scores[uid] += 25;
     } else {
-      seenClues.add(norm);
+      normVariants.forEach(n => seenClues.add(n));
     }
 
-    if (expectedSet.has(norm)) {
+    if (normVariants.some(n => expectedSet.has(n))) {
       scores[uid] -= 25;
-    } else if (expectedSet.size > 0 && !GENERIC_CAMO_SET.has(norm)) {
+    } else if (expectedSet.size > 0 && !normVariants.some(n => GENERIC_CAMO_SET.has(n))) {
       scores[uid] += spies.includes(uid) ? 18 : 5;
     }
   });
@@ -269,7 +393,7 @@ export function generateSmartBotVote(params: {
   isUndercover?: boolean;
   activePlayers: PlayerData[];
   spies: string[];
-  gameChat?: Record<string, { uid?: string; text?: string }>;
+  gameChat?: Record<string, ChatClueLike>;
   word?: string;
   wordAr?: string;
   wordCategory?: CategoryKey;
@@ -343,7 +467,7 @@ export function generateBotVoteDiscussionLine(params: {
   isUndercover?: boolean;
   targetUid: string;
   activePlayers: PlayerData[];
-  gameChat?: Record<string, { uid?: string; text?: string }>;
+  gameChat?: Record<string, ChatClueLike>;
   lang: Language;
 }): string | null {
   const { botUid, isSpy, isUndercover = false, targetUid, activePlayers, gameChat, lang } = params;
@@ -357,9 +481,13 @@ export function generateBotVoteDiscussionLine(params: {
   if (!target) return null;
 
   const targetName = (target.name || 'Agent').replace(/\s*🤖$/, '');
+  const targetLang: 'ar' | 'en' = lang === 'ar' ? 'ar' : 'en';
   const targetClue = Object.values(gameChat || {})
-    .filter(c => c.uid === targetUid && c.text && !/تفويت|pass/i.test(c.text))
-    .map(c => c.text!)
+    .map(c => resolveBotClueText(c, targetLang))
+    .filter((txt, idx) => {
+      const entry = Object.values(gameChat || {})[idx];
+      return entry?.uid === targetUid && txt && !/تفويت|pass/i.test(txt);
+    })
     .pop();
 
   if (lang === 'ar') {

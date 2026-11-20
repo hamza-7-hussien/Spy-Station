@@ -66,7 +66,7 @@ export const PWAInstallButton: React.FC<Props> = ({ lang, variant = 'prominent',
           <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 shadow-2xl relative text-start">
             <button
               onClick={() => setShowIOSGuide(false)}
-              className="absolute top-4 inset-inline-end-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              className="absolute top-4 end-4 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
             >
               <X className="w-5 h-5" />
             </button>

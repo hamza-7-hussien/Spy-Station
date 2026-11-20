@@ -1,7 +1,7 @@
 {
-  "name": "Spy Station - لعبة الجاسوس في الفضاء",
+  "name": "Spy Station - Who is the Spy?",
   "short_name": "SpyStation",
-  "description": "لعبة الجاسوس التكتيكية التفاعلية متعددة اللاعبين في الفضاء - كشف الجواسيس، تلميحات سرية، وتصويت مباشر",
+  "description": "Multiplayer tactical social deduction game in space with public/private stations, voice chat, clues, voting, and AI bots.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
@@ -13,8 +13,8 @@
   "orientation": "any",
   "background_color": "#030712",
   "theme_color": "#030712",
-  "lang": "ar",
-  "dir": "rtl",
+  "lang": "en",
+  "dir": "ltr",
   "categories": [
     "games",
     "entertainment",
@@ -66,42 +66,42 @@
       "sizes": "720x1280",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Spy Station - شاشة البداية واختيار الفئات واللغات"
+      "label": "Spy Station - Home screen, categories, and language selection"
     },
     {
       "src": "screenshot-gameplay.png",
       "sizes": "720x1280",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Spy Station - الجولة المباشرة وتبادل التلميحات الفضائية"
+      "label": "Spy Station - Live round and tactical space clues"
     },
     {
       "src": "screenshot-voting.png",
       "sizes": "720x1280",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Spy Station - بروتوكول التصويت الطارئ لكشف الجاسوس"
+      "label": "Spy Station - Emergency voting protocol to expose the spy"
     },
     {
       "src": "screenshot-ejection.png",
       "sizes": "720x1280",
       "type": "image/png",
       "form_factor": "narrow",
-      "label": "Spy Station - أنيميشن طرد الجاسوس وحبسه في قفص الليزر"
+      "label": "Spy Station - Spy ejection and laser cage animation"
     },
     {
       "src": "screenshot-desktop.png",
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "Spy Station - واجهة القيادة التكتيكية على شاشات سطح المكتب"
+      "label": "Spy Station - Tactical command interface on desktop"
     }
   ],
   "shortcuts": [
     {
-      "name": "إنشاء محطة جديدة",
-      "short_name": "إنشاء محطة",
-      "description": "بدء جولة جديدة فوراً في محطة فضاء سرية",
+      "name": "Create New Station",
+      "short_name": "Create",
+      "description": "Launch a new secret space station round immediately",
       "url": "./?action=create",
       "icons": [
         {
@@ -112,9 +112,9 @@
       ]
     },
     {
-      "name": "انضمام لمحطة",
-      "short_name": "انضمام",
-      "description": "الانضمام لغرفة أصدقائك بكود المحطة",
+      "name": "Join Station",
+      "short_name": "Join",
+      "description": "Join your friends' station using a room code",
       "url": "./?action=join",
       "icons": [
         {
