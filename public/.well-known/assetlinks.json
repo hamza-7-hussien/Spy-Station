@@ -1,8 +1,18 @@
-[{
-  "relation": ["delegate_permission/common.handle_all_urls"],
-  "target": {
-    "namespace": "android_app",
-    "package_name": "app.vercel.spy_station_sand.twa",
-    "sha256_cert_fingerprints": ["8B:10:9D:23:73:8B:AB:55:BB:AE:84:E2:9E:62:3E:01:3F:DB:FD:66:A3:A2:6A:F8:6A:63:6E:84:B1:ED:9A:46"]
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.spy_station_sand.twa",
+      "sha256_cert_fingerprints": ["8B:10:9D:23:73:8B:AB:55:BB:AE:84:E2:9E:62:3E:01:3F:DB:FD:66:A3:A2:6A:F8:6A:63:6E:84:B1:ED:9A:46"]
+    }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.spystation.game",
+      "sha256_cert_fingerprints": ["BD:45:88:4A:94:EA:7F:2F:81:45:0B:BC:34:FE:07:13:B1:40:F8:9A:03:CD:02:FE:92:AF:46:A2:F7:ED:31:65"]
+    }
   }
-}]
+]
