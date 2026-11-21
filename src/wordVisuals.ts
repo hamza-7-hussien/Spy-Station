@@ -358,3 +358,38 @@ export function getWordImage(
       return null;
   }
 }
+
+/**
+ * Resizes & center-crops an uploaded image file into a compact WebP (256x256)
+ * so category cover thumbnails load fast and fit cleanly in realtime payloads.
+ */
+export function compressImageToWebP(file: File, maxSize = 256): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = maxSize;
+        canvas.height = maxSize;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return resolve((e.target?.result as string) || '');
+        }
+        const minDim = Math.min(img.width, img.height);
+        const startX = (img.width - minDim) / 2;
+        const startY = (img.height - minDim) / 2;
+        ctx.drawImage(img, startX, startY, minDim, minDim, 0, 0, maxSize, maxSize);
+        const webpDataUrl = canvas.toDataURL('image/webp', 0.8);
+        const out = webpDataUrl.startsWith('data:image/webp')
+          ? webpDataUrl
+          : canvas.toDataURL('image/jpeg', 0.8);
+        resolve(out);
+      };
+      img.onerror = reject;
+      img.src = (e.target?.result as string) || '';
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 import { dictionary } from '../translations';
-import { Language, CategoryKey, GameMode } from '../types';
+import { Language, CategoryKey, GameMode, CustomCategory } from '../types';
 import { CATEGORY_META } from '../words';
 import { getMaxAllowedSpies } from '../gameEngine';
 import {
@@ -21,29 +21,37 @@ import {
   Radar,
   Flame,
   Eye,
-  ChevronRight
+  ChevronRight,
+  Crosshair,
+  Layers
 } from 'lucide-react';
 import { sound } from '../audio';
 
 interface Props {
   lang: Language;
   initialCategory?: CategoryKey | 'random';
+  initialCustomCategoryId?: string | null;
+  customCategories?: CustomCategory[];
   isEditing?: boolean;
   initialValues?: {
     visibility?: 'public' | 'private';
     categories?: CategoryKey[];
+    customCategoryIds?: string[];
     gameMode?: GameMode;
     maxPlayers?: number;
     spyCount?: number;
     turnSeconds?: number;
+    allowSpyLastChance?: boolean;
   };
   onConfirm: (config: {
     visibility: 'public' | 'private';
     categories: CategoryKey[];
+    customCategoryIds: string[];
     gameMode: GameMode;
     maxPlayers: number;
     spyCount: number;
     turnSeconds: number;
+    allowSpyLastChance: boolean;
   }) => void;
   onCancel: () => void;
   onToast: (msg: string, type?: 'normal' | 'danger' | 'success') => void;
@@ -52,6 +60,8 @@ interface Props {
 export const CreateRoomScreen: React.FC<Props> = ({
   lang,
   initialCategory = 'players',
+  initialCustomCategoryId = null,
+  customCategories = [],
   isEditing = false,
   initialValues,
   onConfirm,
@@ -66,6 +76,12 @@ export const CreateRoomScreen: React.FC<Props> = ({
   );
 
   const [selectedCategories, setSelectedCategories] = useState<Set<CategoryKey>>(() => {
+    if (isEditing && initialValues) {
+      return new Set(initialValues.categories || []);
+    }
+    if (initialCustomCategoryId) {
+      return new Set<CategoryKey>();
+    }
     if (initialValues?.categories && initialValues.categories.length > 0) {
       return new Set(initialValues.categories);
     }
@@ -73,6 +89,16 @@ export const CreateRoomScreen: React.FC<Props> = ({
       return new Set(allCategoryKeys);
     }
     return new Set([initialCategory as CategoryKey]);
+  });
+
+  const [selectedCustomIds, setSelectedCustomIds] = useState<Set<string>>(() => {
+    if (initialValues?.customCategoryIds && initialValues.customCategoryIds.length > 0) {
+      return new Set(initialValues.customCategoryIds);
+    }
+    if (initialCustomCategoryId) {
+      return new Set([initialCustomCategoryId]);
+    }
+    return new Set<string>();
   });
 
   const initialModeRaw = initialValues?.gameMode as string | undefined;
@@ -87,6 +113,9 @@ export const CreateRoomScreen: React.FC<Props> = ({
   const [maxPlayers, setMaxPlayers] = useState<number>(initialValues?.maxPlayers || 8);
   const [spyCount, setSpyCount] = useState<number>(initialValues?.spyCount || 1);
   const [turnSeconds, setTurnSeconds] = useState<number>(initialValues?.turnSeconds || 20);
+  const [allowSpyLastChance, setAllowSpyLastChance] = useState<boolean>(
+    Boolean(initialValues?.allowSpyLastChance)
+  );
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
 
   // Lock background scroll completely when game modes modal is open
@@ -107,12 +136,24 @@ export const CreateRoomScreen: React.FC<Props> = ({
     sound.playTone(480, 'sine', 0.08);
     const next = new Set(selectedCategories);
     if (next.has(cat)) {
-      if (next.size > 1) next.delete(cat);
+      if (next.size + selectedCustomIds.size > 1) next.delete(cat);
       else onToast(t.errNoCategory, 'danger');
     } else {
       next.add(cat);
     }
     setSelectedCategories(next);
+  };
+
+  const toggleCustomCategory = (catId: string) => {
+    sound.playTone(500, 'sine', 0.08);
+    const next = new Set(selectedCustomIds);
+    if (next.has(catId)) {
+      if (next.size + selectedCategories.size > 1) next.delete(catId);
+      else onToast(t.errNoCategory, 'danger');
+    } else {
+      next.add(catId);
+    }
+    setSelectedCustomIds(next);
   };
 
   const selectAll = () => {
@@ -124,7 +165,8 @@ export const CreateRoomScreen: React.FC<Props> = ({
     e.preventDefault();
     sound.triggerHaptic('medium');
     const cats = Array.from(selectedCategories);
-    if (cats.length === 0) {
+    const customIds = Array.from(selectedCustomIds);
+    if (cats.length === 0 && customIds.length === 0) {
       return onToast(t.errNoCategory, 'danger');
     }
     if (gameMode === 'mole' && (spyCount < 2 || maxPlayers < 5)) {
@@ -133,10 +175,12 @@ export const CreateRoomScreen: React.FC<Props> = ({
     onConfirm({
       visibility,
       categories: cats,
+      customCategoryIds: customIds,
       gameMode,
       maxPlayers,
       spyCount,
-      turnSeconds
+      turnSeconds,
+      allowSpyLastChance
     });
   };
 
@@ -543,6 +587,45 @@ export const CreateRoomScreen: React.FC<Props> = ({
             </div>
           </div>
 
+          {/* 5b. Optional Spy Last-Chance Guess Rule */}
+          <button
+            type="button"
+            onClick={() => {
+              sound.playTone(520, 'sine', 0.08);
+              setAllowSpyLastChance(v => !v);
+            }}
+            className={`w-full p-3.5 rounded-2xl border flex items-center justify-between gap-3 text-start transition cursor-pointer ${
+              allowSpyLastChance
+                ? 'bg-rose-500/15 border-rose-400/60 shadow-[0_0_16px_rgba(244,63,94,0.2)]'
+                : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className={`p-2 rounded-xl shrink-0 ${allowSpyLastChance ? 'bg-rose-500/25 text-rose-300' : 'bg-slate-900 text-slate-400'}`}>
+                <Crosshair className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-bold text-white">
+                  {t.lblAllowSpyLastChance}
+                </div>
+                <div className="text-[11px] text-slate-400 leading-snug mt-0.5">
+                  {t.allowSpyLastChanceDesc}
+                </div>
+              </div>
+            </div>
+            <div
+              className={`w-11 h-6 rounded-full p-0.5 transition shrink-0 ${
+                allowSpyLastChance ? 'bg-rose-500' : 'bg-slate-700'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                  allowSpyLastChance ? (lang === 'ar' ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'
+                }`}
+              />
+            </div>
+          </button>
+
           {/* 6. Categories Multi-Select */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -582,6 +665,54 @@ export const CreateRoomScreen: React.FC<Props> = ({
                 );
               })}
             </div>
+
+            {/* Custom & Community Categories */}
+            {customCategories.length > 0 && (
+              <div className="pt-3 space-y-2">
+                <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{t.customCategoriesSection}</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
+                  {customCategories.map(cCat => {
+                    const isSelected = selectedCustomIds.has(cCat.id);
+                    return (
+                      <button
+                        key={cCat.id}
+                        type="button"
+                        onClick={() => toggleCustomCategory(cCat.id)}
+                        className={`p-2 rounded-2xl border text-start flex items-center gap-2.5 transition cursor-pointer ${
+                          isSelected
+                            ? 'border-sky-400 bg-sky-500/20 text-white shadow-[0_0_12px_rgba(56,189,248,0.25)]'
+                            : 'border-slate-800 bg-slate-950/60 text-slate-300 hover:border-slate-700'
+                        }`}
+                      >
+                        {cCat.image ? (
+                          <img
+                            src={cCat.image}
+                            alt={cCat.name}
+                            loading="lazy"
+                            decoding="async"
+                            referrerPolicy="no-referrer"
+                            className="w-9 h-9 rounded-xl object-cover shrink-0 bg-slate-900"
+                          />
+                        ) : (
+                          <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-base shrink-0">
+                            {cCat.icon || '🎯'}
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-bold truncate">{cCat.name}</div>
+                          <div className="text-[10px] text-slate-400 tabular-nums truncate">
+                            {cCat.words?.length || 0} · {cCat.playCount || 0}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Buttons */}

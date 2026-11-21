@@ -463,6 +463,8 @@ export const GameScreen: React.FC<Props> = ({
         amSpectator={amSpectator}
         displayWord={displayWord || ''}
         wordCategory={room.wordCategory}
+        wordCategoryLabel={room.wordCustomCategoryName}
+        wordCategoryImage={room.wordCustomCategoryImage}
         roomGameMode={room.gameMode}
         fellowSpiesNames={(room.spies || [])
           .filter(sUid => sUid !== currentUserUid)

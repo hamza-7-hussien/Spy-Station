@@ -57,6 +57,18 @@ export const GameOverScreen: React.FC<Props> = ({
           {isCrewWinner ? t.crewWonTitle : t.spiesWonTitle}
         </h2>
 
+        {room.spyGuessResult && (
+          <div
+            className={`px-4 py-2.5 rounded-2xl border text-xs font-bold ${
+              room.spyGuessResult.isCorrect
+                ? 'bg-rose-950/60 border-rose-500/50 text-rose-200'
+                : 'bg-emerald-950/60 border-emerald-500/50 text-emerald-200'
+            }`}
+          >
+            {room.spyGuessResult.isCorrect ? t.spyGuessStolenBadge : t.spyGuessMissedBadge}
+          </div>
+        )}
+
         {/* Revealed Secret Word Card */}
         {(room.word || room.wordAr) && (() => {
           const chameleonSpy = room.gameMode === 'chameleon'
@@ -71,8 +83,23 @@ export const GameOverScreen: React.FC<Props> = ({
               <span className="text-[11px] uppercase tracking-widest text-sky-400 font-bold block">
                 {t.secretWordWas || 'Mission secret word was:'}
               </span>
+              {room.wordCustomCategoryName && (
+                <div className="inline-flex items-center gap-1.5 text-xs font-bold text-purple-300">
+                  {room.wordCustomCategoryImage && (
+                    <img
+                      src={room.wordCustomCategoryImage}
+                      alt={room.wordCustomCategoryName}
+                      loading="lazy"
+                      decoding="async"
+                      referrerPolicy="no-referrer"
+                      className="w-4 h-4 rounded object-cover"
+                    />
+                  )}
+                  <span>{room.wordCustomCategoryName}</span>
+                </div>
+              )}
               <div className="flex items-center justify-center gap-2 flex-wrap">
-                {room.wordCategory && (
+                {!room.wordCustomCategoryName && room.wordCategory && (
                   <span className="text-sm text-sky-300 font-bold">
                     {CATEGORY_STYLES[room.wordCategory]?.icon}
                   </span>

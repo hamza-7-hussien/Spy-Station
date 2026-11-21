@@ -1,4 +1,4 @@
-import { RoomData } from '../types';
+import { CustomCategory, RoomData } from '../types';
 
 interface CacheEntry<T> {
   value: T;
@@ -133,4 +133,11 @@ export const publicRoomsCache = new TtlCache<Record<string, RoomData>>({
   defaultTtlMs: 60 * 1000,
   maxEntries: 4,
   storageKey: 'spy_station_public_rooms_cache_v1'
+});
+
+// 2-minute Stale-While-Revalidate cache for published community & user custom categories
+export const customCategoriesCache = new TtlCache<Record<string, CustomCategory>>({
+  defaultTtlMs: 2 * 60 * 1000,
+  maxEntries: 6,
+  storageKey: 'spy_station_custom_cats_cache_v1'
 });

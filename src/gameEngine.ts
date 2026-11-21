@@ -1,8 +1,10 @@
-import { CategoryKey, GameMode, PlayerData, RoomData } from './types';
+import { CategoryKey, CustomCategoryWord, GameMode, PlayerData, RoomData } from './types';
+import { wordsDB } from './words';
 
 export const DEFAULT_TURN_SECONDS = 20;
 export const RAPID_TURN_SECONDS = 7;
 export const DEFAULT_VOTE_SECONDS = 45;
+export const SPY_GUESS_SECONDS = 15;
 export const EJECTION_CINEMATIC_MS = 5000;
 export const ROUND_GRACE_MS = 2000;
 export const BLACKOUT_DURATION_MS = 3500;
@@ -347,11 +349,83 @@ export function areAllEligibleVotesSubmitted(room: Pick<RoomData, 'players' | 'v
 }
 
 export interface VoteResolutionResult {
-  outcome: 'nobody_ejected' | 'crew_win' | 'spies_win' | 'spy_ejected_continue' | 'innocent_ejected_continue';
+  outcome:
+    | 'nobody_ejected'
+    | 'crew_win'
+    | 'spies_win'
+    | 'spy_last_chance'
+    | 'spy_ejected_continue'
+    | 'innocent_ejected_continue';
   ejectedUid: string | null;
   ejectedName: string | null;
   ejectionPayload: RoomData['ejectionEvent'];
   nextRoomFields: Partial<RoomData>;
+}
+
+export function buildSpyGuessOptions(
+  room: Pick<RoomData, 'word' | 'wordAr' | 'wordCategory' | 'customCategoryWords'>,
+  randomFn: () => number = Math.random
+): CustomCategoryWord[] {
+  const secretEn = (room.word || '').trim();
+  const secretAr = (room.wordAr || secretEn).trim();
+  const secretNorm = secretEn.toLowerCase();
+
+  let pool: CustomCategoryWord[] = [];
+  if (room.customCategoryWords && room.customCategoryWords.length > 0) {
+    pool = room.customCategoryWords;
+  } else {
+    const cat = room.wordCategory && wordsDB[room.wordCategory] ? room.wordCategory : 'players';
+    pool = wordsDB[cat].map(([en, ar]) => ({ en, ar }));
+  }
+
+  const seen = new Set<string>([secretNorm]);
+  const decoys: CustomCategoryWord[] = [];
+  for (const item of shuffleArray(pool, randomFn)) {
+    const en = (item.en || item.ar || '').trim();
+    const ar = (item.ar || en).trim();
+    const key = en.toLowerCase();
+    if (!en || seen.has(key)) continue;
+    seen.add(key);
+    decoys.push({ en, ar });
+    if (decoys.length >= 5) break;
+  }
+
+  return shuffleArray([{ en: secretEn, ar: secretAr }, ...decoys], randomFn);
+}
+
+export function resolveSpyLastChanceGuess(
+  room: RoomData,
+  guessedWordEn: string | null
+): {
+  isCorrect: boolean;
+  winnerTeam: 'spies' | 'crew';
+  nextRoomFields: Partial<RoomData>;
+} {
+  const cleanGuess = (guessedWordEn || '').trim().toLowerCase();
+  const cleanSecret = (room.word || '').trim().toLowerCase();
+  const isCorrect = Boolean(cleanGuess && cleanSecret && cleanGuess === cleanSecret);
+  const winnerTeam: 'spies' | 'crew' = isCorrect ? 'spies' : 'crew';
+  const finalSpies =
+    room.finalSpies && room.finalSpies.length > 0 ? room.finalSpies : room.spies || [];
+
+  return {
+    isCorrect,
+    winnerTeam,
+    nextRoomFields: {
+      status: 'gameover',
+      winnerTeam,
+      finalSpies,
+      finalPlayers: room.finalPlayers || room.players || {},
+      spyGuessCandidateUid: null,
+      spyGuessOptions: null,
+      spyGuessEndsAt: null,
+      spyGuessResult: {
+        spyUid: room.spyGuessCandidateUid || finalSpies[0] || '',
+        guessedWord: guessedWordEn || '',
+        isCorrect
+      }
+    }
+  };
 }
 
 export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): VoteResolutionResult {
@@ -440,6 +514,34 @@ export function resolveVoteOutcome(room: RoomData, now: number = Date.now()): Vo
   if (isEjectedSpy) {
     const updatedSpies = currentSpies.filter(s => s !== ejectedUid);
     if (updatedSpies.length === 0) {
+      if (room.allowSpyLastChance && (room.word || room.wordAr)) {
+        const spyGuessOptions = buildSpyGuessOptions(room);
+        return {
+          outcome: 'spy_last_chance',
+          ejectedUid,
+          ejectedName,
+          ejectionPayload,
+          nextRoomFields: {
+            status: 'spy_guess',
+            finalSpies: currentSpies,
+            finalPlayers: playersObj,
+            players: playersObj,
+            spies: updatedSpies,
+            ejectionEndsAt,
+            ejectionEvent: ejectionPayload,
+            spyGuessCandidateUid: ejectedUid,
+            spyGuessOptions,
+            spyGuessEndsAt: ejectionEndsAt + SPY_GUESS_SECONDS * 1000,
+            spyGuessResult: null,
+            voteTimeLeft: null,
+            voteEndsAt: null,
+            votes: null,
+            voteChat: null,
+            blackoutActive: false
+          }
+        };
+      }
+
       return {
         outcome: 'crew_win',
         ejectedUid,

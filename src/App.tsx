@@ -16,21 +16,26 @@ import {
   FriendEntry,
   FriendRequest,
   RoomInvite,
-  JoinRequest
+  JoinRequest,
+  CustomCategory,
+  CustomCategoryWord,
+  RoomCustomCategorySnapshot
 } from './types';
 import { getCombinedWordList, wordsDB, getSmartTwinWord } from './words';
 import { AuthScreen } from './screens/AuthScreen';
 import { HomeTab } from './screens/HomeTab';
 import { StationsTab } from './screens/StationsTab';
 import { FriendsTab } from './screens/FriendsTab';
+import { CategoriesTab } from './screens/CategoriesTab';
 import { SettingsTab } from './screens/SettingsTab';
 import { CreateRoomScreen } from './screens/CreateRoomScreen';
 import { LobbyScreen } from './screens/LobbyScreen';
 import { GameScreen } from './screens/GameScreen';
 import { VotingScreen } from './screens/VotingScreen';
+import { SpyLastChanceScreen } from './screens/SpyLastChanceScreen';
 import { GameOverScreen } from './screens/GameOverScreen';
 import { RoundAnnounceModal } from './screens/RoundAnnounceModal';
-import { BottomNav } from './components/BottomNav';
+import { BottomNav, NavTabId } from './components/BottomNav';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { InviteFriendsModal } from './components/InviteFriendsModal';
 import { RankModal } from './components/RankModal';
@@ -38,7 +43,12 @@ import { AppBootSkeleton, RoomLobbySkeleton } from './components/Skeletons';
 import { HostJoinApprovalModal } from './components/HostJoinApprovalModal';
 import { ApplicantWaitingApprovalModal } from './components/ApplicantWaitingApprovalModal';
 import { QuickMatchModal } from './components/QuickMatchModal';
-import { friendCodeCache, publicRoomsCache, userProfileCache } from './utils/cache';
+import {
+  customCategoriesCache,
+  friendCodeCache,
+  publicRoomsCache,
+  userProfileCache
+} from './utils/cache';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
 import {
   generateSmartBotCluePair,
@@ -57,6 +67,7 @@ import {
   getEffectiveTurnSeconds,
   getEligibleVoters,
   isBotPlayer,
+  resolveSpyLastChanceGuess,
   resolveVoteOutcome,
   shouldResetGameOverToLobby,
   validateGameStart
@@ -70,7 +81,7 @@ function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, u
   return out;
 }
 
-const CURRENT_APP_VERSION = '2.9.2';
+const CURRENT_APP_VERSION = '3.0.0';
 const ROUND_ANNOUNCE_MS = 2400;
 
 export default function App() {
@@ -96,9 +107,10 @@ export default function App() {
   const [userXp, setUserXp] = useState(0);
 
   // Navigation
-  const [activeTab, setActiveTab] = useState<'home' | 'stations' | 'friends' | 'settings'>('home');
+  const [activeTab, setActiveTab] = useState<NavTabId>('home');
   const [inCreateModal, setInCreateModal] = useState(false);
   const [createInitialCategory, setCreateInitialCategory] = useState<CategoryKey | 'random'>('players');
+  const [createInitialCustomCategoryId, setCreateInitialCustomCategoryId] = useState<string | null>(null);
   const [isEditingRoom, setIsEditingRoom] = useState(false);
 
   // In-room state
@@ -127,6 +139,16 @@ export default function App() {
   const [stationsLimit, setStationsLimit] = useState(12);
   const [hasMoreStations, setHasMoreStations] = useState(false);
 
+  // Custom & Community Categories (indexed + paginated + SWR-cached)
+  const [myCategories, setMyCategories] = useState<CustomCategory[]>([]);
+  const [communityCategories, setCommunityCategories] = useState<CustomCategory[]>(() => {
+    const cached = customCategoriesCache.get('latest');
+    return cached ? Object.values(cached).filter(c => c.isPublished) : [];
+  });
+  const [customCatsLoading, setCustomCatsLoading] = useState(true);
+  const [communityCatLimit, setCommunityCatLimit] = useState(12);
+  const [hasMoreCommunityCats, setHasMoreCommunityCats] = useState(false);
+
   // Modals
   const [rankModalOpen, setRankModalOpen] = useState(false);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -138,7 +160,7 @@ export default function App() {
       sound.setBgmMode('ambient');
       return;
     }
-    if (roomData.status === 'playing' || roomData.status === 'voting') {
+    if (roomData.status === 'playing' || roomData.status === 'voting' || roomData.status === 'spy_guess') {
       sound.setBgmMode('suspense');
     } else {
       sound.setBgmMode('ambient');
@@ -180,10 +202,12 @@ export default function App() {
   const annListenerRef = useRef<(() => void) | null>(null);
   const turnIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voteIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const spyGuessIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const watchdogIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isTurnTickRunningRef = useRef(false);
   const isVoteTickRunningRef = useRef(false);
   const isResolvingVotesRef = useRef(false);
+  const isResolvingSpyGuessRef = useRef(false);
   const advancingTurnKeyRef = useRef<string | null>(null);
   const [serverTimeOffsetMs, setServerTimeOffsetMs] = useState(0);
   const serverTimeOffsetRef = useRef(0);
@@ -684,6 +708,88 @@ export default function App() {
     };
   }, [currentUser, currentRoomCode, activeTab, stationsLimit]);
 
+  // Indexed, paginated, SWR-cached Custom & Community Categories listener
+  useEffect(() => {
+    if (!currentUser) {
+      setMyCategories([]);
+      setCommunityCategories([]);
+      return;
+    }
+
+    const cached = customCategoriesCache.get('latest');
+    if (cached && Object.keys(cached).length > 0) {
+      const vals = Object.values(cached);
+      setMyCategories(vals.filter(c => c.creatorUid === currentUser.uid).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+      setCommunityCategories(vals.filter(c => c.isPublished).sort((a, b) => (b.playCount || 0) - (a.playCount || 0) || (b.createdAt || 0) - (a.createdAt || 0)));
+      setCustomCatsLoading(false);
+    } else {
+      setCustomCatsLoading(true);
+    }
+
+    const myQuery = db
+      .ref('customCategories')
+      .orderByChild('creatorUid')
+      .equalTo(currentUser.uid);
+
+    const communityQuery = db
+      .ref('customCategories')
+      .orderByChild('isPublished')
+      .equalTo(true)
+      .limitToLast(communityCatLimit);
+
+    const updateCacheFromList = (items: CustomCategory[]) => {
+      const prevMap = customCategoriesCache.get('latest') || {};
+      const nextMap: Record<string, CustomCategory> = { ...prevMap };
+      items.forEach(item => {
+        if (item?.id) nextMap[item.id] = item;
+      });
+      customCategoriesCache.set('latest', nextMap);
+    };
+
+    const onMyCats = (snap: firebase.database.DataSnapshot) => {
+      const raw = snap.val() || {};
+      const list: CustomCategory[] = Object.entries(raw).map(([id, v]) => ({
+        ...(v as CustomCategory),
+        id
+      }));
+      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setMyCategories(list);
+      setCustomCatsLoading(false);
+      updateCacheFromList(list);
+    };
+
+    const onCommunityCats = (snap: firebase.database.DataSnapshot) => {
+      const raw = snap.val() || {};
+      const entries = Object.entries(raw);
+      const list: CustomCategory[] = entries.map(([id, v]) => ({
+        ...(v as CustomCategory),
+        id
+      }));
+      list.sort((a, b) => (b.playCount || 0) - (a.playCount || 0) || (b.createdAt || 0) - (a.createdAt || 0));
+      setHasMoreCommunityCats(entries.length >= communityCatLimit);
+      setCommunityCategories(list);
+      setCustomCatsLoading(false);
+      updateCacheFromList(list);
+    };
+
+    myQuery.on('value', onMyCats, () => setCustomCatsLoading(false));
+    communityQuery.on('value', onCommunityCats, () => setCustomCatsLoading(false));
+
+    return () => {
+      myQuery.off('value', onMyCats);
+      communityQuery.off('value', onCommunityCats);
+    };
+  }, [currentUser, communityCatLimit]);
+
+  const allAvailableCustomCategories = React.useMemo(() => {
+    const map = new Map<string, CustomCategory>();
+    myCategories.forEach(c => map.set(c.id, c));
+    communityCategories.forEach(c => {
+      if (!map.has(c.id)) map.set(c.id, c);
+    });
+    return Array.from(map.values());
+  }, [myCategories, communityCategories]);
+
   // Handle Host watchdog
   const isHost = !!(roomData && currentUser && roomData.hostUid === currentUser.uid);
 
@@ -754,6 +860,14 @@ export default function App() {
             lastDrawing: null,
             blackoutActive: false,
             blackoutEndsAt: null,
+            spyGuessCandidateUid: null,
+            spyGuessOptions: null,
+            spyGuessEndsAt: null,
+            spyGuessResult: null,
+            activeCustomCategoryId: null,
+            customCategoryWords: null,
+            wordCustomCategoryName: null,
+            wordCustomCategoryImage: null,
             winnerTeam: null,
             announcement: {
               msg: t.gameAbortedNotEnoughPlayers,
@@ -873,6 +987,8 @@ export default function App() {
 
       if (resolution.outcome === 'nobody_ejected') {
         broadcastAnnouncement(t.annNobodyEjected, 'normal');
+      } else if (resolution.outcome === 'spy_last_chance') {
+        broadcastAnnouncement(t.annSpyLastChance.replace('{name}', ejectedName), 'danger');
       } else if (resolution.outcome === 'crew_win') {
         broadcastAnnouncement(t.annCrewWins.replace('{name}', ejectedName), 'success');
         awardXP(playersObj, latestRoom.spies || [], 'crew');
@@ -891,7 +1007,39 @@ export default function App() {
     }
   };
 
-  // Host-authoritative Turn & Vote Countdown Watchdog (synchronized to Firebase server time)
+  // Submit Spy Last-Chance Guess (supports both human spy click and host timeout/bot automation)
+  const handleSubmitSpyGuess = async (guessedWordEn: string | null) => {
+    if (!currentRoomCode || isResolvingSpyGuessRef.current) return;
+    isResolvingSpyGuessRef.current = true;
+    try {
+      const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
+      const latestRoom = snap.val() as RoomData | null;
+      if (!latestRoom || latestRoom.status !== 'spy_guess') return;
+
+      const resolved = resolveSpyLastChanceGuess(latestRoom, guessedWordEn);
+      await db
+        .ref(`spy_rooms/${currentRoomCode}`)
+        .update(toFirebaseUpdatePayload(resolved.nextRoomFields as Record<string, unknown>));
+
+      const playersObj = (latestRoom.finalPlayers || latestRoom.players || {}) as Record<string, PlayerData>;
+      const spiesList = latestRoom.finalSpies || latestRoom.spies || [];
+      const spyUid = latestRoom.spyGuessCandidateUid || '';
+      const spyName = (spyUid && playersObj[spyUid]?.name) || 'Spy';
+
+      if (resolved.isCorrect) {
+        broadcastAnnouncement(t.annSpyStoleWin.replace('{name}', spyName), 'danger');
+      } else {
+        broadcastAnnouncement(t.annSpyMissedWin.replace('{name}', spyName), 'success');
+      }
+      awardXP(playersObj, spiesList, resolved.winnerTeam);
+    } catch {
+      // allow retry safely
+    } finally {
+      isResolvingSpyGuessRef.current = false;
+    }
+  };
+
+  // Host-authoritative Turn, Vote & Spy-Guess Countdown Watchdog (synchronized to Firebase server time)
   useEffect(() => {
     if (!isHost || !currentRoomCode || !roomData) {
       if (turnIntervalRef.current) {
@@ -901,6 +1049,10 @@ export default function App() {
       if (voteIntervalRef.current) {
         clearInterval(voteIntervalRef.current);
         voteIntervalRef.current = null;
+      }
+      if (spyGuessIntervalRef.current) {
+        clearInterval(spyGuessIntervalRef.current);
+        spyGuessIntervalRef.current = null;
       }
       isTurnTickRunningRef.current = false;
       isVoteTickRunningRef.current = false;
@@ -1006,6 +1158,31 @@ export default function App() {
       isVoteTickRunningRef.current = false;
     }
 
+    // Spy Last-Chance Guess timeout watchdog
+    if (roomData.status === 'spy_guess') {
+      if (!spyGuessIntervalRef.current) {
+        spyGuessIntervalRef.current = setInterval(async () => {
+          if (isResolvingSpyGuessRef.current) return;
+          try {
+            const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
+            const room = snap.val() as RoomData | null;
+            if (!room || room.status !== 'spy_guess') return;
+            const now = getServerNow();
+            if (room.spyGuessEndsAt && now >= room.spyGuessEndsAt) {
+              await handleSubmitSpyGuess(null);
+            }
+          } catch {
+            // ignore transient errors
+          }
+        }, 450);
+      }
+    } else {
+      if (spyGuessIntervalRef.current) {
+        clearInterval(spyGuessIntervalRef.current);
+        spyGuessIntervalRef.current = null;
+      }
+    }
+
     return () => {
       if (turnIntervalRef.current) {
         clearInterval(turnIntervalRef.current);
@@ -1014,6 +1191,10 @@ export default function App() {
       if (voteIntervalRef.current) {
         clearInterval(voteIntervalRef.current);
         voteIntervalRef.current = null;
+      }
+      if (spyGuessIntervalRef.current) {
+        clearInterval(spyGuessIntervalRef.current);
+        spyGuessIntervalRef.current = null;
       }
       isTurnTickRunningRef.current = false;
       isVoteTickRunningRef.current = false;
@@ -1259,6 +1440,41 @@ export default function App() {
     return () => clearTimeout(resolveTimer);
   }, [allEligibleVotesSubmitted, currentRoomCode]);
 
+  // Bot Spy Last-Chance Guess Automation
+  useEffect(() => {
+    if (!isHost || !currentRoomCode || roomData?.status !== 'spy_guess') return;
+    const candidateUid = roomData.spyGuessCandidateUid;
+    if (!candidateUid) return;
+    const candidatePlayer = roomData.players?.[candidateUid] || roomData.finalPlayers?.[candidateUid];
+    if (!isBotPlayer(candidatePlayer, candidateUid)) return;
+    const options = roomData.spyGuessOptions || [];
+    if (options.length === 0) return;
+
+    const serverNow = getServerNow();
+    const waitEjection = roomData.ejectionEndsAt && roomData.ejectionEndsAt > serverNow
+      ? roomData.ejectionEndsAt - serverNow
+      : 0;
+    const delayMs = waitEjection + 1800;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      const realWord = (roomData.word || '').trim().toLowerCase();
+      const match = options.find(o => o.en.trim().toLowerCase() === realWord);
+      const decoys = options.filter(o => o.en.trim().toLowerCase() !== realWord);
+      const shouldGuessRight = match && Math.random() < 0.35;
+      const picked = shouldGuessRight ? match : (decoys[Math.floor(Math.random() * decoys.length)] || options[0]);
+      if (picked) {
+        handleSubmitSpyGuess(picked.en);
+      }
+    }, delayMs);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isHost, currentRoomCode, roomData?.status, roomData?.spyGuessCandidateUid, roomData?.ejectionEndsAt]);
+
   const broadcastAnnouncement = (msg: string, type: 'normal' | 'danger' | 'success' = 'normal') => {
     if (!currentRoomCode) return;
     db.ref(`spy_rooms/${currentRoomCode}/announcement`).set({
@@ -1292,8 +1508,8 @@ export default function App() {
         return;
       }
 
-      // If game is in progress (playing or voting), enter immediately as spectator without interrupting host
-      if (room.status === 'playing' || room.status === 'voting') {
+      // If game is in progress (playing, voting, or spy_guess), enter immediately as spectator without interrupting host
+      if (room.status === 'playing' || room.status === 'voting' || room.status === 'spy_guess') {
         joinRoom(cleanCode);
         return;
       }
@@ -1454,7 +1670,7 @@ export default function App() {
           currentUser.photoURL ||
           `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
         joinedAt: firebase.database.ServerValue.TIMESTAMP,
-        isSpectator: !!(roomStatus === 'playing' || roomStatus === 'voting')
+        isSpectator: !!(roomStatus === 'playing' || roomStatus === 'voting' || roomStatus === 'spy_guess')
       });
     }
 
@@ -1521,6 +1737,14 @@ export default function App() {
           ejectionEndsAt: null,
           blackoutActive: false,
           blackoutEndsAt: null,
+          spyGuessCandidateUid: null,
+          spyGuessOptions: null,
+          spyGuessEndsAt: null,
+          spyGuessResult: null,
+          activeCustomCategoryId: null,
+          customCategoryWords: null,
+          wordCustomCategoryName: null,
+          wordCustomCategoryImage: null,
           completedTurnsThisRound: null,
           players: resetPlayers
         }).catch(() => {});
@@ -1573,6 +1797,14 @@ export default function App() {
             ejectionEndsAt: null,
             blackoutActive: false,
             blackoutEndsAt: null,
+            spyGuessCandidateUid: null,
+            spyGuessOptions: null,
+            spyGuessEndsAt: null,
+            spyGuessResult: null,
+            activeCustomCategoryId: null,
+            customCategoryWords: null,
+            wordCustomCategoryName: null,
+            wordCustomCategoryImage: null,
             completedTurnsThisRound: null,
             winnerTeam: null,
             announcement: {
@@ -1749,6 +1981,14 @@ export default function App() {
                 ejectionEndsAt: null,
                 blackoutActive: false,
                 blackoutEndsAt: null,
+                spyGuessCandidateUid: null,
+                spyGuessOptions: null,
+                spyGuessEndsAt: null,
+                spyGuessResult: null,
+                activeCustomCategoryId: null,
+                customCategoryWords: null,
+                wordCustomCategoryName: null,
+                wordCustomCategoryImage: null,
                 completedTurnsThisRound: null,
                 players: resetPlayers
               });
@@ -1786,6 +2026,14 @@ export default function App() {
               ejectionEndsAt: null,
               blackoutActive: false,
               blackoutEndsAt: null,
+              spyGuessCandidateUid: null,
+              spyGuessOptions: null,
+              spyGuessEndsAt: null,
+              spyGuessResult: null,
+              activeCustomCategoryId: null,
+              customCategoryWords: null,
+              wordCustomCategoryName: null,
+              wordCustomCategoryImage: null,
               completedTurnsThisRound: null,
               winnerTeam: null,
               announcement: {
@@ -1802,22 +2050,96 @@ export default function App() {
     }
   };
 
+  // Save / Delete Custom Category CRUD Handlers
+  const handleSaveCustomCategory = async (payload: {
+    id?: string;
+    name: string;
+    icon: string;
+    image?: string;
+    words: CustomCategoryWord[];
+    isPublished: boolean;
+  }) => {
+    if (!currentUser) return;
+    const catRef = payload.id
+      ? db.ref(`customCategories/${payload.id}`)
+      : db.ref('customCategories').push();
+    const catId = payload.id || catRef.key;
+    if (!catId) return;
+
+    const existing = payload.id ? myCategories.find(c => c.id === payload.id) : undefined;
+    const now = Date.now();
+    const record: Record<string, unknown> = {
+      id: catId,
+      name: payload.name,
+      creatorUid: currentUser.uid,
+      creatorName: profileNameRef.current || currentUser.displayName || 'Agent',
+      icon: payload.icon || '🎯',
+      image: payload.image || null,
+      words: payload.words,
+      isPublished: payload.isPublished,
+      playCount: existing?.playCount ?? 0,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now
+    };
+    await catRef.set(record);
+  };
+
+  const handleDeleteCustomCategory = async (catId: string) => {
+    if (!currentUser || !catId) return;
+    await db.ref(`customCategories/${catId}`).remove();
+    const cached = customCategoriesCache.get('latest');
+    if (cached && cached[catId]) {
+      const next = { ...cached };
+      delete next[catId];
+      customCategoriesCache.set('latest', next);
+    }
+  };
+
   // Create room flow
   const handleConfirmRoomConfig = async (config: {
     visibility: 'public' | 'private';
     categories: CategoryKey[];
+    customCategoryIds: string[];
     gameMode: GameMode;
     maxPlayers: number;
     spyCount: number;
     turnSeconds: number;
+    allowSpyLastChance: boolean;
   }) => {
     if (!currentUser) return;
     setInCreateModal(false);
+    setCreateInitialCustomCategoryId(null);
+
+    const snapshotMap: Record<string, RoomCustomCategorySnapshot> = {};
+    (config.customCategoryIds || []).forEach(cId => {
+      const found =
+        allAvailableCustomCategories.find(c => c.id === cId) ||
+        roomData?.customCategorySnapshot?.[cId];
+      if (found && found.words?.length) {
+        snapshotMap[cId] = {
+          id: cId,
+          name: found.name,
+          icon: found.icon || '🎯',
+          ...(found.image ? { image: found.image } : {}),
+          words: found.words
+        };
+      }
+    });
 
     if (isEditingRoom && currentRoomCode) {
-      await db.ref(`spy_rooms/${currentRoomCode}`).update({
-        ...config
-      });
+      await db.ref(`spy_rooms/${currentRoomCode}`).update(
+        toFirebaseUpdatePayload({
+          visibility: config.visibility,
+          categories: config.categories,
+          customCategoryIds: config.customCategoryIds,
+          customCategorySnapshot: Object.keys(snapshotMap).length > 0 ? snapshotMap : null,
+          gameMode: config.gameMode,
+          maxPlayers: config.maxPlayers,
+          spyCount: config.spyCount,
+          turnSeconds: config.turnSeconds,
+          allowSpyLastChance: Boolean(config.allowSpyLastChance)
+        })
+      );
       setIsEditingRoom(false);
       showToast(t.msgSettingsSaved, 'success');
     } else {
@@ -1834,21 +2156,26 @@ export default function App() {
         isBot: false
       };
 
-      await db.ref(`spy_rooms/${code}`).set({
-        status: 'waiting',
-        originalHostUid: currentUser.uid,
-        hostUid: currentUser.uid,
-        categories: config.categories,
-        spyCount: config.spyCount,
-        maxPlayers: config.maxPlayers,
-        turnSeconds: config.turnSeconds,
-        visibility: config.visibility,
-        gameMode: config.gameMode,
-        createdAt: firebase.database.ServerValue.TIMESTAMP,
-        players: {
-          [currentUser.uid]: initialHostPlayer
-        }
-      });
+      await db.ref(`spy_rooms/${code}`).set(
+        toFirebaseUpdatePayload({
+          status: 'waiting',
+          originalHostUid: currentUser.uid,
+          hostUid: currentUser.uid,
+          categories: config.categories,
+          customCategoryIds: config.customCategoryIds,
+          customCategorySnapshot: Object.keys(snapshotMap).length > 0 ? snapshotMap : null,
+          allowSpyLastChance: Boolean(config.allowSpyLastChance),
+          spyCount: config.spyCount,
+          maxPlayers: config.maxPlayers,
+          turnSeconds: config.turnSeconds,
+          visibility: config.visibility,
+          gameMode: config.gameMode,
+          createdAt: firebase.database.ServerValue.TIMESTAMP,
+          players: {
+            [currentUser.uid]: initialHostPlayer
+          }
+        })
+      );
 
       joinRoom(code);
     }
@@ -1927,14 +2254,74 @@ export default function App() {
         return;
       }
 
-      const cats =
-        roomData.categories && roomData.categories.length > 0
-          ? roomData.categories
-          : (['players'] as CategoryKey[]);
-      const chosenCat = cats[Math.floor(Math.random() * cats.length)];
-      const wordList = wordsDB[chosenCat] || wordsDB.players;
-      const selectedPair = wordList[Math.floor(Math.random() * wordList.length)];
-      const chameleonPair = getSmartTwinWord(selectedPair, chosenCat || 'players', wordList);
+      const builtInCats = roomData.categories || [];
+      const customIds = roomData.customCategoryIds || [];
+      const customPool: RoomCustomCategorySnapshot[] = [];
+      customIds.forEach(cId => {
+        const snapDeck = roomData.customCategorySnapshot?.[cId];
+        const liveDeck = allAvailableCustomCategories.find(c => c.id === cId);
+        const resolvedDeck = liveDeck || snapDeck;
+        if (resolvedDeck && resolvedDeck.words && resolvedDeck.words.length > 0) {
+          customPool.push({
+            id: cId,
+            name: resolvedDeck.name,
+            icon: resolvedDeck.icon || '🎯',
+            ...(resolvedDeck.image ? { image: resolvedDeck.image } : {}),
+            words: resolvedDeck.words
+          });
+        }
+      });
+
+      type PoolChoice =
+        | { kind: 'builtin'; cat: CategoryKey }
+        | { kind: 'custom'; deck: RoomCustomCategorySnapshot };
+      const combinedPool: PoolChoice[] = [
+        ...builtInCats.map(cat => ({ kind: 'builtin' as const, cat })),
+        ...customPool.map(deck => ({ kind: 'custom' as const, deck }))
+      ];
+      if (combinedPool.length === 0) {
+        combinedPool.push({ kind: 'builtin', cat: 'players' });
+      }
+
+      const pickedChoice = combinedPool[Math.floor(Math.random() * combinedPool.length)];
+
+      let chosenCat: CategoryKey = 'players';
+      let selectedPair: [string, string];
+      let chameleonPair: [string, string];
+      let customPatch: {
+        activeCustomCategoryId: string | null;
+        customCategoryWords: CustomCategoryWord[] | null;
+        wordCustomCategoryName: string | null;
+        wordCustomCategoryImage: string | null;
+      };
+
+      if (pickedChoice.kind === 'custom') {
+        const deck = pickedChoice.deck;
+        const deckPairs: [string, string][] = deck.words.map(w => [w.en, w.ar || w.en]);
+        selectedPair = deckPairs[Math.floor(Math.random() * deckPairs.length)] || ['Mission', 'مهمة'];
+        chameleonPair = getSmartTwinWord(selectedPair, 'players', deckPairs);
+        customPatch = {
+          activeCustomCategoryId: deck.id,
+          customCategoryWords: deck.words,
+          wordCustomCategoryName: deck.name,
+          wordCustomCategoryImage: deck.image || null
+        };
+        // Atomically increment community deck play count (+1)
+        db.ref(`customCategories/${deck.id}/playCount`)
+          .transaction(cur => (Number(cur) || 0) + 1)
+          .catch(() => {});
+      } else {
+        chosenCat = pickedChoice.cat;
+        const wordList = wordsDB[chosenCat] || wordsDB.players;
+        selectedPair = wordList[Math.floor(Math.random() * wordList.length)];
+        chameleonPair = getSmartTwinWord(selectedPair, chosenCat || 'players', wordList);
+        customPatch = {
+          activeCustomCategoryId: null,
+          customCategoryWords: null,
+          wordCustomCategoryName: null,
+          wordCustomCategoryImage: null
+        };
+      }
 
       const setup = computeInitialGameSetup({
         room: roomData,
@@ -1956,6 +2343,11 @@ export default function App() {
         wordAr: selectedPair[1] || 'محطة الفضاء',
         wordCategory: chosenCat || 'players',
         wordImage: null,
+        ...customPatch,
+        spyGuessCandidateUid: null,
+        spyGuessOptions: null,
+        spyGuessEndsAt: null,
+        spyGuessResult: null,
         spies: setup.spies,
         undercoverUid: setup.undercoverUid,
         round: 1,
@@ -2027,19 +2419,23 @@ export default function App() {
         <CreateRoomScreen
           lang={lang}
           initialCategory={createInitialCategory}
+          initialCustomCategoryId={createInitialCustomCategoryId}
+          customCategories={allAvailableCustomCategories}
           isEditing={isEditingRoom}
           initialValues={
             isEditingRoom && roomData
               ? {
                   visibility: roomData.visibility,
                   categories: roomData.categories,
+                  customCategoryIds: roomData.customCategoryIds,
                   gameMode:
                     (roomData.gameMode as string) === 'silent' || (roomData.gameMode as string) === 'blackout'
                       ? 'normal'
                       : roomData.gameMode,
                   maxPlayers: roomData.maxPlayers,
                   spyCount: roomData.spyCount,
-                  turnSeconds: roomData.turnSeconds
+                  turnSeconds: roomData.turnSeconds,
+                  allowSpyLastChance: roomData.allowSpyLastChance
                 }
               : undefined
           }
@@ -2047,6 +2443,7 @@ export default function App() {
           onCancel={() => {
             setInCreateModal(false);
             setIsEditingRoom(false);
+            setCreateInitialCustomCategoryId(null);
           }}
           onToast={showToast}
         />
@@ -2063,6 +2460,7 @@ export default function App() {
   if (currentRoomCode && roomData) {
     const isPlaying = roomData.status === 'playing';
     const isVoting = roomData.status === 'voting';
+    const isSpyGuess = roomData.status === 'spy_guess';
     const isGameOver = roomData.status === 'gameover';
     const myPlayer = (roomData.players || {})[currentUser.uid];
 
@@ -2196,6 +2594,14 @@ export default function App() {
               });
             }}
           />
+        ) : isSpyGuess ? (
+          <SpyLastChanceScreen
+            lang={lang}
+            currentUserUid={currentUser.uid}
+            room={roomData}
+            serverTimeOffsetMs={serverTimeOffsetMs}
+            onSubmitGuess={opt => handleSubmitSpyGuess(opt.en)}
+          />
         ) : isGameOver && myPlayer?.postGame !== 'inLobby' ? (
           <GameOverScreen
             lang={lang}
@@ -2234,6 +2640,14 @@ export default function App() {
                   ejectionEndsAt: null,
                   blackoutActive: false,
                   blackoutEndsAt: null,
+                  spyGuessCandidateUid: null,
+                  spyGuessOptions: null,
+                  spyGuessEndsAt: null,
+                  spyGuessResult: null,
+                  activeCustomCategoryId: null,
+                  customCategoryWords: null,
+                  wordCustomCategoryName: null,
+                  wordCustomCategoryImage: null,
                   completedTurnsThisRound: null,
                   players: reset
                 });
@@ -2408,6 +2822,7 @@ export default function App() {
           onOpenQuickMatch={() => setQuickMatchModalOpen(true)}
           onOpenCreateRoom={cat => {
             setCreateInitialCategory(cat);
+            setCreateInitialCustomCategoryId(null);
             setIsEditingRoom(false);
             setInCreateModal(true);
           }}
@@ -2495,6 +2910,27 @@ export default function App() {
           onDismissInvite={async fromUid => {
             await db.ref(`users/${currentUser.uid}/roomInvites/${fromUid}`).remove();
           }}
+        />
+      )}
+
+      {activeTab === 'categories' && (
+        <CategoriesTab
+          lang={lang}
+          currentUserUid={currentUser.uid}
+          currentUserName={profileName}
+          myCategories={myCategories}
+          communityCategories={communityCategories}
+          isLoading={customCatsLoading}
+          hasMoreCommunity={hasMoreCommunityCats}
+          onLoadMoreCommunity={() => setCommunityCatLimit(l => l + 12)}
+          onSaveCategory={handleSaveCustomCategory}
+          onDeleteCategory={handleDeleteCustomCategory}
+          onPlayCategory={catId => {
+            setCreateInitialCustomCategoryId(catId);
+            setIsEditingRoom(false);
+            setInCreateModal(true);
+          }}
+          onToast={showToast}
         />
       )}
 

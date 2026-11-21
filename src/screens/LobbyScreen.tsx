@@ -99,12 +99,14 @@ export const LobbyScreen: React.FC<Props> = ({
   );
 
   const cats = room.categories || [];
-  const catNames = cats
-    .map(c => {
+  const customSnaps = Object.values(room.customCategorySnapshot || {});
+  const catNames = [
+    ...cats.map(c => {
       const meta = CATEGORY_META[c];
       return meta ? t[meta.key as keyof typeof t] || c : c;
-    })
-    .join(' + ');
+    }),
+    ...customSnaps.map(s => s.name)
+  ].join(' + ');
 
   const pendingRequests = Object.values(room.joinRequests || {}).filter(
     r => r && r.status === 'pending'
@@ -179,17 +181,24 @@ export const LobbyScreen: React.FC<Props> = ({
           <div className="text-xs font-bold text-purple-300">
             {t.categoryPrefix} {catNames || t.catRandom}
           </div>
-          <div className="text-[11px] font-bold text-slate-400">
-            {t.modePrefix}{' '}
-            {room.gameMode === 'mole'
-              ? t.modeMoleNetwork
-              : room.gameMode === 'chameleon'
-              ? t.modeChameleon
-              : room.gameMode === 'rapid'
-              ? t.modeRapid
-              : room.gameMode === 'undercover'
-              ? t.modeUndercover
-              : t.modeNormal}
+          <div className="text-[11px] font-bold text-slate-400 flex flex-wrap items-center justify-center gap-2">
+            <span>
+              {t.modePrefix}{' '}
+              {room.gameMode === 'mole'
+                ? t.modeMoleNetwork
+                : room.gameMode === 'chameleon'
+                ? t.modeChameleon
+                : room.gameMode === 'rapid'
+                ? t.modeRapid
+                : room.gameMode === 'undercover'
+                ? t.modeUndercover
+                : t.modeNormal}
+            </span>
+            {room.allowSpyLastChance && (
+              <span className="text-rose-300">
+                · {t.lblAllowSpyLastChance}
+              </span>
+            )}
           </div>
         </div>
 

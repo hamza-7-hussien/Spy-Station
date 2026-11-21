@@ -22,6 +22,33 @@ export type CategoryKey =
   | 'jobs'
   | 'singers';
 
+export interface CustomCategoryWord {
+  en: string;
+  ar: string;
+}
+
+export interface CustomCategory {
+  id: string;
+  name: string;
+  creatorUid: string;
+  creatorName: string;
+  image?: string;
+  icon?: string;
+  words: CustomCategoryWord[];
+  isPublished: boolean;
+  playCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface RoomCustomCategorySnapshot {
+  id: string;
+  name: string;
+  image?: string;
+  icon?: string;
+  words: CustomCategoryWord[];
+}
+
 export interface PlayerData {
   uid: string;
   name: string;
@@ -40,10 +67,25 @@ export interface PlayerData {
 }
 
 export interface RoomData {
-  status: 'waiting' | 'playing' | 'voting' | 'resolving' | 'gameover';
+  status: 'waiting' | 'playing' | 'voting' | 'spy_guess' | 'resolving' | 'gameover';
   originalHostUid?: string;
   hostUid: string;
   categories: CategoryKey[];
+  customCategoryIds?: string[];
+  customCategorySnapshot?: Record<string, RoomCustomCategorySnapshot> | null;
+  activeCustomCategoryId?: string | null;
+  customCategoryWords?: CustomCategoryWord[] | null;
+  wordCustomCategoryName?: string | null;
+  wordCustomCategoryImage?: string | null;
+  allowSpyLastChance?: boolean;
+  spyGuessCandidateUid?: string | null;
+  spyGuessOptions?: CustomCategoryWord[] | null;
+  spyGuessEndsAt?: number | null;
+  spyGuessResult?: {
+    spyUid: string;
+    guessedWord: string;
+    isCorrect: boolean;
+  } | null;
   spyCount: number;
   maxPlayers: number;
   turnSeconds: number;

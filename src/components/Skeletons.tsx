@@ -83,7 +83,7 @@ export const AppBootSkeleton: React.FC<{ lang?: Language }> = ({ lang = 'ar' }) 
 
     {/* Bottom Navigation Bar Skeleton */}
     <div className="shrink-0 h-16 px-4 bg-slate-950/90 border-t border-slate-800 flex items-center justify-around relative z-10">
-      {Array.from({ length: 4 }).map((_, idx) => (
+      {Array.from({ length: 5 }).map((_, idx) => (
         <div key={idx} className="flex flex-col items-center gap-1">
           <SkeletonBlock className="w-6 h-6 rounded-lg" />
           <SkeletonBlock className="w-10 h-2.5" />
@@ -201,3 +201,25 @@ export const RoomLobbySkeleton: React.FC<{ lang?: Language; roomCode?: string | 
     </div>
   </div>
 );
+
+/**
+ * Skeleton grid matching CategoriesTab custom & community category cards.
+ */
+export const CategoriesListSkeleton: React.FC<{ count?: number }> = ({ count = 4 }) => (
+  <div aria-busy="true" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    {Array.from({ length: count }).map((_, idx) => (
+      <div
+        key={idx}
+        className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 flex items-center gap-3"
+      >
+        <SkeletonBlock className="w-14 h-14 rounded-2xl shrink-0" />
+        <div className="space-y-2 flex-1 min-w-0">
+          <SkeletonBlock className="h-4 w-32" />
+          <SkeletonBlock className="h-3 w-24" />
+          <SkeletonBlock className="h-7 w-20 rounded-xl" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
+

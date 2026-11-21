@@ -11,6 +11,8 @@ interface RoleDossierCardProps {
   amSpectator: boolean;
   displayWord: string;
   wordCategory?: string;
+  wordCategoryLabel?: string | null;
+  wordCategoryImage?: string | null;
   roomGameMode?: string;
   fellowSpiesNames: string[];
   protectedSpyName?: string | null;
@@ -24,6 +26,8 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
   amSpectator,
   displayWord,
   wordCategory,
+  wordCategoryLabel,
+  wordCategoryImage,
   roomGameMode,
   fellowSpiesNames,
   protectedSpyName,
@@ -47,7 +51,9 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
   }, [isEffectiveSpy, displayWord, amSpectator]);
 
   const catStyle = wordCategory ? CATEGORY_STYLES[wordCategory as CategoryKey] : undefined;
-  const catLabel = catStyle
+  const catLabel = wordCategoryLabel
+    ? wordCategoryLabel
+    : catStyle
     ? lang === 'ar'
       ? catStyle.titleAr
       : catStyle.titleEn
@@ -137,9 +143,20 @@ export const RoleDossierCard: React.FC<RoleDossierCardProps> = ({
             </div>
           ) : (
             <div className="space-y-1.5 flex flex-col items-center">
-              {wordCategory && (
-                <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-400/35 text-xs font-bold text-cyan-300">
-                  <span>{catStyle?.icon || '🎯'}</span>
+              {(wordCategory || wordCategoryLabel) && (
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-500/15 border border-cyan-400/35 text-xs font-bold text-cyan-300">
+                  {wordCategoryImage ? (
+                    <img
+                      src={wordCategoryImage}
+                      alt={catLabel || ''}
+                      loading="lazy"
+                      decoding="async"
+                      referrerPolicy="no-referrer"
+                      className="w-4 h-4 rounded-md object-cover shrink-0"
+                    />
+                  ) : (
+                    <span>{catStyle?.icon || '🎯'}</span>
+                  )}
                   <span>{catLabel}</span>
                 </div>
               )}

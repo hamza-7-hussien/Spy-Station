@@ -14,6 +14,8 @@ import {
   getMaxAllowedSpies,
   getMinRequiredPlayers,
   isBotPlayer,
+  buildSpyGuessOptions,
+  resolveSpyLastChanceGuess,
   resolveVoteOutcome,
   shouldResetGameOverToLobby,
   validateGameStart
@@ -630,6 +632,72 @@ describe('Bilingual AI Bot clue pairs & per-player per-round script detection', 
     assert.equal(r2LangB, 'ar');
     assert.equal(resolveBotClueText(botClueR2, r2LangA), 'trophy');
     assert.equal(resolveBotClueText(botClueR2, r2LangB), 'بطولة');
+  });
+});
+
+describe('Spy Last-Chance Guess mechanics & Custom Category option pools', () => {
+  it('transitions to spy_guess with 6 options including the secret word when allowSpyLastChance is enabled', () => {
+    const players = makePlayers(4);
+    const customWords = [
+      { en: 'Naruto', ar: 'ناروتو' },
+      { en: 'Luffy', ar: 'لوفي' },
+      { en: 'Goku', ar: 'غوكو' },
+      { en: 'Ichigo', ar: 'إيتشيغو' },
+      { en: 'Eren', ar: 'إيرين' },
+      { en: 'Gon', ar: 'غون' },
+      { en: 'Saitama', ar: 'سايتاما' }
+    ];
+    const room = makeRoom({
+      status: 'voting',
+      allowSpyLastChance: true,
+      word: 'Naruto',
+      wordAr: 'ناروتو',
+      customCategoryWords: customWords,
+      players,
+      spies: ['u_3'],
+      votes: { u_0: 'u_3', u_1: 'u_3', u_2: 'u_3', u_3: 'u_0' }
+    });
+
+    const outcome = resolveVoteOutcome(room, 10000);
+    assert.equal(outcome.outcome, 'spy_last_chance');
+    assert.equal(outcome.nextRoomFields.status, 'spy_guess');
+    assert.equal(outcome.nextRoomFields.spyGuessCandidateUid, 'u_3');
+    assert.deepEqual(outcome.nextRoomFields.finalSpies, ['u_3']);
+    const opts = outcome.nextRoomFields.spyGuessOptions || [];
+    assert.equal(opts.length, 6);
+    assert.ok(opts.some(o => o.en === 'Naruto'));
+  });
+
+  it('awards victory to spies when the caught spy guesses correctly, and to crew on miss or timeout', () => {
+    const players = makePlayers(4);
+    const room = makeRoom({
+      status: 'spy_guess',
+      word: 'Pyramids',
+      wordAr: 'الأهرامات',
+      spyGuessCandidateUid: 'u_3',
+      spies: [],
+      finalSpies: ['u_3'],
+      finalPlayers: players,
+      spyGuessOptions: buildSpyGuessOptions(
+        makeRoom({ word: 'Pyramids', wordAr: 'الأهرامات', wordCategory: 'places' })
+      )
+    });
+
+    const winRes = resolveSpyLastChanceGuess(room, 'Pyramids');
+    assert.equal(winRes.isCorrect, true);
+    assert.equal(winRes.winnerTeam, 'spies');
+    assert.equal(winRes.nextRoomFields.status, 'gameover');
+    assert.equal(winRes.nextRoomFields.winnerTeam, 'spies');
+
+    const missRes = resolveSpyLastChanceGuess(room, 'London');
+    assert.equal(missRes.isCorrect, false);
+    assert.equal(missRes.winnerTeam, 'crew');
+    assert.equal(missRes.nextRoomFields.status, 'gameover');
+
+    const timeoutRes = resolveSpyLastChanceGuess(room, null);
+    assert.equal(timeoutRes.isCorrect, false);
+    assert.equal(timeoutRes.winnerTeam, 'crew');
+    assert.equal(timeoutRes.nextRoomFields.spyGuessResult?.guessedWord, '');
   });
 });
 
