@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { auth, db, firebase } from './firebase';
+import type { User as SupabaseUser, RealtimeChannel } from '@supabase/supabase-js';
+import { supabase } from './supabase';
 import { sound } from './audio';
 import { dictionary } from './translations';
 import {
@@ -19,9 +20,10 @@ import {
   JoinRequest,
   CustomCategory,
   CustomCategoryWord,
-  RoomCustomCategorySnapshot
+  RoomCustomCategorySnapshot,
+  MissionDossier
 } from './types';
-import { getCombinedWordList, wordsDB, getSmartTwinWord } from './words';
+import { wordsDB } from './words';
 import { AuthScreen } from './screens/AuthScreen';
 import { HomeTab } from './screens/HomeTab';
 import { StationsTab } from './screens/StationsTab';
@@ -45,44 +47,154 @@ import { ApplicantWaitingApprovalModal } from './components/ApplicantWaitingAppr
 import { QuickMatchModal } from './components/QuickMatchModal';
 import {
   customCategoriesCache,
-  friendCodeCache,
   publicRoomsCache,
   userProfileCache
 } from './utils/cache';
 import { CinematicEjectionOverlay } from './components/CinematicEjectionOverlay';
 import {
-  generateSmartBotCluePair,
-  generateSmartBotVote,
-  generateUniqueBotName
+  generateUniqueBotName,
+  getBotClueBankForWord,
+  getBotSpyClueBank
 } from './aiBot';
 import { useVoiceChat } from './hooks/useVoiceChat';
 import { MandatoryUpdateModal } from './components/MandatoryUpdateModal';
 import { saveAccountProfile } from './utils/savedAccounts';
 import {
-  DEFAULT_VOTE_SECONDS,
-  ROUND_GRACE_MS,
   areAllEligibleVotesSubmitted,
-  computeInitialGameSetup,
-  computeNextTurnState,
   getEffectiveTurnSeconds,
   getEligibleVoters,
   isBotPlayer,
-  resolveSpyLastChanceGuess,
-  resolveVoteOutcome,
   shouldResetGameOverToLobby,
+  shuffleArray,
   validateGameStart
 } from './gameEngine';
 
-function toFirebaseUpdatePayload(obj: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  Object.entries(obj).forEach(([key, val]) => {
-    out[key] = val === undefined ? null : val;
-  });
-  return out;
+const CURRENT_APP_VERSION = '3.1.0';
+const ROUND_ANNOUNCE_MS = 2400;
+
+function toMs(val?: string | number | null): number | undefined {
+  if (typeof val === 'number' && Number.isFinite(val)) return val;
+  if (typeof val === 'string' && val) {
+    const parsed = Date.parse(val);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
-const CURRENT_APP_VERSION = '3.0.0';
-const ROUND_ANNOUNCE_MS = 2400;
+function getUserMeta(user: SupabaseUser) {
+  const meta = (user.user_metadata || {}) as Record<string, string | undefined>;
+  const name =
+    (meta.full_name || meta.name || (user.email ? user.email.split('@')[0] : 'Agent') || 'Agent').trim() ||
+    'Agent';
+  const avatar =
+    meta.avatar_url ||
+    meta.picture ||
+    `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name || user.id)}`;
+  const provider: 'google' | 'password' =
+    user.app_metadata?.provider === 'google' ||
+    user.identities?.some(i => i.provider === 'google')
+      ? 'google'
+      : 'password';
+  return { name, avatar, provider };
+}
+
+interface SqlProfileRow {
+  uid: string;
+  name: string;
+  avatar: string;
+  friend_code?: string;
+  score?: number;
+}
+
+interface SqlCategoryRow {
+  id: string;
+  creator_uid: string;
+  creator_name: string;
+  name: string;
+  icon?: string | null;
+  image_url?: string | null;
+  words?: CustomCategoryWord[] | null;
+  is_published?: boolean;
+  play_count?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+function mapCategoryRow(row: SqlCategoryRow): CustomCategory {
+  return {
+    id: row.id,
+    creatorUid: row.creator_uid,
+    creatorName: row.creator_name || 'Agent',
+    name: row.name,
+    icon: row.icon || '🎯',
+    image: row.image_url || undefined,
+    words: Array.isArray(row.words) ? row.words : [],
+    isPublished: Boolean(row.is_published),
+    playCount: Number(row.play_count) || 0,
+    createdAt: toMs(row.created_at) || Date.now(),
+    updatedAt: toMs(row.updated_at) || Date.now()
+  };
+}
+
+interface SqlRoomRow {
+  code: string;
+  host_uid: string;
+  original_host_uid?: string | null;
+  host_name?: string | null;
+  status: RoomData['status'];
+  visibility: 'public' | 'private';
+  is_quick_match?: boolean;
+  game_mode: GameMode;
+  categories?: CategoryKey[] | null;
+  custom_category_ids?: string[] | null;
+  custom_category_snapshot?: Record<string, RoomCustomCategorySnapshot> | null;
+  active_custom_category_id?: string | null;
+  custom_category_words?: CustomCategoryWord[] | null;
+  allow_spy_last_chance?: boolean;
+  spy_count: number;
+  max_players: number;
+  turn_seconds: number;
+  round_num?: number;
+  turn_order?: string[] | null;
+  turn_index?: number | null;
+  turn_time_left?: number | null;
+  turn_ends_at?: string | null;
+  turn_grace_until?: string | null;
+  completed_turns_this_round?: Record<string, boolean> | null;
+  vote_ends_at?: string | null;
+  spy_guess_candidate_uid?: string | null;
+  spy_guess_options?: CustomCategoryWord[] | null;
+  spy_guess_ends_at?: string | null;
+  spy_guess_result?: RoomData['spyGuessResult'];
+  winner_team?: 'crew' | 'spies' | null;
+  active_word_category?: CategoryKey | null;
+  active_custom_category_name?: string | null;
+  active_custom_category_image?: string | null;
+  revealed_word?: string | null;
+  revealed_word_ar?: string | null;
+  revealed_spies?: string[] | null;
+  final_players?: Record<string, PlayerData> | null;
+  ejection_event?: RoomData['ejectionEvent'];
+  ejection_ends_at?: string | null;
+  announcement?: RoomData['announcement'];
+  blackout_active?: boolean;
+  blackout_ends_at?: string | null;
+  last_blackout_round?: number;
+  created_at?: string | null;
+}
+
+interface SqlPlayerRow {
+  uid: string;
+  name: string;
+  avatar: string;
+  is_bot?: boolean;
+  is_spectator?: boolean;
+  post_game?: 'inLobby' | null;
+  is_silenced?: boolean;
+  disqualified_vote?: boolean;
+  missed_turns?: number;
+  joined_at?: string;
+}
 
 export default function App() {
   const [lang, setLang] = useState<Language>(() => {
@@ -101,7 +213,7 @@ export default function App() {
   });
 
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<firebase.User | null>(null);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
   const [profileName, setProfileName] = useState('Agent');
   const [profileAvatar, setProfileAvatar] = useState('');
   const [userXp, setUserXp] = useState(0);
@@ -116,6 +228,7 @@ export default function App() {
   // In-room state
   const [currentRoomCode, setCurrentRoomCode] = useState<string | null>(null);
   const [roomData, setRoomData] = useState<RoomData | null>(null);
+  const [missionDossier, setMissionDossier] = useState<MissionDossier | null>(null);
   const [announcedRound, setAnnouncedRound] = useState<number | null>(null);
   const lastAnnouncedRoundRef = useRef<number>(0);
   const [pendingJoinApproval, setPendingJoinApproval] = useState<{
@@ -133,13 +246,13 @@ export default function App() {
   const [sentRequests, setSentRequests] = useState<Record<string, boolean>>({});
   const [roomInvites, setRoomInvites] = useState<Record<string, RoomInvite>>({});
 
-  // Public rooms (SWR-cached + indexed + paginated)
+  // Public rooms
   const [publicRooms, setPublicRooms] = useState<Record<string, RoomData>>(() => publicRoomsCache.get('latest') || {});
   const [publicRoomsLoading, setPublicRoomsLoading] = useState(true);
   const [stationsLimit, setStationsLimit] = useState(12);
   const [hasMoreStations, setHasMoreStations] = useState(false);
 
-  // Custom & Community Categories (indexed + paginated + SWR-cached)
+  // Custom & Community Categories
   const [myCategories, setMyCategories] = useState<CustomCategory[]>([]);
   const [communityCategories, setCommunityCategories] = useState<CustomCategory[]>(() => {
     const cached = customCategoriesCache.get('latest');
@@ -154,7 +267,7 @@ export default function App() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [quickMatchModalOpen, setQuickMatchModalOpen] = useState(false);
 
-  // Dynamic Adaptive Espionage Background Music (Ambient vs Suspense)
+  // Dynamic Adaptive Espionage Background Music
   useEffect(() => {
     if (!roomData) {
       sound.setBgmMode('ambient');
@@ -198,8 +311,8 @@ export default function App() {
   }, []);
 
   const roundAnnounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const roomListenerRef = useRef<(() => void) | null>(null);
-  const annListenerRef = useRef<(() => void) | null>(null);
+  const roomChannelRef = useRef<RealtimeChannel | null>(null);
+  const roomRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voteIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const spyGuessIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -209,28 +322,37 @@ export default function App() {
   const isResolvingVotesRef = useRef(false);
   const isResolvingSpyGuessRef = useRef(false);
   const advancingTurnKeyRef = useRef<string | null>(null);
+  const dossierRef = useRef<MissionDossier | null>(null);
+  const dossierPhaseKeyRef = useRef<string>('');
   const [serverTimeOffsetMs, setServerTimeOffsetMs] = useState(0);
   const serverTimeOffsetRef = useRef(0);
   const getServerNow = useCallback(() => Date.now() + serverTimeOffsetRef.current, []);
-  const purgedRoomsRef = useRef<Map<string, number>>(new Map());
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const lastRoomSnapshotRef = useRef<RoomData | null>(null);
-  const pendingReqCleanupsRef = useRef<(() => void) | null>(null);
-  const activeFriendListenersRef = useRef<(() => void)[]>([]);
+  const pendingReqChannelRef = useRef<RealtimeChannel | null>(null);
   const profileNameRef = useRef(profileName);
   const profileAvatarRef = useRef(profileAvatar);
 
+  // Synchronize clock against Postgres server clock_timestamp()
   useEffect(() => {
-    const offsetRef = db.ref('.info/serverTimeOffset');
-    const onOffset = (snap: firebase.database.DataSnapshot) => {
-      const val = Number(snap.val()) || 0;
-      serverTimeOffsetRef.current = val;
-      setServerTimeOffsetMs(val);
+    const syncClock = async () => {
+      try {
+        const t0 = Date.now();
+        const { data, error } = await supabase.rpc('get_server_now_ms');
+        const t1 = Date.now();
+        if (!error && typeof data === 'number') {
+          const rttMid = Math.round((t0 + t1) / 2);
+          const offset = data - rttMid;
+          serverTimeOffsetRef.current = offset;
+          setServerTimeOffsetMs(offset);
+        }
+      } catch {
+        // ignore clock sync errors
+      }
     };
-    offsetRef.on('value', onOffset);
-    return () => {
-      offsetRef.off('value', onOffset);
-    };
+    syncClock();
+    const id = setInterval(syncClock, 180000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -245,8 +367,8 @@ export default function App() {
 
   const voice = useVoiceChat({
     roomCode: currentRoomCode || '',
-    currentUserUid: currentUser?.uid || '',
-    currentUserName: profileName || currentUser?.displayName || 'Agent',
+    currentUserUid: currentUser?.id || '',
+    currentUserName: profileName || (currentUser ? getUserMeta(currentUser).name : 'Agent'),
     onToast: showToast,
     permissionErrorMsg: t.voicePermissionError
   });
@@ -254,7 +376,7 @@ export default function App() {
   // Auto-join voice room in listen-only mode (Mic OFF, Headphones ON) when entering a room
   const voiceAutoJoinedRoomRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!currentRoomCode || !currentUser?.uid) {
+    if (!currentRoomCode || !currentUser?.id) {
       voiceAutoJoinedRoomRef.current = null;
       return;
     }
@@ -262,7 +384,7 @@ export default function App() {
       voiceAutoJoinedRoomRef.current = currentRoomCode;
       voice.joinVoice(true);
     }
-  }, [currentRoomCode, currentUser?.uid, voice.joinVoice]);
+  }, [currentRoomCode, currentUser?.id, voice.joinVoice]);
 
   // Sync document direction & language
   useEffect(() => {
@@ -291,94 +413,50 @@ export default function App() {
     };
 
     checkUpdate();
-    const interval = setInterval(checkUpdate, 60000); // Check every 60s
+    const interval = setInterval(checkUpdate, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Auth listener with redirect recovery, RTDB profile bootstrap, and persistent session maintenance
+  // Auth listener & persistent session maintenance (Supabase Auth)
   useEffect(() => {
-    auth
-      .getRedirectResult()
-      .then(res => {
-        if (res?.user) {
-          const u = res.user;
-          const fallbackName = u.displayName || (u.email ? u.email.split('@')[0] : 'Agent');
-          const fallbackAvatar =
-            u.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(fallbackName || u.uid)}`;
-          db.ref(`users/${u.uid}`)
-            .once('value')
-            .then(snap => {
-              const val = snap.val() || {};
-              const patch: Record<string, unknown> = {};
-              if (!val.name) patch.name = fallbackName;
-              if (!val.avatar) patch.avatar = fallbackAvatar;
-              if (!val.createdAt) patch.createdAt = firebase.database.ServerValue.TIMESTAMP;
-              if (Object.keys(patch).length > 0) {
-                db.ref(`users/${u.uid}`).update(patch).catch(() => {});
-              }
-            })
-            .catch(() => {});
-        }
-      })
-      .catch(err => {
-        if (err?.message) {
-          console.warn('Redirect sign-in notice:', err);
-        }
-      });
+    let mounted = true;
 
-    const unsub = auth.onAuthStateChanged(user => {
+    const applySessionUser = (user: SupabaseUser | null) => {
+      if (!mounted) return;
       setCurrentUser(user);
       if (user) {
         localStorage.setItem('spy_station_has_session', 'true');
-        const fallbackName = user.displayName || (user.email ? user.email.split('@')[0] : 'Agent');
-        const fallbackAvatar =
-          user.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(fallbackName || user.uid)}`;
+        const meta = getUserMeta(user);
+        setProfileName(meta.name);
+        setProfileAvatar(meta.avatar);
 
-        setProfileName(fallbackName);
-        setProfileAvatar(fallbackAvatar);
-        user.getIdToken(false).catch(() => {});
-
-        const providerKind = user.providerData?.some(p => p?.providerId === 'google.com')
-          ? 'google'
-          : 'password';
         if (user.email) {
           saveAccountProfile({
-            uid: user.uid,
+            uid: user.id,
             email: user.email,
-            name: fallbackName,
-            avatar: fallbackAvatar,
-            provider: providerKind
+            name: meta.name,
+            avatar: meta.avatar,
+            provider: meta.provider
           });
         }
-
-        db.ref(`users/${user.uid}`)
-          .once('value')
-          .then(snap => {
-            const val = snap.val() || {};
-            const patch: Record<string, unknown> = {};
-            if (!val.name) patch.name = fallbackName;
-            if (!val.avatar) patch.avatar = fallbackAvatar;
-            if (!val.createdAt) patch.createdAt = firebase.database.ServerValue.TIMESTAMP;
-            if (Object.keys(patch).length > 0) {
-              db.ref(`users/${user.uid}`).update(patch).catch(() => {});
-            }
-            if (user.email) {
-              saveAccountProfile({
-                uid: user.uid,
-                email: user.email,
-                name: val.name || fallbackName,
-                avatar: val.avatar || fallbackAvatar,
-                provider: providerKind
-              });
-            }
-          })
-          .catch(() => {});
       } else {
         localStorage.removeItem('spy_station_has_session');
       }
       setLoading(false);
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      applySessionUser(data.session?.user ?? null);
     });
-    return () => unsub();
+
+    const { data: authSub } = supabase.auth.onAuthStateChange((_event, session) => {
+      applySessionUser(session?.user ?? null);
+    });
+
+    return () => {
+      mounted = false;
+      authSub.subscription.unsubscribe();
+    };
   }, []);
 
   // Screen Wake Lock
@@ -399,7 +477,103 @@ export default function App() {
     }
   };
 
-  // User Data & Presence (with proper listener cleanup on logout/unmount)
+  // Load & sync profile, presence, friends, requests, and room invites
+  const reloadSocialData = useCallback(async (user: SupabaseUser) => {
+    const uid = user.id;
+    try {
+      const [
+        { data: friendsRows },
+        { data: reqIncoming },
+        { data: reqSent },
+        { data: inviteRows }
+      ] = await Promise.all([
+        supabase.from('friendships').select('friend_uid, created_at').eq('user_uid', uid),
+        supabase.from('friend_requests').select('sender_uid, created_at').eq('recipient_uid', uid),
+        supabase.from('friend_requests').select('recipient_uid').eq('sender_uid', uid),
+        supabase.from('room_invites').select('sender_uid, room_code, from_name, from_avatar, created_at').eq('recipient_uid', uid)
+      ]);
+
+      const friendUids = (friendsRows || []).map(r => r.friend_uid as string);
+      const senderUids = (reqIncoming || []).map(r => r.sender_uid as string);
+      const lookupUids = Array.from(new Set([...friendUids, ...senderUids]));
+
+      const profileMap: Record<string, SqlProfileRow> = {};
+      if (lookupUids.length > 0) {
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('uid, name, avatar, friend_code')
+          .in('uid', lookupUids);
+        (profs || []).forEach(p => {
+          profileMap[p.uid] = p as SqlProfileRow;
+          userProfileCache.set(p.uid, { name: p.name, avatar: p.avatar, friendCode: p.friend_code });
+        });
+      }
+
+      const nextFriends: Record<string, FriendEntry> = {};
+      (friendsRows || []).forEach(row => {
+        const fUid = row.friend_uid as string;
+        const prof = profileMap[fUid];
+        nextFriends[fUid] = {
+          name: prof?.name || 'Agent',
+          avatar: prof?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${fUid}`,
+          since: toMs(row.created_at) || Date.now()
+        };
+      });
+      setFriends(nextFriends);
+      setFriendsLoading(false);
+
+      // Load friend online presence
+      if (friendUids.length > 0) {
+        const { data: presRows } = await supabase
+          .from('player_presence')
+          .select('uid, state, last_changed')
+          .in('uid', friendUids);
+        const now = Date.now();
+        const nextStatuses: Record<string, 'online' | 'offline'> = {};
+        (presRows || []).forEach(pr => {
+          const lastMs = toMs(pr.last_changed) || 0;
+          const fresh = now - lastMs < 150000;
+          nextStatuses[pr.uid as string] = pr.state === 'online' && fresh ? 'online' : 'offline';
+        });
+        setFriendStatuses(nextStatuses);
+      } else {
+        setFriendStatuses({});
+      }
+
+      const nextIncoming: Record<string, FriendRequest> = {};
+      (reqIncoming || []).forEach(r => {
+        const sUid = r.sender_uid as string;
+        const prof = profileMap[sUid];
+        nextIncoming[sUid] = {
+          name: prof?.name || 'Agent',
+          avatar: prof?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${sUid}`,
+          timestamp: toMs(r.created_at) || Date.now()
+        };
+      });
+      setFriendRequests(nextIncoming);
+
+      const nextSent: Record<string, boolean> = {};
+      (reqSent || []).forEach(r => {
+        nextSent[r.recipient_uid as string] = true;
+      });
+      setSentRequests(nextSent);
+
+      const nextInvites: Record<string, RoomInvite> = {};
+      (inviteRows || []).forEach(inv => {
+        const sUid = inv.sender_uid as string;
+        nextInvites[sUid] = {
+          roomCode: inv.room_code as string,
+          fromName: (inv.from_name as string) || 'Agent',
+          fromAvatar: (inv.from_avatar as string) || '',
+          timestamp: toMs(inv.created_at) || Date.now()
+        };
+      });
+      setRoomInvites(nextInvites);
+    } catch {
+      setFriendsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!currentUser) {
       setFriends({});
@@ -408,233 +582,212 @@ export default function App() {
       setSentRequests({});
       setRoomInvites({});
       setPublicRooms({});
+      setUserXp(0);
+      setMyFriendCode('--------');
       return;
     }
 
     let isCancelled = false;
+    const uid = currentUser.id;
+    const meta = getUserMeta(currentUser);
 
-    // Realtime Profile Sync
-    const profileRef = db.ref(`users/${currentUser.uid}`);
-    const onProfileChange = (snap: firebase.database.DataSnapshot) => {
-      const data = snap.val();
-      if (data) {
-        if (data.name) setProfileName(data.name);
-        if (data.avatar) setProfileAvatar(data.avatar);
-        userProfileCache.set(currentUser.uid, {
-          name: data.name,
-          avatar: data.avatar,
-          friendCode: data.friendCode
+    // 1. Ensure & fetch user profile + XP + friendCode via atomic server RPC
+    supabase
+      .rpc('ensure_user_profile', {
+        p_name: meta.name,
+        p_avatar: meta.avatar,
+        p_claim_username: false
+      })
+      .then(({ data }) => {
+        if (isCancelled || !data) return;
+        const prof = data as SqlProfileRow;
+        if (prof.name) setProfileName(prof.name);
+        if (prof.avatar) setProfileAvatar(prof.avatar);
+        if (typeof prof.score === 'number') setUserXp(prof.score);
+        if (prof.friend_code) setMyFriendCode(prof.friend_code);
+
+        userProfileCache.set(uid, {
+          name: prof.name,
+          avatar: prof.avatar,
+          friendCode: prof.friend_code
         });
+
         if (currentUser.email) {
           saveAccountProfile({
-            uid: currentUser.uid,
+            uid,
             email: currentUser.email,
-            name: data.name || currentUser.displayName || currentUser.email.split('@')[0] || 'Agent',
-            avatar: data.avatar || currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
-            provider: currentUser.providerData?.some(p => p?.providerId === 'google.com') ? 'google' : 'password'
+            name: prof.name || meta.name,
+            avatar: prof.avatar || meta.avatar,
+            provider: meta.provider
           });
         }
-      }
+      }, () => {});
+
+    // 2. Presence heartbeat
+    const pushPresence = (state: 'online' | 'offline') => {
+      supabase
+        .from('player_presence')
+        .upsert({ uid, state, last_changed: new Date().toISOString() }, { onConflict: 'uid' })
+        .then(() => {}, () => {});
     };
-    profileRef.on('value', onProfileChange);
-
-    // Presence
-    const statusRef = db.ref(`status/${currentUser.uid}`);
-    const connectedRef = db.ref('.info/connected');
-    const onConnectedChange = (snap: firebase.database.DataSnapshot) => {
-      if (snap.val() === true) {
-        statusRef
-          .onDisconnect()
-          .set({
-            state: 'offline',
-            last_changed: firebase.database.ServerValue.TIMESTAMP
-          })
-          .then(() => {
-            if (!isCancelled) {
-              statusRef.set({
-                state: 'online',
-                last_changed: firebase.database.ServerValue.TIMESTAMP
-              });
-            }
-          })
-          .catch(() => {});
+    pushPresence('online');
+    const presenceInterval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        pushPresence('online');
       }
+    }, 45000);
+
+    const onVisChange = () => {
+      pushPresence(document.visibilityState === 'visible' ? 'online' : 'offline');
     };
-    connectedRef.on('value', onConnectedChange);
+    document.addEventListener('visibilitychange', onVisChange);
 
-    // Score / XP
-    const scoreRef = db.ref(`users/${currentUser.uid}/score`);
-    const onScoreChange = (snap: firebase.database.DataSnapshot) => {
-      setUserXp(snap.val() || 0);
-    };
-    scoreRef.on('value', onScoreChange);
-
-    // Friend code lookup & migration
-    const codeRef = db.ref(`users/${currentUser.uid}/friendCode`);
-    codeRef.once('value').then(async snap => {
-      if (isCancelled) return;
-      const code = snap.val();
-      if (!code || code.length !== 8) {
-        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-        let candidate = '';
-        let claimed = false;
-        let tries = 0;
-        while (!claimed && tries < 25 && !isCancelled) {
-          tries++;
-          candidate = '';
-          for (let i = 0; i < 8; i++) candidate += chars.charAt(Math.floor(Math.random() * chars.length));
-          const res = await db
-            .ref(`friendCodes/${candidate}`)
-            .transaction(cur => (cur === null ? currentUser.uid : undefined));
-          if (res.committed) claimed = true;
-        }
-        if (claimed && !isCancelled) {
-          await db.ref(`users/${currentUser.uid}/friendCode`).set(candidate);
-          if (code) await db.ref(`friendCodes/${code}`).remove();
-          setMyFriendCode(candidate);
-        }
-      } else {
-        setMyFriendCode(code);
-      }
-    }).catch(() => {});
-
-    // Friends list (TTL-cached profile hydration + bounded presence subscriptions to eliminate N+1 reads)
+    // 3. Initial load of social graph
     setFriendsLoading(true);
-    const friendsRef = db.ref(`users/${currentUser.uid}/friends`);
-    const onFriendsChange = (snap: firebase.database.DataSnapshot) => {
-      const f = (snap.val() || {}) as Record<string, FriendEntry>;
-      const friendUids = Object.keys(f);
+    reloadSocialData(currentUser);
 
-      // Apply cached friend profiles synchronously first
-      const hydrated: Record<string, FriendEntry> = { ...f };
-      const staleUids: string[] = [];
-      for (const fUid of friendUids) {
-        const cached = userProfileCache.get(fUid);
-        if (cached) {
-          hydrated[fUid] = {
-            ...hydrated[fUid],
-            name: cached.name || hydrated[fUid].name,
-            avatar: cached.avatar || hydrated[fUid].avatar
-          };
-        } else {
-          staleUids.push(fUid);
+    // 4. Realtime social + profile channel
+    const socialChannel = supabase
+      .channel(`user-social:${uid}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `uid=eq.${uid}` },
+        payload => {
+          const row = payload.new as SqlProfileRow | undefined;
+          if (!row) return;
+          if (row.name) setProfileName(row.name);
+          if (row.avatar) setProfileAvatar(row.avatar);
+          if (typeof row.score === 'number') setUserXp(row.score);
+          if (row.friend_code) setMyFriendCode(row.friend_code);
         }
-      }
-      setFriends(hydrated);
-      setFriendsLoading(false);
-
-      activeFriendListenersRef.current.forEach(cleanup => cleanup());
-      activeFriendListenersRef.current = [];
-
-      // Bound live presence listeners to active set to prevent listener explosion
-      friendUids.slice(0, 40).forEach(fUid => {
-        const sRef = db.ref(`status/${fUid}`);
-        const onStatus = (s: firebase.database.DataSnapshot) => {
-          const val = s.val();
-          setFriendStatuses(prev => ({
-            ...prev,
-            [fUid]: val && val.state === 'online' ? 'online' : 'offline'
-          }));
-        };
-        sRef.on('value', onStatus);
-        activeFriendListenersRef.current.push(() => sRef.off('value', onStatus));
-      });
-
-      // Batch fetch only uncached/expired friend profiles in parallel (instead of N persistent profile listeners)
-      if (staleUids.length > 0) {
-        Promise.all(
-          staleUids.slice(0, 30).map(fUid =>
-            db
-              .ref(`users/${fUid}`)
-              .once('value')
-              .then(uSnap => ({ fUid, uData: uSnap.val() }))
-              .catch(() => null)
-          )
-        ).then(results => {
-          if (isCancelled) return;
-          const patches: Record<string, { name?: string; avatar?: string }> = {};
-          for (const res of results) {
-            if (!res || !res.uData) continue;
-            userProfileCache.set(res.fUid, {
-              name: res.uData.name,
-              avatar: res.uData.avatar,
-              friendCode: res.uData.friendCode
-            });
-            patches[res.fUid] = {
-              name: res.uData.name,
-              avatar: res.uData.avatar
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friendships', filter: `user_uid=eq.${uid}` },
+        () => reloadSocialData(currentUser)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friend_requests', filter: `recipient_uid=eq.${uid}` },
+        () => reloadSocialData(currentUser)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'friend_requests', filter: `sender_uid=eq.${uid}` },
+        () => reloadSocialData(currentUser)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'room_invites', filter: `recipient_uid=eq.${uid}` },
+        () => reloadSocialData(currentUser)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'player_presence' },
+        payload => {
+          const row = payload.new as { uid?: string; state?: string; last_changed?: string } | undefined;
+          if (!row?.uid || row.uid === uid) return;
+          setFriendStatuses(prev => {
+            if (!(row.uid! in prev) && !(row.uid! in friends)) return prev;
+            return {
+              ...prev,
+              [row.uid!]: row.state === 'online' ? 'online' : 'offline'
             };
-          }
-          if (Object.keys(patches).length > 0) {
-            setFriends(prev => {
-              let changed = false;
-              const next = { ...prev };
-              for (const [fUid, patch] of Object.entries(patches)) {
-                if (!next[fUid]) continue;
-                const nextName = patch.name || next[fUid].name;
-                const nextAvatar = patch.avatar || next[fUid].avatar;
-                if (next[fUid].name !== nextName || next[fUid].avatar !== nextAvatar) {
-                  next[fUid] = { ...next[fUid], name: nextName, avatar: nextAvatar };
-                  changed = true;
-                }
-              }
-              return changed ? next : prev;
-            });
-          }
-        });
-      }
-    };
-    friendsRef.on('value', onFriendsChange);
-
-    // Sent requests
-    const sentReqRef = db.ref(`users/${currentUser.uid}/sentRequests`);
-    const onSentReq = (snap: firebase.database.DataSnapshot) => {
-      setSentRequests(snap.val() || {});
-    };
-    sentReqRef.on('value', onSentReq);
-
-    // Incoming friend requests
-    const friendReqRef = db.ref(`users/${currentUser.uid}/friendRequests`);
-    const onFriendReq = (snap: firebase.database.DataSnapshot) => {
-      setFriendRequests(snap.val() || {});
-    };
-    friendReqRef.on('value', onFriendReq);
-
-    // Room invites
-    const invitesRef = db.ref(`users/${currentUser.uid}/roomInvites`);
-    const onInvites = (snap: firebase.database.DataSnapshot) => {
-      setRoomInvites(snap.val() || {});
-    };
-    invitesRef.on('value', onInvites);
-
-    // Check saved room code on initial auth restore
-    const saved = localStorage.getItem('spy_station_room');
-    if (saved) {
-      db.ref(`spy_rooms/${saved}`).once('value', s => {
-        if (isCancelled) return;
-        if (s.exists()) {
-          joinRoom(saved);
-        } else {
-          localStorage.removeItem('spy_station_room');
+          });
         }
-      });
+      )
+      .subscribe();
+
+    // 5. Restore previous room if saved and still valid
+    const savedRoom = localStorage.getItem('spy_station_room');
+    if (savedRoom) {
+      supabase
+        .rpc('lookup_room_for_join', { p_code: savedRoom })
+        .then(({ data }) => {
+          if (isCancelled) return;
+          const info = data as { exists?: boolean; isMember?: boolean; visibility?: string; isInvited?: boolean } | null;
+          if (info?.exists && (info.isMember || info.visibility === 'public' || info.isInvited)) {
+            joinRoom(savedRoom);
+          } else {
+            localStorage.removeItem('spy_station_room');
+          }
+        }, () => {
+          localStorage.removeItem('spy_station_room');
+        });
     }
 
     return () => {
       isCancelled = true;
-      profileRef.off('value', onProfileChange);
-      connectedRef.off('value', onConnectedChange);
-      scoreRef.off('value', onScoreChange);
-      friendsRef.off('value', onFriendsChange);
-      sentReqRef.off('value', onSentReq);
-      friendReqRef.off('value', onFriendReq);
-      invitesRef.off('value', onInvites);
-      activeFriendListenersRef.current.forEach(cleanup => cleanup());
-      activeFriendListenersRef.current = [];
+      clearInterval(presenceInterval);
+      document.removeEventListener('visibilitychange', onVisChange);
+      pushPresence('offline');
+      supabase.removeChannel(socialChannel);
     };
-  }, [currentUser]);
+  }, [currentUser?.id]);
 
-  // Indexed, paginated, SWR-cached Public Stations listener (only active while browsing Stations tab)
+  // Public Stations loader & realtime listener (only active while browsing Stations tab)
+  const fetchPublicStations = useCallback(async () => {
+    try {
+      const { data: rows, error } = await supabase
+        .from('rooms')
+        .select('code, host_uid, host_name, status, visibility, game_mode, categories, custom_category_ids, custom_category_snapshot, max_players, spy_count, turn_seconds, allow_spy_last_chance, created_at, room_players(uid, name, avatar, is_bot, is_spectator, joined_at)')
+        .eq('visibility', 'public')
+        .order('created_at', { ascending: false })
+        .limit(stationsLimit);
+
+      if (error) throw error;
+
+      const validRooms: Record<string, RoomData> = {};
+      const now = Date.now();
+
+      (rows || []).forEach(r => {
+        const rawPlayers = Array.isArray(r.room_players) ? (r.room_players as SqlPlayerRow[]) : [];
+        const playersMap: Record<string, PlayerData> = {};
+        rawPlayers.forEach(p => {
+          playersMap[p.uid] = {
+            uid: p.uid,
+            name: p.name,
+            avatar: p.avatar,
+            joinedAt: toMs(p.joined_at),
+            isBot: p.is_bot,
+            isSpectator: p.is_spectator
+          };
+        });
+
+        const humanList = rawPlayers.filter(p => !p.is_bot && !p.uid.startsWith('bot_'));
+        const createdAt = toMs(r.created_at) || now;
+        const ageMs = now - createdAt;
+
+        if (humanList.length === 0 && ageMs > 25000) {
+          return;
+        }
+
+        validRooms[r.code as string] = {
+          hostUid: r.host_uid as string,
+          status: r.status as RoomData['status'],
+          visibility: r.visibility as 'public' | 'private',
+          gameMode: r.game_mode as GameMode,
+          categories: (r.categories as CategoryKey[]) || ['players'],
+          customCategoryIds: (r.custom_category_ids as string[]) || [],
+          customCategorySnapshot: (r.custom_category_snapshot as Record<string, RoomCustomCategorySnapshot>) || undefined,
+          maxPlayers: r.max_players as number,
+          spyCount: r.spy_count as number,
+          turnSeconds: r.turn_seconds as number,
+          allowSpyLastChance: Boolean(r.allow_spy_last_chance),
+          createdAt,
+          players: playersMap
+        };
+      });
+
+      setHasMoreStations((rows || []).length >= stationsLimit);
+      setPublicRooms(validRooms);
+      setPublicRoomsLoading(false);
+      publicRoomsCache.set('latest', validRooms);
+    } catch {
+      setPublicRoomsLoading(false);
+    }
+  }, [stationsLimit]);
+
   useEffect(() => {
     if (!currentUser || currentRoomCode || activeTab !== 'stations') {
       return;
@@ -648,67 +801,63 @@ export default function App() {
       setPublicRoomsLoading(true);
     }
 
-    const roomsQuery = db
-      .ref('spy_rooms')
-      .orderByChild('visibility')
-      .equalTo('public')
-      .limitToLast(stationsLimit);
+    fetchPublicStations();
 
-    const onRoomsChange = (snap: firebase.database.DataSnapshot) => {
-      const all = snap.val() || {};
-      const rawCount = Object.keys(all).length;
-      const validRooms: Record<string, RoomData> = {};
-      const staleDeletePaths: Record<string, null> = {};
-      const now = Date.now();
-
-      Object.keys(all).forEach(code => {
-        const r = all[code];
-        if (!r) return;
-        const players = r.players || {};
-        const pList = Object.values(players) as PlayerData[];
-        const humanList = pList.filter(p => !isBotPlayer(p));
-        const hostUid = r.hostUid || '';
-        const hostPlayer = hostUid ? players[hostUid] : null;
-        const isBotHost = hostUid.startsWith('bot_') || hostPlayer?.isBot === true;
-
-        const createdAt = typeof r.createdAt === 'number' ? r.createdAt : now;
-        const ageMs = now - createdAt;
-
-        const lastPurge = purgedRoomsRef.current.get(code) || 0;
-        const canAttemptPurge = now - lastPurge > 10000;
-
-        if (isBotHost || (humanList.length === 0 && ageMs > 25000)) {
-          if (canAttemptPurge) {
-            purgedRoomsRef.current.set(code, now);
-            staleDeletePaths[`spy_rooms/${code}`] = null;
-          }
-          return;
-        }
-
-        if (humanList.length > 0 || ageMs <= 25000) {
-          validRooms[code] = r;
-        }
-      });
-
-      if (Object.keys(staleDeletePaths).length > 0) {
-        db.ref().update(staleDeletePaths).catch(() => {});
-      }
-
-      setHasMoreStations(rawCount >= stationsLimit);
-      setPublicRooms(validRooms);
-      setPublicRoomsLoading(false);
-      publicRoomsCache.set('latest', validRooms);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => fetchPublicStations(), 250);
     };
 
-    roomsQuery.on('value', onRoomsChange, () => {
-      setPublicRoomsLoading(false);
-    });
+    const channel = supabase
+      .channel('public-stations-list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players' }, scheduleRefresh)
+      .subscribe();
+
     return () => {
-      roomsQuery.off('value', onRoomsChange);
+      if (timer) clearTimeout(timer);
+      supabase.removeChannel(channel);
     };
-  }, [currentUser, currentRoomCode, activeTab, stationsLimit]);
+  }, [currentUser?.id, currentRoomCode, activeTab, fetchPublicStations]);
 
-  // Indexed, paginated, SWR-cached Custom & Community Categories listener
+  // Custom & Community Categories loader & realtime subscription
+  const fetchCustomCategories = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const [{ data: myRows }, { data: pubRows }] = await Promise.all([
+        supabase
+          .from('custom_categories')
+          .select('*')
+          .eq('creator_uid', currentUser.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('custom_categories')
+          .select('*')
+          .eq('is_published', true)
+          .order('play_count', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(communityCatLimit)
+      ]);
+
+      const myList = (myRows || []).map(r => mapCategoryRow(r as SqlCategoryRow));
+      const pubList = (pubRows || []).map(r => mapCategoryRow(r as SqlCategoryRow));
+
+      setMyCategories(myList);
+      setCommunityCategories(pubList);
+      setHasMoreCommunityCats(pubList.length >= communityCatLimit);
+      setCustomCatsLoading(false);
+
+      const nextCache: Record<string, CustomCategory> = {};
+      [...myList, ...pubList].forEach(c => {
+        nextCache[c.id] = c;
+      });
+      customCategoriesCache.set('latest', nextCache);
+    } catch {
+      setCustomCatsLoading(false);
+    }
+  }, [currentUser?.id, communityCatLimit]);
+
   useEffect(() => {
     if (!currentUser) {
       setMyCategories([]);
@@ -719,67 +868,26 @@ export default function App() {
     const cached = customCategoriesCache.get('latest');
     if (cached && Object.keys(cached).length > 0) {
       const vals = Object.values(cached);
-      setMyCategories(vals.filter(c => c.creatorUid === currentUser.uid).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+      setMyCategories(vals.filter(c => c.creatorUid === currentUser.id).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
       setCommunityCategories(vals.filter(c => c.isPublished).sort((a, b) => (b.playCount || 0) - (a.playCount || 0) || (b.createdAt || 0) - (a.createdAt || 0)));
       setCustomCatsLoading(false);
     } else {
       setCustomCatsLoading(true);
     }
 
-    const myQuery = db
-      .ref('customCategories')
-      .orderByChild('creatorUid')
-      .equalTo(currentUser.uid);
+    fetchCustomCategories();
 
-    const communityQuery = db
-      .ref('customCategories')
-      .orderByChild('isPublished')
-      .equalTo(true)
-      .limitToLast(communityCatLimit);
-
-    const updateCacheFromList = (items: CustomCategory[]) => {
-      const prevMap = customCategoriesCache.get('latest') || {};
-      const nextMap: Record<string, CustomCategory> = { ...prevMap };
-      items.forEach(item => {
-        if (item?.id) nextMap[item.id] = item;
-      });
-      customCategoriesCache.set('latest', nextMap);
-    };
-
-    const onMyCats = (snap: firebase.database.DataSnapshot) => {
-      const raw = snap.val() || {};
-      const list: CustomCategory[] = Object.entries(raw).map(([id, v]) => ({
-        ...(v as CustomCategory),
-        id
-      }));
-      list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setMyCategories(list);
-      setCustomCatsLoading(false);
-      updateCacheFromList(list);
-    };
-
-    const onCommunityCats = (snap: firebase.database.DataSnapshot) => {
-      const raw = snap.val() || {};
-      const entries = Object.entries(raw);
-      const list: CustomCategory[] = entries.map(([id, v]) => ({
-        ...(v as CustomCategory),
-        id
-      }));
-      list.sort((a, b) => (b.playCount || 0) - (a.playCount || 0) || (b.createdAt || 0) - (a.createdAt || 0));
-      setHasMoreCommunityCats(entries.length >= communityCatLimit);
-      setCommunityCategories(list);
-      setCustomCatsLoading(false);
-      updateCacheFromList(list);
-    };
-
-    myQuery.on('value', onMyCats, () => setCustomCatsLoading(false));
-    communityQuery.on('value', onCommunityCats, () => setCustomCatsLoading(false));
+    const channel = supabase
+      .channel('custom-categories-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'custom_categories' }, () => {
+        fetchCustomCategories();
+      })
+      .subscribe();
 
     return () => {
-      myQuery.off('value', onMyCats);
-      communityQuery.off('value', onCommunityCats);
+      supabase.removeChannel(channel);
     };
-  }, [currentUser, communityCatLimit]);
+  }, [currentUser?.id, fetchCustomCategories]);
 
   const allAvailableCustomCategories = React.useMemo(() => {
     const map = new Map<string, CustomCategory>();
@@ -790,8 +898,7 @@ export default function App() {
     return Array.from(map.values());
   }, [myCategories, communityCategories]);
 
-  // Handle Host watchdog
-  const isHost = !!(roomData && currentUser && roomData.hostUid === currentUser.uid);
+  const isHost = !!(roomData && currentUser && roomData.hostUid === currentUser.id);
 
   // Listen for Cinematic Space Ejection Events (strictly runs once per ejection event)
   useEffect(() => {
@@ -808,6 +915,7 @@ export default function App() {
     }
   }, [roomData?.ejectionEvent]);
 
+  // Host & GameOver Watchdog (uses Postgres RPCs safely)
   useEffect(() => {
     if (!currentRoomCode || !currentUser) {
       if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
@@ -822,69 +930,36 @@ export default function App() {
       const hostP = currentHost ? playersObj[currentHost] : null;
 
       const activeList = Object.values(playersObj)
-        .filter(p => !p.isSpectator)
+        .filter(p => !p.isSpectator && !isBotPlayer(p))
         .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
 
-      if ((!hostP || hostP.isSpectator) && activeList.length > 0) {
-        const newHost = activeList[0].uid;
-        if (currentUser.uid === newHost && currentHost !== newHost) {
-          db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(newHost);
-          showToast(t.hostMigratedNotification, 'success');
+      if ((!hostP || hostP.isSpectator || isBotPlayer(hostP, currentHost)) && activeList.length > 0) {
+        if (currentUser.id === activeList[0].uid && currentHost !== activeList[0].uid) {
+          supabase.rpc('claim_host_if_needed', { p_room_code: currentRoomCode }).then(() => {}, () => {});
         }
       }
 
-      // Check if game is in progress but active players dropped below 3
+      const activeAll = Object.values(playersObj).filter(p => !p.isSpectator);
       const isGameActive = data.status === 'playing' || data.status === 'voting' || data.status === 'resolving';
-      if (isGameActive && activeList.length < 3) {
-        const effectiveHost = currentHost && playersObj[currentHost] && !playersObj[currentHost].isSpectator
-          ? currentHost
-          : activeList[0]?.uid;
-        if (currentUser.uid === effectiveHost) {
-          db.ref(`spy_rooms/${currentRoomCode}`).update({
-            status: 'waiting',
-            round: 1,
-            spies: null,
-            undercoverUid: null,
-            word: null,
-            wordAr: null,
-            turnOrder: null,
-            turnIndex: 0,
-            turnTimeLeft: null,
-            turnEndsAt: null,
-            turnGraceUntil: null,
-            voteTimeLeft: null,
-            voteEndsAt: null,
-            votes: null,
-            voteChat: null,
-            currentDrawing: null,
-            lastDrawing: null,
-            blackoutActive: false,
-            blackoutEndsAt: null,
-            spyGuessCandidateUid: null,
-            spyGuessOptions: null,
-            spyGuessEndsAt: null,
-            spyGuessResult: null,
-            activeCustomCategoryId: null,
-            customCategoryWords: null,
-            wordCustomCategoryName: null,
-            wordCustomCategoryImage: null,
-            winnerTeam: null,
-            announcement: {
-              msg: t.gameAbortedNotEnoughPlayers,
-              type: 'danger',
-              timestamp: firebase.database.ServerValue.TIMESTAMP
-            }
-          });
+      if (isGameActive && activeAll.length < 3) {
+        const effectiveHost =
+          currentHost && playersObj[currentHost] && !playersObj[currentHost].isSpectator
+            ? currentHost
+            : activeList[0]?.uid;
+        if (currentUser.id === effectiveHost) {
+          supabase
+            .rpc('reset_room_to_lobby', { p_room_code: currentRoomCode, p_reason: t.gameAbortedNotEnoughPlayers })
+            .then(() => {}, () => {});
         }
       }
-    }, 1000);
+    }, 1500);
 
     return () => {
       if (watchdogIntervalRef.current) clearInterval(watchdogIntervalRef.current);
     };
-  }, [currentRoomCode, currentUser]);
+  }, [currentRoomCode, currentUser?.id, t.gameAbortedNotEnoughPlayers]);
 
-  // Advance Turn logic (Guarded against stale turn/round and RTDB child contention)
+  // Advance Turn RPC wrapper
   const advanceTurn = async (expectedTurnIndex?: number, wasTimeout: boolean = false, expectedRound?: number) => {
     if (!currentRoomCode) return;
     const lockKey = `${currentRoomCode}:${expectedRound ?? 'any'}:${expectedTurnIndex ?? 'any'}`;
@@ -892,51 +967,18 @@ export default function App() {
     advancingTurnKeyRef.current = lockKey;
 
     try {
-      const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-      const typedRoom = snap.val() as RoomData | null;
-      if (!typedRoom || typedRoom.status !== 'playing') return;
+      const speakerUid = lastRoomSnapshotRef.current?.turnOrder?.[lastRoomSnapshotRef.current?.turnIndex || 0];
+      const speakerName = (speakerUid && lastRoomSnapshotRef.current?.players?.[speakerUid]?.name) || 'Agent';
 
-      const resolvedRound = expectedRound ?? typedRoom.round ?? 1;
-      const speakerUid = typedRoom.turnOrder?.[typedRoom.turnIndex || 0];
-      const speakerPlayer = speakerUid ? typedRoom.players?.[speakerUid] : null;
-
-      const result = computeNextTurnState(typedRoom, {
-        expectedTurnIndex,
-        expectedRound: resolvedRound,
-        wasTimeout,
-        now: getServerNow()
+      await supabase.rpc('advance_room_turn', {
+        p_room_code: currentRoomCode,
+        p_expected_turn_index: expectedTurnIndex ?? null,
+        p_was_timeout: wasTimeout,
+        p_expected_round: expectedRound ?? null,
+        p_timeout_msg: wasTimeout ? t.annTurnTimedOut.replace('{name}', speakerName) : null
       });
-      if (!result.changed) return;
-
-      const turnPatch: Record<string, unknown> = {
-        players: result.room.players,
-        round: result.room.round,
-        completedTurnsThisRound: result.room.completedTurnsThisRound ?? null,
-        turnOrder: result.room.turnOrder,
-        turnIndex: result.room.turnIndex,
-        turnTimeLeft: result.room.turnTimeLeft ?? null,
-        turnGraceUntil: result.room.turnGraceUntil ?? null,
-        turnEndsAt: result.room.turnEndsAt ?? null,
-        votes: result.room.votes ?? null
-      };
-
-      await db.ref(`spy_rooms/${currentRoomCode}`).update(turnPatch);
-
-      if (result.afkKickedName) {
-        broadcastAnnouncement(
-          lang === 'ar'
-            ? `تم استبعاد ${result.afkKickedName} تلقائياً لعدم التفاعل لمدة 3 جولات متتالية`
-            : `${result.afkKickedName} was auto-kicked for being inactive for 3 rounds`,
-          'danger'
-        );
-      } else if (wasTimeout && speakerPlayer && !isBotPlayer(speakerPlayer, speakerUid)) {
-        broadcastAnnouncement(
-          t.annTurnTimedOut.replace('{name}', speakerPlayer.name || 'Agent'),
-          'normal'
-        );
-      }
     } catch {
-      // ignore transient network errors
+      // ignore transient errors; watchdog retries cleanly
     } finally {
       if (advancingTurnKeyRef.current === lockKey) {
         advancingTurnKeyRef.current = null;
@@ -944,94 +986,28 @@ export default function App() {
     }
   };
 
-  // Process Vote Results (Reads fresh votes from RTDB, resolves immediately with server timestamp)
+  // Resolve Votes RPC wrapper (Runs atomically inside Postgres!)
   const processVoteResults = async (_roomFallback?: RoomData | null) => {
     if (!currentRoomCode || !isHost || isResolvingVotesRef.current) return;
     isResolvingVotesRef.current = true;
-
     try {
-      const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-      const latestRoom = snap.val() as RoomData | null;
-      if (!latestRoom || latestRoom.status !== 'voting') return;
-
-      // Ensure any unvoted bots still cast a real vote if timer expired
-      const eligibleVoters = getEligibleVoters(latestRoom.players);
-      const unvotedBots = eligibleVoters.filter(p => isBotPlayer(p) && !latestRoom.votes?.[p.uid]);
-      if (unvotedBots.length > 0) {
-        const spies = latestRoom.spies || [];
-        const activePlayers = Object.values(latestRoom.players || {}).filter(p => !p.isSpectator);
-        const nextVotes = { ...(latestRoom.votes || {}) };
-        for (const bot of unvotedBots) {
-          nextVotes[bot.uid] = generateSmartBotVote({
-            botUid: bot.uid,
-            isSpy: spies.includes(bot.uid),
-            isUndercover: latestRoom.undercoverUid === bot.uid,
-            activePlayers,
-            spies,
-            gameChat: latestRoom.gameChat,
-            word: latestRoom.word,
-            wordAr: latestRoom.wordAr,
-            wordCategory: latestRoom.wordCategory
-          });
-        }
-        latestRoom.votes = nextVotes;
-      }
-
-      const resolution = resolveVoteOutcome(latestRoom, getServerNow());
-      await db
-        .ref(`spy_rooms/${currentRoomCode}`)
-        .update(toFirebaseUpdatePayload(resolution.nextRoomFields as Record<string, unknown>));
-
-      const playersObj = (resolution.nextRoomFields.players as Record<string, PlayerData>) || latestRoom.players || {};
-      const ejectedName = resolution.ejectedName || '?';
-
-      if (resolution.outcome === 'nobody_ejected') {
-        broadcastAnnouncement(t.annNobodyEjected, 'normal');
-      } else if (resolution.outcome === 'spy_last_chance') {
-        broadcastAnnouncement(t.annSpyLastChance.replace('{name}', ejectedName), 'danger');
-      } else if (resolution.outcome === 'crew_win') {
-        broadcastAnnouncement(t.annCrewWins.replace('{name}', ejectedName), 'success');
-        awardXP(playersObj, latestRoom.spies || [], 'crew');
-      } else if (resolution.outcome === 'spy_ejected_continue') {
-        broadcastAnnouncement(t.annSpyEjectedMoreRemain.replace('{name}', ejectedName), 'danger');
-      } else if (resolution.outcome === 'spies_win') {
-        broadcastAnnouncement(t.annSpiesWin.replace('{name}', ejectedName), 'danger');
-        awardXP(playersObj, latestRoom.spies || [], 'spies');
-      } else if (resolution.outcome === 'innocent_ejected_continue') {
-        broadcastAnnouncement(t.annInnocentEjected.replace('{name}', ejectedName), 'danger');
-      }
+      await supabase.rpc('resolve_room_votes', { p_room_code: currentRoomCode });
     } catch {
-      // keep status in 'voting' so retry succeeds cleanly
+      // keep status in 'voting' so watchdog retries
     } finally {
       isResolvingVotesRef.current = false;
     }
   };
 
-  // Submit Spy Last-Chance Guess (supports both human spy click and host timeout/bot automation)
+  // Submit Spy Last-Chance Guess RPC wrapper
   const handleSubmitSpyGuess = async (guessedWordEn: string | null) => {
     if (!currentRoomCode || isResolvingSpyGuessRef.current) return;
     isResolvingSpyGuessRef.current = true;
     try {
-      const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-      const latestRoom = snap.val() as RoomData | null;
-      if (!latestRoom || latestRoom.status !== 'spy_guess') return;
-
-      const resolved = resolveSpyLastChanceGuess(latestRoom, guessedWordEn);
-      await db
-        .ref(`spy_rooms/${currentRoomCode}`)
-        .update(toFirebaseUpdatePayload(resolved.nextRoomFields as Record<string, unknown>));
-
-      const playersObj = (latestRoom.finalPlayers || latestRoom.players || {}) as Record<string, PlayerData>;
-      const spiesList = latestRoom.finalSpies || latestRoom.spies || [];
-      const spyUid = latestRoom.spyGuessCandidateUid || '';
-      const spyName = (spyUid && playersObj[spyUid]?.name) || 'Spy';
-
-      if (resolved.isCorrect) {
-        broadcastAnnouncement(t.annSpyStoleWin.replace('{name}', spyName), 'danger');
-      } else {
-        broadcastAnnouncement(t.annSpyMissedWin.replace('{name}', spyName), 'success');
-      }
-      awardXP(playersObj, spiesList, resolved.winnerTeam);
+      await supabase.rpc('submit_spy_last_chance_guess', {
+        p_room_code: currentRoomCode,
+        p_guessed_word: guessedWordEn
+      });
     } catch {
       // allow retry safely
     } finally {
@@ -1039,7 +1015,7 @@ export default function App() {
     }
   };
 
-  // Host-authoritative Turn, Vote & Spy-Guess Countdown Watchdog (synchronized to Firebase server time)
+  // Host-authoritative Turn, Vote & Spy-Guess Countdown Watchdog (synchronized to Postgres server clock)
   useEffect(() => {
     if (!isHost || !currentRoomCode || !roomData) {
       if (turnIntervalRef.current) {
@@ -1059,20 +1035,16 @@ export default function App() {
       return;
     }
 
-    // Playing watchdog (Blackout cleanup, invalid speaker recovery, turn timeout enforcement)
     if (roomData.status === 'playing') {
       if (!turnIntervalRef.current) {
         turnIntervalRef.current = setInterval(async () => {
           if (isTurnTickRunningRef.current) return;
           isTurnTickRunningRef.current = true;
           try {
-            const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-            const room = snap.val() as RoomData | null;
+            const room = lastRoomSnapshotRef.current;
             if (!room || room.status !== 'playing') return;
 
             const now = getServerNow();
-
-            // Pause turn countdown while cinematic ejection overlay or round-start grace is active
             if ((room.ejectionEndsAt && now < room.ejectionEndsAt) || (room.turnGraceUntil && now < room.turnGraceUntil)) {
               return;
             }
@@ -1082,7 +1054,6 @@ export default function App() {
             const currentSpeakerUid = turnOrder[turnIdx];
             const currentSpeaker = currentSpeakerUid ? room.players?.[currentSpeakerUid] : null;
 
-            // Self-heal if turn pointer lands on an empty/spectator slot or completed speaker
             if (
               turnOrder.length === 0 ||
               !currentSpeakerUid ||
@@ -1094,18 +1065,9 @@ export default function App() {
               return;
             }
 
-            const defaultTurnSeconds = getEffectiveTurnSeconds(room.gameMode, room.turnSeconds);
-            if (!room.turnEndsAt || room.turnEndsAt <= 0) {
-              await db.ref(`spy_rooms/${currentRoomCode}`).update({
-                turnEndsAt: now + defaultTurnSeconds * 1000,
-                turnTimeLeft: defaultTurnSeconds
-              });
-              return;
-            }
-
             const isBotTurn = isBotPlayer(currentSpeaker, currentSpeakerUid);
             const timeoutMarginMs = isBotTurn ? 0 : 600;
-            if (now >= room.turnEndsAt + timeoutMarginMs) {
+            if (room.turnEndsAt && now >= room.turnEndsAt + timeoutMarginMs) {
               await advanceTurn(room.turnIndex, true, room.round);
             }
           } catch {
@@ -1123,24 +1085,16 @@ export default function App() {
       isTurnTickRunningRef.current = false;
     }
 
-    // Voting watchdog (Ensures deadline exists & triggers resolution immediately when all voted or expired)
     if (roomData.status === 'voting') {
       if (!voteIntervalRef.current) {
         voteIntervalRef.current = setInterval(async () => {
           if (isVoteTickRunningRef.current || isResolvingVotesRef.current) return;
           isVoteTickRunningRef.current = true;
           try {
-            const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-            const room = snap.val() as RoomData | null;
+            const room = lastRoomSnapshotRef.current;
             if (!room || room.status !== 'voting') return;
-
             const now = getServerNow();
-            if (!room.voteEndsAt || room.voteEndsAt <= 0) {
-              await db.ref(`spy_rooms/${currentRoomCode}/voteEndsAt`).set(now + DEFAULT_VOTE_SECONDS * 1000);
-              return;
-            }
-
-            if (areAllEligibleVotesSubmitted(room) || now >= room.voteEndsAt) {
+            if (areAllEligibleVotesSubmitted(room) || (room.voteEndsAt && now >= room.voteEndsAt)) {
               await processVoteResults(room);
             }
           } catch {
@@ -1158,14 +1112,12 @@ export default function App() {
       isVoteTickRunningRef.current = false;
     }
 
-    // Spy Last-Chance Guess timeout watchdog
     if (roomData.status === 'spy_guess') {
       if (!spyGuessIntervalRef.current) {
         spyGuessIntervalRef.current = setInterval(async () => {
           if (isResolvingSpyGuessRef.current) return;
           try {
-            const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-            const room = snap.val() as RoomData | null;
+            const room = lastRoomSnapshotRef.current;
             if (!room || room.status !== 'spy_guess') return;
             const now = getServerNow();
             if (room.spyGuessEndsAt && now >= room.spyGuessEndsAt) {
@@ -1201,54 +1153,7 @@ export default function App() {
     };
   }, [isHost, currentRoomCode, roomData?.status]);
 
-  // Award XP at game end (batched parallel reads + single atomic multi-path write)
-  const awardXP = async (playersObj: Record<string, PlayerData>, spies: string[], winner: 'crew' | 'spies') => {
-    const humanUids = Object.keys(playersObj).filter(
-      uid => !uid.startsWith('bot_') && !playersObj[uid]?.isBot
-    );
-    if (humanUids.length === 0) return;
-
-    const scoreResults = await Promise.all(
-      humanUids.map(uid =>
-        db
-          .ref(`users/${uid}/score`)
-          .once('value')
-          .then(snap => ({ uid, currentScore: Number(snap.val()) || 0 }))
-          .catch(() => null)
-      )
-    );
-
-    const updates: Record<string, number> = {};
-    for (const res of scoreResults) {
-      if (!res) continue;
-      const isSpy = spies.includes(res.uid);
-      const isWinner = (winner === 'crew' && !isSpy) || (winner === 'spies' && isSpy);
-      const gain = 10 + (isWinner ? 25 : 0);
-      updates[`users/${res.uid}/score`] = res.currentScore + gain;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      db.ref().update(updates).catch(() => {});
-    }
-  };
-
-  // Auto-heal bot host -> assign to first human
-  useEffect(() => {
-    if (currentRoomCode && roomData) {
-      const players = roomData.players || {};
-      const hostUid = roomData.hostUid;
-      const hostPlayer = hostUid ? players[hostUid] : null;
-      const isHostBot = !hostPlayer || isBotPlayer(hostPlayer, hostUid);
-      if (isHostBot) {
-        const firstHuman = Object.values(players).find(p => !isBotPlayer(p));
-        if (firstHuman) {
-          db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(firstHuman.uid);
-        }
-      }
-    }
-  }, [currentRoomCode, roomData?.hostUid, roomData?.players]);
-
-  // Bot Speaking Automation (Isolated from voting & freeze timestamps so timers never cancel mid-turn)
+  // Bot Speaking Automation (Executes securely INSIDE Postgres so Host never learns spies/words!)
   const currentSpeakerUid = roomData?.turnOrder?.[roomData?.turnIndex || 0];
   useEffect(() => {
     if (!isHost || !currentRoomCode || roomData?.status !== 'playing' || !currentSpeakerUid) return;
@@ -1265,9 +1170,6 @@ export default function App() {
     }
 
     let cancelled = false;
-    let botTimer: ReturnType<typeof setTimeout> | null = null;
-    let advanceTimer: ReturnType<typeof setTimeout> | null = null;
-
     const serverNow = getServerNow();
     const ejectionRemaining =
       roomData.ejectionEndsAt && roomData.ejectionEndsAt > serverNow
@@ -1283,88 +1185,27 @@ export default function App() {
         ? Math.max(900, waitOffset + 400)
         : Math.max(1600, waitOffset + 800);
 
-    botTimer = setTimeout(async () => {
+    const botTimer = setTimeout(async () => {
       if (cancelled) return;
       try {
-        const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-        if (cancelled) return;
-        const latest = snap.val() as RoomData | null;
-        if (
-          !latest ||
-          latest.status !== 'playing' ||
-          (latest.round || 1) !== targetRound ||
-          (latest.turnIndex || 0) !== targetTurnIndex ||
-          latest.turnOrder?.[targetTurnIndex] !== currentSpeakerUid
-        ) {
-          return;
-        }
-
-        if (latest.completedTurnsThisRound?.[currentSpeakerUid]) {
-          await advanceTurn(targetTurnIndex, false, targetRound);
-          return;
-        }
-
-        const latestSpeaker = latest.players?.[currentSpeakerUid];
-        const isBotSpy = (latest.spies || []).includes(currentSpeakerUid);
-
-        const prevClues: string[] = [];
-        Object.values(latest.gameChat || {}).forEach(c => {
-          if (c?.text) prevClues.push(c.text);
-          if (c?.translations?.ar) prevClues.push(c.translations.ar);
-          if (c?.translations?.en) prevClues.push(c.translations.en);
+        await supabase.rpc('run_bot_turn_action', {
+          p_room_code: currentRoomCode,
+          p_bot_uid: currentSpeakerUid,
+          p_expected_round: targetRound,
+          p_expected_turn_index: targetTurnIndex
         });
-
-        const cluePair = generateSmartBotCluePair({
-          isSpy: isBotSpy,
-          word: latest.word || '',
-          wordAr: latest.wordAr || '',
-          category: latest.wordCategory || 'places',
-          language: lang,
-          previousClues: prevClues,
-          gameMode: latest.gameMode,
-          chameleonWord: latestSpeaker?.chameleonWord,
-          chameleonWordAr: latestSpeaker?.chameleonWordAr
-        });
-
-        await db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).set({
-          text: cluePair.en,
-          translations: { ar: cluePair.ar, en: cluePair.en },
-          isBot: true,
-          timestamp: firebase.database.ServerValue.TIMESTAMP
-        });
-        await db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
-          uid: currentSpeakerUid,
-          sender: latestSpeaker?.name || speaker?.name || 'Bot Agent',
-          avatar:
-            latestSpeaker?.avatar ||
-            speaker?.avatar ||
-            `https://api.dicebear.com/7.x/bottts/svg?seed=${currentSpeakerUid}`,
-          text: cluePair.en,
-          translations: { ar: cluePair.ar, en: cluePair.en },
-          isBot: true,
-          round: targetRound,
-          timestamp: firebase.database.ServerValue.TIMESTAMP
-        });
-        setTimeout(() => {
-          db.ref(`spy_rooms/${currentRoomCode}/speechBubbles/${currentSpeakerUid}`).remove().catch(() => {});
-        }, 5500);
-
-        advanceTimer = setTimeout(() => {
-          if (!cancelled) advanceTurn(targetTurnIndex, false, targetRound);
-        }, latest.gameMode === 'rapid' ? 650 : 900);
       } catch {
-        // Turn watchdog recovers automatically if anything transient fails
+        // Watchdog recovers automatically if needed
       }
     }, botThinkDelay);
 
     return () => {
       cancelled = true;
-      if (botTimer) clearTimeout(botTimer);
-      if (advanceTimer) clearTimeout(advanceTimer);
+      clearTimeout(botTimer);
     };
   }, [isHost, currentRoomCode, roomData?.status, roomData?.round, roomData?.turnIndex, currentSpeakerUid]);
 
-  // Bot Voting Automation (Votes promptly — and immediately in a batch once all humans have voted)
+  // Bot Voting Automation (Runs inside Postgres without exposing spy list)
   const eligibleVotersForBots = roomData?.status === 'voting' ? getEligibleVoters(roomData.players) : [];
   const unvotedBotsKey = eligibleVotersForBots
     .filter(p => isBotPlayer(p) && !roomData?.votes?.[p.uid])
@@ -1384,36 +1225,10 @@ export default function App() {
     const timerId = setTimeout(async () => {
       if (cancelled) return;
       try {
-        const snap = await db.ref(`spy_rooms/${currentRoomCode}`).once('value');
-        if (cancelled) return;
-        const latest = snap.val() as RoomData | null;
-        if (!latest || latest.status !== 'voting') return;
-
-        const eligible = getEligibleVoters(latest.players);
-        const remainingBots = eligible.filter(p => isBotPlayer(p) && !latest.votes?.[p.uid]);
-        if (remainingBots.length === 0) return;
-
-        const humansPending = eligible.filter(p => !isBotPlayer(p) && !latest.votes?.[p.uid]).length;
-        const botsToCommit = humansPending === 0 ? remainingBots : [remainingBots[0]];
-        const activePlayers = Object.values(latest.players || {}).filter(p => !p.isSpectator);
-        const spies = latest.spies || [];
-        const updates: Record<string, string> = {};
-
-        for (const bot of botsToCommit) {
-          updates[`spy_rooms/${currentRoomCode}/votes/${bot.uid}`] = generateSmartBotVote({
-            botUid: bot.uid,
-            isSpy: spies.includes(bot.uid),
-            isUndercover: latest.undercoverUid === bot.uid,
-            activePlayers,
-            spies,
-            gameChat: latest.gameChat,
-            word: latest.word,
-            wordAr: latest.wordAr,
-            wordCategory: latest.wordCategory
-          });
-        }
-
-        await db.ref().update(updates);
+        await supabase.rpc('run_bot_votes', {
+          p_room_code: currentRoomCode,
+          p_batch_all: unvotedHumansCount === 0
+        });
       } catch {
         // Watchdog retries safely
       }
@@ -1440,33 +1255,25 @@ export default function App() {
     return () => clearTimeout(resolveTimer);
   }, [allEligibleVotesSubmitted, currentRoomCode]);
 
-  // Bot Spy Last-Chance Guess Automation
+  // Bot Spy Last-Chance Guess Automation (Runs inside Postgres!)
   useEffect(() => {
     if (!isHost || !currentRoomCode || roomData?.status !== 'spy_guess') return;
     const candidateUid = roomData.spyGuessCandidateUid;
     if (!candidateUid) return;
     const candidatePlayer = roomData.players?.[candidateUid] || roomData.finalPlayers?.[candidateUid];
     if (!isBotPlayer(candidatePlayer, candidateUid)) return;
-    const options = roomData.spyGuessOptions || [];
-    if (options.length === 0) return;
 
     const serverNow = getServerNow();
-    const waitEjection = roomData.ejectionEndsAt && roomData.ejectionEndsAt > serverNow
-      ? roomData.ejectionEndsAt - serverNow
-      : 0;
+    const waitEjection =
+      roomData.ejectionEndsAt && roomData.ejectionEndsAt > serverNow
+        ? roomData.ejectionEndsAt - serverNow
+        : 0;
     const delayMs = waitEjection + 1800;
 
     let cancelled = false;
     const timer = setTimeout(() => {
       if (cancelled) return;
-      const realWord = (roomData.word || '').trim().toLowerCase();
-      const match = options.find(o => o.en.trim().toLowerCase() === realWord);
-      const decoys = options.filter(o => o.en.trim().toLowerCase() !== realWord);
-      const shouldGuessRight = match && Math.random() < 0.35;
-      const picked = shouldGuessRight ? match : (decoys[Math.floor(Math.random() * decoys.length)] || options[0]);
-      if (picked) {
-        handleSubmitSpyGuess(picked.en);
-      }
+      supabase.rpc('run_bot_spy_guess', { p_room_code: currentRoomCode }).then(() => {}, () => {});
     }, delayMs);
 
     return () => {
@@ -1475,107 +1282,379 @@ export default function App() {
     };
   }, [isHost, currentRoomCode, roomData?.status, roomData?.spyGuessCandidateUid, roomData?.ejectionEndsAt]);
 
-  const broadcastAnnouncement = (msg: string, type: 'normal' | 'danger' | 'success' = 'normal') => {
-    if (!currentRoomCode) return;
-    db.ref(`spy_rooms/${currentRoomCode}/announcement`).set({
-      msg,
-      type,
-      timestamp: firebase.database.ServerValue.TIMESTAMP
-    });
-  };
+  // Hydrate full Zero-Knowledge RoomData snapshot from normalized Postgres tables
+  const loadRoomState = useCallback(async (cleanCode: string, activeUid: string) => {
+    try {
+      const { data: roomRowRaw, error: rErr } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('code', cleanCode)
+        .maybeSingle();
 
-  // Request to Join Room (Public rooms require Host approval)
+      if (rErr || !roomRowRaw) {
+        leaveRoom();
+        return;
+      }
+
+      const roomRow = roomRowRaw as SqlRoomRow;
+
+      // Sync mission dossier on active match phase/round changes
+      const inActiveMatch = roomRow.status === 'playing' || roomRow.status === 'voting' || roomRow.status === 'spy_guess';
+      const phaseKey = `${cleanCode}:${roomRow.status}:${roomRow.round_num || 1}`;
+      let activeDossier = dossierRef.current;
+
+      if (inActiveMatch) {
+        if (!activeDossier || activeDossier.role === 'waiting' || dossierPhaseKeyRef.current !== phaseKey) {
+          const { data: dData } = await supabase.rpc('get_my_mission_dossier', { p_room_code: cleanCode });
+          if (dData) {
+            activeDossier = dData as MissionDossier;
+            dossierRef.current = activeDossier;
+            dossierPhaseKeyRef.current = phaseKey;
+            setMissionDossier(activeDossier);
+          }
+        }
+      } else {
+        activeDossier = null;
+        dossierRef.current = null;
+        dossierPhaseKeyRef.current = '';
+        setMissionDossier(null);
+      }
+
+      const isSpyViewer = activeDossier?.role === 'spy';
+
+      const [
+        { data: playerRows },
+        { data: joinReqRows },
+        { data: clueRows },
+        { data: voteRows },
+        { data: voteChatRows },
+        { data: lobbyChatRows },
+        spyRes
+      ] = await Promise.all([
+        supabase.from('room_players').select('*').eq('room_code', cleanCode).order('joined_at', { ascending: true }),
+        roomRow.host_uid === activeUid
+          ? supabase.from('join_requests').select('*').eq('room_code', cleanCode).order('created_at', { ascending: true })
+          : Promise.resolve({ data: [] }),
+        supabase.from('room_clues').select('*').eq('room_code', cleanCode).order('created_at', { ascending: true }),
+        supabase.from('room_votes').select('*').eq('room_code', cleanCode),
+        supabase.from('vote_chat').select('*').eq('room_code', cleanCode).order('created_at', { ascending: true }),
+        supabase.from('lobby_chat').select('*').eq('room_code', cleanCode).order('created_at', { ascending: true }),
+        isSpyViewer && roomRow.game_mode === 'mole'
+          ? supabase.from('room_spy_messages').select('*').eq('room_code', cleanCode).order('created_at', { ascending: true })
+          : Promise.resolve({ data: [] })
+      ]);
+
+      const playersMap: Record<string, PlayerData> = {};
+      (playerRows || []).forEach(pr => {
+        const p = pr as SqlPlayerRow;
+        playersMap[p.uid] = {
+          uid: p.uid,
+          name: p.name,
+          avatar: p.avatar,
+          joinedAt: toMs(p.joined_at),
+          isSpectator: p.is_spectator,
+          isBot: p.is_bot,
+          postGame: p.post_game || null,
+          isSilenced: p.is_silenced,
+          disqualifiedVote: p.disqualified_vote,
+          missedTurns: p.missed_turns
+        };
+      });
+
+      if (!playersMap[activeUid]) {
+        showToast(t.msgRemovedFromStation, 'danger');
+        leaveRoom();
+        return;
+      }
+
+      // Apply personal dossier safely without leaking opponents' secrets
+      let spiesList: string[] | undefined = undefined;
+      let secretWord: string | undefined = undefined;
+      let secretWordAr: string | undefined = undefined;
+      let undercoverUid: string | null = null;
+      let finalPlayers: Record<string, PlayerData> | undefined = undefined;
+      let finalSpies: string[] | undefined = undefined;
+
+      if (roomRow.status === 'gameover') {
+        secretWord = roomRow.revealed_word || undefined;
+        secretWordAr = roomRow.revealed_word_ar || undefined;
+        spiesList = roomRow.revealed_spies || [];
+        finalSpies = roomRow.revealed_spies || [];
+        if (roomRow.final_players) {
+          finalPlayers = roomRow.final_players;
+        }
+      } else if (activeDossier && activeDossier.role !== 'waiting') {
+        if (activeDossier.role === 'spy') {
+          spiesList =
+            activeDossier.fellowSpies && activeDossier.fellowSpies.length > 0
+              ? activeDossier.fellowSpies
+              : [activeUid];
+          if (roomRow.game_mode === 'chameleon' && playersMap[activeUid]) {
+            playersMap[activeUid].chameleonWord = activeDossier.word || '';
+            playersMap[activeUid].chameleonWordAr = activeDossier.wordAr || '';
+          }
+        } else {
+          secretWord = activeDossier.word || undefined;
+          secretWordAr = activeDossier.wordAr || undefined;
+          if (activeDossier.role === 'undercover') {
+            undercoverUid = activeUid;
+            spiesList = activeDossier.protectedSpyUid ? [activeDossier.protectedSpyUid] : [];
+          } else {
+            spiesList = [];
+          }
+        }
+      }
+
+      const joinReqMap: Record<string, JoinRequest> = {};
+      (joinReqRows || []).forEach((jr: Record<string, unknown>) => {
+        const uidKey = jr.uid as string;
+        joinReqMap[uidKey] = {
+          uid: uidKey,
+          name: (jr.name as string) || 'Agent',
+          avatar: (jr.avatar as string) || '',
+          status: (jr.status as JoinRequest['status']) || 'pending',
+          timestamp: toMs(jr.created_at as string) || Date.now()
+        };
+      });
+
+      const gameChatMap: NonNullable<RoomData['gameChat']> = {};
+      (clueRows || []).forEach((c: Record<string, unknown>) => {
+        gameChatMap[c.id as string] = {
+          uid: c.sender_uid as string,
+          sender: c.sender_name as string,
+          avatar: c.sender_avatar as string,
+          text: c.clue_text as string,
+          translations: c.translations as { ar: string; en: string } | undefined,
+          isBot: Boolean(c.is_bot),
+          round: Number(c.round_num) || 1,
+          timestamp: toMs(c.created_at as string) || Date.now()
+        };
+      });
+
+      const votesMap: Record<string, string> = {};
+      (voteRows || []).forEach((v: Record<string, unknown>) => {
+        votesMap[v.voter_uid as string] = v.target_uid as string;
+      });
+
+      const voteChatMap: NonNullable<RoomData['voteChat']> = {};
+      (voteChatRows || []).forEach((vc: Record<string, unknown>) => {
+        voteChatMap[vc.id as string] = {
+          uid: vc.sender_uid as string,
+          sender: vc.sender_name as string,
+          avatar: vc.sender_avatar as string,
+          text: vc.text as string,
+          isBot: Boolean(vc.is_bot),
+          timestamp: toMs(vc.created_at as string) || Date.now()
+        };
+      });
+
+      const lobbyChatMap: NonNullable<RoomData['lobbyChat']> = {};
+      (lobbyChatRows || []).forEach((lc: Record<string, unknown>) => {
+        lobbyChatMap[lc.id as string] = {
+          sender: lc.sender_name as string,
+          text: lc.text as string
+        };
+      });
+
+      const spyChatMap: NonNullable<RoomData['spyChat']> = {};
+      ((spyRes as { data?: Record<string, unknown>[] })?.data || []).forEach(sc => {
+        spyChatMap[sc.id as string] = {
+          sender: sc.sender_name as string,
+          text: sc.text as string
+        };
+      });
+
+      const assembled: RoomData = {
+        status: roomRow.status,
+        originalHostUid: roomRow.original_host_uid || undefined,
+        hostUid: roomRow.host_uid,
+        categories: roomRow.categories || ['players'],
+        customCategoryIds: roomRow.custom_category_ids || [],
+        customCategorySnapshot: roomRow.custom_category_snapshot || undefined,
+        activeCustomCategoryId: roomRow.active_custom_category_id || undefined,
+        customCategoryWords: roomRow.custom_category_words || undefined,
+        wordCustomCategoryName: roomRow.active_custom_category_name || undefined,
+        wordCustomCategoryImage: roomRow.active_custom_category_image || undefined,
+        allowSpyLastChance: Boolean(roomRow.allow_spy_last_chance),
+        spyGuessCandidateUid: roomRow.spy_guess_candidate_uid || null,
+        spyGuessOptions: roomRow.spy_guess_options || null,
+        spyGuessEndsAt: toMs(roomRow.spy_guess_ends_at) ?? null,
+        spyGuessResult: roomRow.spy_guess_result || null,
+        spyCount: roomRow.spy_count,
+        maxPlayers: roomRow.max_players,
+        turnSeconds: roomRow.turn_seconds,
+        visibility: roomRow.visibility,
+        gameMode: roomRow.game_mode,
+        createdAt: toMs(roomRow.created_at) || Date.now(),
+        word: secretWord,
+        wordAr: secretWordAr,
+        wordCategory: (roomRow.active_word_category as CategoryKey) || undefined,
+        spies: spiesList,
+        undercoverUid,
+        round: roomRow.round_num || 1,
+        turnOrder: roomRow.turn_order || [],
+        turnIndex: roomRow.turn_index || 0,
+        turnTimeLeft: roomRow.turn_time_left ?? null,
+        turnEndsAt: toMs(roomRow.turn_ends_at) ?? null,
+        turnGraceUntil: toMs(roomRow.turn_grace_until) ?? null,
+        completedTurnsThisRound: roomRow.completed_turns_this_round || {},
+        voteEndsAt: toMs(roomRow.vote_ends_at) ?? null,
+        votes: Object.keys(votesMap).length > 0 ? votesMap : null,
+        winnerTeam: roomRow.winner_team || null,
+        finalSpies,
+        finalPlayers,
+        players: playersMap,
+        lobbyChat: lobbyChatMap,
+        gameChat: gameChatMap,
+        voteChat: Object.keys(voteChatMap).length > 0 ? voteChatMap : null,
+        spyChat: spyChatMap,
+        joinRequests: joinReqMap,
+        announcement: roomRow.announcement || undefined,
+        blackoutActive: Boolean(roomRow.blackout_active),
+        blackoutEndsAt: toMs(roomRow.blackout_ends_at) ?? null,
+        lastBlackoutRound: roomRow.last_blackout_round || 0,
+        isQuickMatch: Boolean(roomRow.is_quick_match),
+        ejectionEndsAt: toMs(roomRow.ejection_ends_at) ?? null,
+        ejectionEvent: roomRow.ejection_event || null
+      };
+
+      lastRoomSnapshotRef.current = assembled;
+      setRoomData(assembled);
+
+      // Waiting lobby resets
+      if (assembled.status === 'waiting') {
+        lastSeenEjectionTimestampRef.current = 0;
+        completedEjectionsRef.current.clear();
+        if (playersMap[activeUid]?.isSpectator) {
+          supabase
+            .from('room_players')
+            .update({ is_spectator: false })
+            .eq('room_code', cleanCode)
+            .eq('uid', activeUid)
+            .then(() => {}, () => {});
+        }
+      }
+
+      // If gameover and all remaining humans have returned to lobby, reset room cleanly
+      if (
+        assembled.status === 'gameover' &&
+        activeUid === assembled.hostUid &&
+        shouldResetGameOverToLobby(assembled.players)
+      ) {
+        supabase.rpc('reset_room_to_lobby', { p_room_code: cleanCode }).then(() => {}, () => {});
+        return;
+      }
+
+      // Round transition popup announcement (once per round)
+      if (assembled.status !== 'playing') {
+        lastAnnouncedRoundRef.current = 0;
+        setAnnouncedRound(null);
+      } else if (assembled.round && assembled.round > lastAnnouncedRoundRef.current) {
+        lastAnnouncedRoundRef.current = assembled.round;
+        setAnnouncedRound(assembled.round);
+        sound.playChime([[523, 0, 0.15], [659, 120, 0.15], [784, 240, 0.3]], 'sine');
+        if (roundAnnounceTimerRef.current) clearTimeout(roundAnnounceTimerRef.current);
+        roundAnnounceTimerRef.current = setTimeout(() => {
+          setAnnouncedRound(null);
+        }, ROUND_ANNOUNCE_MS);
+      }
+    } catch {
+      // Transient load failure; next realtime tick retries
+    }
+  }, []);
+
+  // Request to Join Room (Public lobby rooms require Host approval)
   const handleRequestJoinRoom = async (code: string) => {
     if (!currentUser) return;
     const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!cleanCode) return;
+
     try {
-      const snap = await db.ref(`spy_rooms/${cleanCode}`).once('value');
-      const room = snap.val();
-      if (!room) {
+      const { data, error } = await supabase.rpc('lookup_room_for_join', { p_code: cleanCode });
+      if (error || !data?.exists) {
         showToast(t.errStationNotExist, 'danger');
         return;
       }
 
-      // If user is already the host or already in the room, join directly
-      if (room.hostUid === currentUser.uid || (room.players && room.players[currentUser.uid])) {
+      const info = data as {
+        exists: boolean;
+        status: string;
+        visibility: string;
+        hostUid: string;
+        hostName?: string;
+        isMember?: boolean;
+        isInvited?: boolean;
+      };
+
+      if (
+        info.hostUid === currentUser.id ||
+        info.isMember ||
+        info.isInvited ||
+        info.status === 'playing' ||
+        info.status === 'voting' ||
+        info.status === 'spy_guess' ||
+        info.visibility === 'private'
+      ) {
         joinRoom(cleanCode);
         return;
       }
 
-      // If user was invited to this room, admit them directly without host approval
-      if (room.invitedPlayers && room.invitedPlayers[currentUser.uid]) {
-        joinRoom(cleanCode);
-        return;
+      // Public room in waiting lobby -> Host must approve
+      const hostName = info.hostName || 'Commander';
+      await supabase.from('join_requests').upsert(
+        {
+          room_code: cleanCode,
+          uid: currentUser.id,
+          name: profileNameRef.current || getUserMeta(currentUser).name,
+          avatar: profileAvatarRef.current || getUserMeta(currentUser).avatar,
+          status: 'pending'
+        },
+        { onConflict: 'room_code,uid' }
+      );
+
+      setPendingJoinApproval({ code: cleanCode, hostName, queuePosition: 1 });
+      showToast(t.joinRequestPending, 'normal');
+
+      if (pendingReqChannelRef.current) {
+        supabase.removeChannel(pendingReqChannelRef.current);
       }
 
-      // If game is in progress (playing, voting, or spy_guess), enter immediately as spectator without interrupting host
-      if (room.status === 'playing' || room.status === 'voting' || room.status === 'spy_guess') {
-        joinRoom(cleanCode);
-        return;
-      }
-
-      // If room is public and in lobby, Host must approve!
-      if (room.visibility === 'public') {
-        const hostName = (room.hostUid && room.players?.[room.hostUid]?.name) || 'Commander';
-        const reqRef = db.ref(`spy_rooms/${cleanCode}/joinRequests/${currentUser.uid}`);
-        await reqRef.set({
-          uid: currentUser.uid,
-          name: profileName || currentUser.displayName || 'Agent',
-          avatar: profileAvatar || currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
-          status: 'pending',
-          timestamp: firebase.database.ServerValue.TIMESTAMP
-        });
-        reqRef.onDisconnect().remove();
-
-        setPendingJoinApproval({ code: cleanCode, hostName, queuePosition: 1 });
-        showToast(t.joinRequestPending, 'normal');
-
-        // Track live queue position among pending requests
-        const allRequestsRef = db.ref(`spy_rooms/${cleanCode}/joinRequests`);
-        const onAllReqs = (allSnap: firebase.database.DataSnapshot) => {
-          const allReqs = allSnap.val() || {};
-          const myReq = allReqs[currentUser.uid];
-          if (!myReq) return;
-          const pendingBefore = Object.values(allReqs)
-            .filter((r: unknown) => {
-              const req = r as { status?: string; timestamp?: number };
-              return req && req.status === 'pending' && (req.timestamp || 0) < (myReq.timestamp || 0);
-            }).length;
-          setPendingJoinApproval(prev => prev ? { ...prev, queuePosition: pendingBefore + 1 } : null);
-        };
-        allRequestsRef.on('value', onAllReqs);
-
-        // Listen for host decision
-        const onDecision = (respSnap: firebase.database.DataSnapshot) => {
-          const reqData = respSnap.val();
-          if (!reqData) return;
-          if (reqData.status === 'accepted') {
-            reqRef.off('value', onDecision);
-            allRequestsRef.off('value', onAllReqs);
-            pendingReqCleanupsRef.current = null;
-            setPendingJoinApproval(null);
-            joinRoom(cleanCode);
-            showToast(t.joinRequestAccepted, 'success');
-          } else if (reqData.status === 'rejected') {
-            reqRef.off('value', onDecision);
-            allRequestsRef.off('value', onAllReqs);
-            pendingReqCleanupsRef.current = null;
-            reqRef.remove().catch(() => {});
-            setPendingJoinApproval(null);
-            showToast(t.joinRequestDeclined, 'danger');
+      const channel = supabase
+        .channel(`join-req:${cleanCode}:${currentUser.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'join_requests',
+            filter: `room_code=eq.${cleanCode}`
+          },
+          payload => {
+            const row = payload.new as { uid?: string; status?: string } | undefined;
+            if (!row || row.uid !== currentUser.id) return;
+            if (row.status === 'accepted') {
+              supabase.removeChannel(channel);
+              pendingReqChannelRef.current = null;
+              setPendingJoinApproval(null);
+              joinRoom(cleanCode);
+              showToast(t.joinRequestAccepted, 'success');
+            } else if (row.status === 'rejected') {
+              supabase.removeChannel(channel);
+              pendingReqChannelRef.current = null;
+              supabase
+                .from('join_requests')
+                .delete()
+                .eq('room_code', cleanCode)
+                .eq('uid', currentUser.id)
+                .then(() => {}, () => {});
+              setPendingJoinApproval(null);
+              showToast(t.joinRequestDeclined, 'danger');
+            }
           }
-        };
-        reqRef.on('value', onDecision);
+        )
+        .subscribe();
 
-        pendingReqCleanupsRef.current = () => {
-          reqRef.off('value', onDecision);
-          allRequestsRef.off('value', onAllReqs);
-        };
-        return;
-      }
-
-      // Private room with direct code -> join directly
-      joinRoom(cleanCode);
+      pendingReqChannelRef.current = channel;
     } catch {
       showToast(t.errStationNotExist, 'danger');
     }
@@ -1583,34 +1662,35 @@ export default function App() {
 
   const handleCancelJoinRequest = async () => {
     if (pendingJoinApproval && currentUser) {
-      if (pendingReqCleanupsRef.current) {
-        pendingReqCleanupsRef.current();
-        pendingReqCleanupsRef.current = null;
+      if (pendingReqChannelRef.current) {
+        supabase.removeChannel(pendingReqChannelRef.current);
+        pendingReqChannelRef.current = null;
       }
-      db.ref(`spy_rooms/${pendingJoinApproval.code}/joinRequests/${currentUser.uid}`).remove().catch(() => {});
+      supabase
+        .from('join_requests')
+        .delete()
+        .eq('room_code', pendingJoinApproval.code)
+        .eq('uid', currentUser.id)
+        .then(() => {}, () => {});
       setPendingJoinApproval(null);
     }
   };
 
   const handleAcceptJoinRequest = async (applicantUid: string) => {
     if (!currentRoomCode) return;
-    const req = roomData?.joinRequests?.[applicantUid];
     sound.playTone(600, 'sine', 0.1);
-    await db.ref(`spy_rooms/${currentRoomCode}/joinRequests/${applicantUid}/status`).set('accepted');
-    if (req) {
-      await db.ref(`spy_rooms/${currentRoomCode}/players/${applicantUid}`).set({
-        uid: applicantUid,
-        name: req.name || 'Agent',
-        avatar: req.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${applicantUid}`,
-        joinedAt: firebase.database.ServerValue.TIMESTAMP,
-        isSpectator: !!(roomData?.status === 'playing' || roomData?.status === 'voting')
-      });
-      showToast(t.toastAcceptedJoin.replace('{name}', req.name), 'success');
-    }
-    // Clean up processed request so the host modal advances sequentially to the next applicant
+    await supabase.rpc('accept_join_request', {
+      p_room_code: currentRoomCode,
+      p_applicant_uid: applicantUid
+    });
     setTimeout(() => {
       if (currentRoomCode) {
-        db.ref(`spy_rooms/${currentRoomCode}/joinRequests/${applicantUid}`).remove().catch(() => {});
+        supabase
+          .from('join_requests')
+          .delete()
+          .eq('room_code', currentRoomCode)
+          .eq('uid', applicantUid)
+          .then(() => {}, () => {});
       }
     }, 1500);
   };
@@ -1618,12 +1698,19 @@ export default function App() {
   const handleDeclineJoinRequest = async (applicantUid: string) => {
     if (!currentRoomCode) return;
     sound.playTone(300, 'sine', 0.1);
-    await db.ref(`spy_rooms/${currentRoomCode}/joinRequests/${applicantUid}/status`).set('rejected');
-    showToast(t.toastDeclinedJoin, 'normal');
-    // Clean up processed request so the host modal advances sequentially to the next applicant
+    await supabase
+      .from('join_requests')
+      .update({ status: 'rejected' })
+      .eq('room_code', currentRoomCode)
+      .eq('uid', applicantUid);
     setTimeout(() => {
       if (currentRoomCode) {
-        db.ref(`spy_rooms/${currentRoomCode}/joinRequests/${applicantUid}`).remove().catch(() => {});
+        supabase
+          .from('join_requests')
+          .delete()
+          .eq('room_code', currentRoomCode)
+          .eq('uid', applicantUid)
+          .then(() => {}, () => {});
       }
     }, 1500);
   };
@@ -1636,263 +1723,46 @@ export default function App() {
     localStorage.setItem('spy_station_room', cleanCode);
     requestWakeLock();
 
-    const playerRef = db.ref(`spy_rooms/${cleanCode}/players/${currentUser.uid}`);
-    await playerRef.onDisconnect().cancel().catch(() => {});
-
-    const existing = await playerRef.once('value');
-    if (!existing.exists()) {
-      const roomSnap = await db.ref(`spy_rooms/${cleanCode}`).once('value');
-      const rData = roomSnap.val();
-      if (!rData) {
-        showToast(t.toastStationNotFound, 'danger');
-        leaveRoom();
-        return;
-      }
-      const existingPlayers = rData.players || {};
-      const currentCount = Object.keys(existingPlayers).length;
-      const maxP = rData.maxPlayers || 20;
-      if (currentCount >= maxP) {
-        showToast(
-          lang === 'ar'
-            ? `عذراً، هذه المحطة الفضائية ممتلئة بالكامل (${currentCount}/${maxP})!`
-            : `Sorry, this space station is full (${currentCount}/${maxP})!`,
-          'danger'
-        );
-        leaveRoom();
-        return;
-      }
-      const roomStatus = rData.status;
-      await playerRef.set({
-        uid: currentUser.uid,
-        name: profileNameRef.current || currentUser.displayName || 'Agent',
-        avatar:
-          profileAvatarRef.current ||
-          currentUser.photoURL ||
-          `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
-        joinedAt: firebase.database.ServerValue.TIMESTAMP,
-        isSpectator: !!(roomStatus === 'playing' || roomStatus === 'voting' || roomStatus === 'spy_guess')
-      });
-    }
-
-    // On disconnect remove
-    playerRef.onDisconnect().remove();
-
-    if (annListenerRef.current) {
-      annListenerRef.current();
-      annListenerRef.current = null;
-    }
-
-    // Main room data listener
-    if (roomListenerRef.current) roomListenerRef.current();
-    const rRef = db.ref(`spy_rooms/${cleanCode}`);
-    rRef.on('value', snap => {
-      const data = snap.val() as RoomData | null;
-      if (!data) {
-        leaveRoom();
-        return;
-      }
-      lastRoomSnapshotRef.current = data;
-      setRoomData(data);
-
-      if (!data.players || !data.players[currentUser.uid]) {
-        showToast(t.msgRemovedFromStation, 'danger');
-        leaveRoom();
-        return;
-      }
-
-      // In waiting lobby, ensure every player is an active astronaut & reset ejection tracking
-      if (data.status === 'waiting') {
-        lastSeenEjectionTimestampRef.current = 0;
-        completedEjectionsRef.current.clear();
-        if (data.players[currentUser.uid]?.isSpectator) {
-          db.ref(`spy_rooms/${cleanCode}/players/${currentUser.uid}/isSpectator`).set(false).catch(() => {});
-        }
-      }
-
-      // If gameover and all remaining humans have returned to lobby, reset room back to waiting
-      if (data.status === 'gameover' && currentUser.uid === data.hostUid && shouldResetGameOverToLobby(data.players)) {
-        const resetPlayers: Record<string, PlayerData> = {};
-        Object.entries(data.players || {}).forEach(([pUid, pl]) => {
-          resetPlayers[pUid] = { ...pl, isSpectator: false, postGame: null };
-        });
-        db.ref(`spy_rooms/${cleanCode}`).update({
-          status: 'waiting',
-          winnerTeam: null,
-          votes: null,
-          spies: null,
-          undercoverUid: null,
-          word: null,
-          wordAr: null,
-          round: null,
-          turnOrder: null,
-          turnIndex: null,
-          turnTimeLeft: null,
-          turnEndsAt: null,
-          turnGraceUntil: null,
-          voteEndsAt: null,
-          voteChat: null,
-          currentDrawing: null,
-          lastDrawing: null,
-          ejectionEvent: null,
-          ejectionEndsAt: null,
-          blackoutActive: false,
-          blackoutEndsAt: null,
-          spyGuessCandidateUid: null,
-          spyGuessOptions: null,
-          spyGuessEndsAt: null,
-          spyGuessResult: null,
-          activeCustomCategoryId: null,
-          customCategoryWords: null,
-          wordCustomCategoryName: null,
-          wordCustomCategoryImage: null,
-          completedTurnsThisRound: null,
-          players: resetPlayers
-        }).catch(() => {});
-        return;
-      }
-
-      // Instant Host Migration: Check if host left or disconnected
-      const playersObj = data.players || {};
-      const activePlayers = Object.values(playersObj).filter(p => !p.isSpectator);
-      const isGameActive = data.status === 'playing' || data.status === 'voting' || data.status === 'resolving';
-
-      const currentHostUid = data.hostUid;
-      const hostPlayer = currentHostUid ? playersObj[currentHostUid] : null;
-
-      if ((!hostPlayer || hostPlayer.isSpectator) && activePlayers.length > 0) {
-        const sortedActive = [...activePlayers].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
-        const nextHostUid = sortedActive[0].uid;
-        if (currentUser.uid === nextHostUid && currentHostUid !== nextHostUid) {
-          db.ref(`spy_rooms/${cleanCode}/hostUid`).set(nextHostUid);
-          showToast(t.hostMigratedNotification, 'success');
-        }
-      }
-
-      // CRITICAL GAME RULE: If game is active and active players drop below 3
-      if (isGameActive && activePlayers.length < 3) {
-        const effectiveHostUid =
-          data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
-            ? data.hostUid
-            : activePlayers[0]?.uid;
-
-        if (currentUser.uid === effectiveHostUid) {
-          db.ref(`spy_rooms/${cleanCode}`).update({
-            status: 'waiting',
-            round: 1,
-            spies: null,
-            undercoverUid: null,
-            word: null,
-            wordAr: null,
-            turnOrder: null,
-            turnIndex: 0,
-            turnTimeLeft: null,
-            turnEndsAt: null,
-            turnGraceUntil: null,
-            voteTimeLeft: null,
-            voteEndsAt: null,
-            votes: null,
-            currentDrawing: null,
-            lastDrawing: null,
-            ejectionEvent: null,
-            ejectionEndsAt: null,
-            blackoutActive: false,
-            blackoutEndsAt: null,
-            spyGuessCandidateUid: null,
-            spyGuessOptions: null,
-            spyGuessEndsAt: null,
-            spyGuessResult: null,
-            activeCustomCategoryId: null,
-            customCategoryWords: null,
-            wordCustomCategoryName: null,
-            wordCustomCategoryImage: null,
-            completedTurnsThisRound: null,
-            winnerTeam: null,
-            announcement: {
-              msg: t.gameAbortedNotEnoughPlayers,
-              type: 'danger',
-              timestamp: firebase.database.ServerValue.TIMESTAMP
-            }
-          });
-        }
-        return;
-      }
-
-      // If playing: Check if all spies left -> crew wins immediately
-      if (data.status === 'playing' && data.spies && data.spies.length > 0) {
-        const activeSpies = data.spies.filter(uid => playersObj[uid] && !playersObj[uid].isSpectator);
-        if (activeSpies.length === 0) {
-          const effectiveHostUid =
-            data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
-              ? data.hostUid
-              : activePlayers[0]?.uid;
-          if (currentUser.uid === effectiveHostUid) {
-            db.ref(`spy_rooms/${cleanCode}`).update({
-              status: 'gameover',
-              winnerTeam: 'crew',
-              finalSpies: data.spies,
-              finalPlayers: playersObj,
-              votes: null,
-              announcement: {
-                msg: t.annSpiesGoneCrewWins,
-                type: 'success',
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-              }
-            });
-            awardXP(playersObj, data.spies || [], 'crew');
-            return;
-          }
-        }
-      }
-
-      // If playing: Sanitize turnOrder if someone left, preserving the current speaker's turn
-      if (data.status === 'playing' && data.turnOrder && data.turnOrder.length > 0) {
-        const cleanedTurnOrder = data.turnOrder.filter(uid => playersObj[uid] && !playersObj[uid].isSpectator);
-        if (cleanedTurnOrder.length > 0 && cleanedTurnOrder.length !== data.turnOrder.length) {
-          const effectiveHostUid =
-            data.hostUid && playersObj[data.hostUid] && !playersObj[data.hostUid].isSpectator
-              ? data.hostUid
-              : activePlayers[0]?.uid;
-          if (currentUser.uid === effectiveHostUid) {
-            const currentSpeakerUid = data.turnOrder[data.turnIndex || 0];
-            const preservedIndex = currentSpeakerUid ? cleanedTurnOrder.indexOf(currentSpeakerUid) : -1;
-            if (preservedIndex >= 0) {
-              db.ref(`spy_rooms/${cleanCode}`).update({
-                turnOrder: cleanedTurnOrder,
-                turnIndex: preservedIndex
-              });
-            } else {
-              let nextIndex = data.turnIndex || 0;
-              if (nextIndex >= cleanedTurnOrder.length) nextIndex = 0;
-              db.ref(`spy_rooms/${cleanCode}`).update({
-                turnOrder: cleanedTurnOrder,
-                turnIndex: nextIndex,
-                turnTimeLeft: getEffectiveTurnSeconds(data.gameMode, data.turnSeconds)
-              });
-            }
-          }
-        }
-      }
-
-      // Reset announced round if not in playing
-      if (data.status !== 'playing') {
-        lastAnnouncedRoundRef.current = 0;
-        setAnnouncedRound(null);
-      }
-
-      // Check round transition for popup announcement - ONLY ONCE per round!
-      if (data.status === 'playing' && data.round && data.round > lastAnnouncedRoundRef.current) {
-        lastAnnouncedRoundRef.current = data.round;
-        setAnnouncedRound(data.round);
-        sound.playChime([[523, 0, 0.15], [659, 120, 0.15], [784, 240, 0.3]], 'sine');
-        if (roundAnnounceTimerRef.current) {
-          clearTimeout(roundAnnounceTimerRef.current);
-        }
-        roundAnnounceTimerRef.current = setTimeout(() => {
-          setAnnouncedRound(null);
-        }, ROUND_ANNOUNCE_MS);
-      }
+    const meta = getUserMeta(currentUser);
+    const joinRes = await supabase.rpc('join_room_safe', {
+      p_room_code: cleanCode,
+      p_name: profileNameRef.current || meta.name,
+      p_avatar: profileAvatarRef.current || meta.avatar
     });
-    roomListenerRef.current = () => rRef.off();
+
+    if (joinRes.error || !joinRes.data?.ok) {
+      showToast(t.toastStationNotFound, 'danger');
+      leaveRoom();
+      return;
+    }
+
+    if (roomChannelRef.current) {
+      supabase.removeChannel(roomChannelRef.current);
+      roomChannelRef.current = null;
+    }
+
+    await loadRoomState(cleanCode, currentUser.id);
+
+    const scheduleRoomRefresh = () => {
+      if (roomRefreshTimerRef.current) clearTimeout(roomRefreshTimerRef.current);
+      roomRefreshTimerRef.current = setTimeout(() => {
+        loadRoomState(cleanCode, currentUser.id);
+      }, 65);
+    };
+
+    const channel = supabase
+      .channel(`room-live:${cleanCode}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms', filter: `code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_players', filter: `room_code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'join_requests', filter: `room_code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_clues', filter: `room_code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_votes', filter: `room_code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vote_chat', filter: `room_code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lobby_chat', filter: `room_code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_spy_messages', filter: `room_code=eq.${cleanCode}` }, scheduleRoomRefresh)
+      .subscribe();
+
+    roomChannelRef.current = channel;
   };
 
   const leaveRoom = async () => {
@@ -1906,144 +1776,32 @@ export default function App() {
     setActiveEjection(null);
     advancingTurnKeyRef.current = null;
     isResolvingVotesRef.current = false;
+    dossierRef.current = null;
+    dossierPhaseKeyRef.current = '';
+    setMissionDossier(null);
+
     if (roundAnnounceTimerRef.current) {
       clearTimeout(roundAnnounceTimerRef.current);
       roundAnnounceTimerRef.current = null;
     }
+    if (roomRefreshTimerRef.current) {
+      clearTimeout(roomRefreshTimerRef.current);
+      roomRefreshTimerRef.current = null;
+    }
+    if (roomChannelRef.current) {
+      supabase.removeChannel(roomChannelRef.current);
+      roomChannelRef.current = null;
+    }
 
     const code = currentRoomCode;
-    const uid = currentUser?.uid;
-    const currentRoomSnapshot = roomData;
-
-    // 1. Immediately detach listeners so remote events don't pull the client back
-    if (roomListenerRef.current) {
-      roomListenerRef.current();
-      roomListenerRef.current = null;
-    }
-    if (annListenerRef.current) {
-      annListenerRef.current();
-      annListenerRef.current = null;
-    }
-
-    // 2. Instantly reset local state so the user exits the room to Home without any delay or freeze
+    lastRoomSnapshotRef.current = null;
     setCurrentRoomCode(null);
     setRoomData(null);
     setActiveTab('home');
-    showToast(t.msgLeftStation);
 
-    // 3. Perform database cleanup asynchronously and safely
-    if (code && uid) {
+    if (code && currentUser?.id) {
       try {
-        const wasHost = !!(currentRoomSnapshot && currentRoomSnapshot.hostUid === uid);
-        const playersObj = currentRoomSnapshot?.players || {};
-        const remainingHumans = Object.values(playersObj)
-          .filter(pl => pl.uid !== uid && !pl.isSpectator && !isBotPlayer(pl))
-          .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
-
-        if (remainingHumans.length === 0) {
-          await db.ref(`spy_rooms/${code}`).remove();
-        } else {
-          await db.ref(`spy_rooms/${code}/players/${uid}`).remove();
-
-          if (wasHost && remainingHumans[0]) {
-            await db.ref(`spy_rooms/${code}/hostUid`).set(remainingHumans[0].uid);
-          }
-
-          // If room was on gameover and remaining human players are all inLobby, reset room to waiting
-          if (currentRoomSnapshot?.status === 'gameover') {
-            const remainingPlayersMap: Record<string, PlayerData> = {};
-            Object.entries(playersObj).forEach(([pUid, pl]) => {
-              if (pUid !== uid) remainingPlayersMap[pUid] = pl;
-            });
-            if (shouldResetGameOverToLobby(remainingPlayersMap)) {
-              const resetPlayers: Record<string, PlayerData> = {};
-              Object.entries(remainingPlayersMap).forEach(([pUid, pl]) => {
-                resetPlayers[pUid] = { ...pl, isSpectator: false, postGame: null };
-              });
-              await db.ref(`spy_rooms/${code}`).update({
-                status: 'waiting',
-                winnerTeam: null,
-                votes: null,
-                spies: null,
-                undercoverUid: null,
-                word: null,
-                wordAr: null,
-                round: null,
-                turnOrder: null,
-                turnIndex: null,
-                turnTimeLeft: null,
-                turnEndsAt: null,
-                turnGraceUntil: null,
-                voteEndsAt: null,
-                currentDrawing: null,
-                lastDrawing: null,
-                ejectionEvent: null,
-                ejectionEndsAt: null,
-                blackoutActive: false,
-                blackoutEndsAt: null,
-                spyGuessCandidateUid: null,
-                spyGuessOptions: null,
-                spyGuessEndsAt: null,
-                spyGuessResult: null,
-                activeCustomCategoryId: null,
-                customCategoryWords: null,
-                wordCustomCategoryName: null,
-                wordCustomCategoryImage: null,
-                completedTurnsThisRound: null,
-                players: resetPlayers
-              });
-            }
-            return;
-          }
-
-          const remainingAll = Object.values(playersObj).filter(p => p.uid !== uid && !p.isSpectator);
-          const isGameActive =
-            currentRoomSnapshot?.status === 'playing' ||
-            currentRoomSnapshot?.status === 'voting' ||
-            currentRoomSnapshot?.status === 'resolving';
-
-          if (isGameActive && remainingAll.length < 3) {
-            await db.ref(`spy_rooms/${code}`).update({
-              status: 'waiting',
-              round: 1,
-              spies: null,
-              undercoverUid: null,
-              word: null,
-              wordAr: null,
-              wordCategory: null,
-              wordImage: null,
-              turnOrder: null,
-              turnIndex: 0,
-              turnTimeLeft: null,
-              turnEndsAt: null,
-              turnGraceUntil: null,
-              voteTimeLeft: null,
-              voteEndsAt: null,
-              votes: null,
-              currentDrawing: null,
-              lastDrawing: null,
-              ejectionEvent: null,
-              ejectionEndsAt: null,
-              blackoutActive: false,
-              blackoutEndsAt: null,
-              spyGuessCandidateUid: null,
-              spyGuessOptions: null,
-              spyGuessEndsAt: null,
-              spyGuessResult: null,
-              activeCustomCategoryId: null,
-              customCategoryWords: null,
-              wordCustomCategoryName: null,
-              wordCustomCategoryImage: null,
-              completedTurnsThisRound: null,
-              winnerTeam: null,
-              announcement: {
-                msg: t.gameAbortedNotEnoughPlayers,
-                type: 'danger',
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-              }
-            });
-          }
-        }
+        await supabase.rpc('leave_room_clean', { p_room_code: code });
       } catch (err) {
         console.error('Error during room leave cleanup:', err);
       }
@@ -2060,42 +1818,55 @@ export default function App() {
     isPublished: boolean;
   }) => {
     if (!currentUser) return;
-    const catRef = payload.id
-      ? db.ref(`customCategories/${payload.id}`)
-      : db.ref('customCategories').push();
-    const catId = payload.id || catRef.key;
-    if (!catId) return;
+    const nowIso = new Date().toISOString();
 
-    const existing = payload.id ? myCategories.find(c => c.id === payload.id) : undefined;
-    const now = Date.now();
-    const record: Record<string, unknown> = {
-      id: catId,
-      name: payload.name,
-      creatorUid: currentUser.uid,
-      creatorName: profileNameRef.current || currentUser.displayName || 'Agent',
-      icon: payload.icon || '🎯',
-      image: payload.image || null,
-      words: payload.words,
-      isPublished: payload.isPublished,
-      playCount: existing?.playCount ?? 0,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now
-    };
-    await catRef.set(record);
+    if (payload.id) {
+      await supabase
+        .from('custom_categories')
+        .update({
+          name: payload.name,
+          icon: payload.icon || '🎯',
+          image_url: payload.image || '',
+          words: payload.words,
+          is_published: payload.isPublished,
+          updated_at: nowIso
+        })
+        .eq('id', payload.id)
+        .eq('creator_uid', currentUser.id);
+    } else {
+      await supabase.from('custom_categories').insert({
+        creator_uid: currentUser.id,
+        creator_name: profileNameRef.current || getUserMeta(currentUser).name,
+        name: payload.name,
+        icon: payload.icon || '🎯',
+        image_url: payload.image || '',
+        words: payload.words,
+        is_published: payload.isPublished,
+        play_count: 0
+      });
+    }
+
+    await fetchCustomCategories();
   };
 
   const handleDeleteCustomCategory = async (catId: string) => {
     if (!currentUser || !catId) return;
-    await db.ref(`customCategories/${catId}`).remove();
+    await supabase
+      .from('custom_categories')
+      .delete()
+      .eq('id', catId)
+      .eq('creator_uid', currentUser.id);
+
     const cached = customCategoriesCache.get('latest');
     if (cached && cached[catId]) {
       const next = { ...cached };
       delete next[catId];
       customCategoriesCache.set('latest', next);
     }
+    await fetchCustomCategories();
   };
 
-  // Create room flow
+  // Create or Edit room flow
   const handleConfirmRoomConfig = async (config: {
     visibility: 'public' | 'private';
     categories: CategoryKey[];
@@ -2127,19 +1898,21 @@ export default function App() {
     });
 
     if (isEditingRoom && currentRoomCode) {
-      await db.ref(`spy_rooms/${currentRoomCode}`).update(
-        toFirebaseUpdatePayload({
+      await supabase
+        .from('rooms')
+        .update({
           visibility: config.visibility,
           categories: config.categories,
-          customCategoryIds: config.customCategoryIds,
-          customCategorySnapshot: Object.keys(snapshotMap).length > 0 ? snapshotMap : null,
-          gameMode: config.gameMode,
-          maxPlayers: config.maxPlayers,
-          spyCount: config.spyCount,
-          turnSeconds: config.turnSeconds,
-          allowSpyLastChance: Boolean(config.allowSpyLastChance)
+          custom_category_ids: config.customCategoryIds || [],
+          custom_category_snapshot: Object.keys(snapshotMap).length > 0 ? snapshotMap : null,
+          game_mode: config.gameMode,
+          max_players: config.maxPlayers,
+          spy_count: config.spyCount,
+          turn_seconds: config.turnSeconds,
+          allow_spy_last_chance: Boolean(config.allowSpyLastChance)
         })
-      );
+        .eq('code', currentRoomCode);
+
       setIsEditingRoom(false);
       showToast(t.msgSettingsSaved, 'success');
     } else {
@@ -2147,112 +1920,85 @@ export default function App() {
       let code = '';
       for (let i = 0; i < 6; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
 
-      const initialHostPlayer: PlayerData = {
-        uid: currentUser.uid,
-        name: profileName || currentUser.displayName || 'Agent',
-        avatar: profileAvatar || currentUser.photoURL || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`,
-        joinedAt: Date.now(),
-        isSpectator: false,
-        isBot: false
-      };
+      const meta = getUserMeta(currentUser);
+      const myName = profileNameRef.current || meta.name;
+      const myAvatar = profileAvatarRef.current || meta.avatar;
 
-      await db.ref(`spy_rooms/${code}`).set(
-        toFirebaseUpdatePayload({
-          status: 'waiting',
-          originalHostUid: currentUser.uid,
-          hostUid: currentUser.uid,
-          categories: config.categories,
-          customCategoryIds: config.customCategoryIds,
-          customCategorySnapshot: Object.keys(snapshotMap).length > 0 ? snapshotMap : null,
-          allowSpyLastChance: Boolean(config.allowSpyLastChance),
-          spyCount: config.spyCount,
-          maxPlayers: config.maxPlayers,
-          turnSeconds: config.turnSeconds,
-          visibility: config.visibility,
-          gameMode: config.gameMode,
-          createdAt: firebase.database.ServerValue.TIMESTAMP,
-          players: {
-            [currentUser.uid]: initialHostPlayer
-          }
-        })
-      );
+      const { error: rErr } = await supabase.from('rooms').insert({
+        code,
+        original_host_uid: currentUser.id,
+        host_uid: currentUser.id,
+        host_name: myName,
+        status: 'waiting',
+        visibility: config.visibility,
+        game_mode: config.gameMode,
+        categories: config.categories,
+        custom_category_ids: config.customCategoryIds || [],
+        custom_category_snapshot: Object.keys(snapshotMap).length > 0 ? snapshotMap : null,
+        allow_spy_last_chance: Boolean(config.allowSpyLastChance),
+        spy_count: config.spyCount,
+        max_players: config.maxPlayers,
+        turn_seconds: config.turnSeconds
+      });
+
+      if (rErr) {
+        showToast(t.errActionFailed, 'danger');
+        return;
+      }
+
+      await supabase.from('room_players').insert({
+        room_code: code,
+        uid: currentUser.id,
+        name: myName,
+        avatar: myAvatar,
+        is_spectator: false,
+        is_bot: false
+      });
 
       joinRoom(code);
     }
   };
 
-  // Add simulated bot astronaut for easy testing & solo play
+  // Add simulated bot astronaut
   const handleAddBot = async () => {
     if (!currentRoomCode || !roomData) return;
     const playersObj = roomData.players || {};
     const currentCount = Object.keys(playersObj).length;
     const maxP = roomData.maxPlayers || 20;
-    if (currentCount >= maxP) {
-      showToast(
-        lang === 'ar'
-          ? `لا يمكن إضافة رائد فضاء تجريبي: تم بلوغ الحد الأقصى للمحطة (${maxP} لاعبين)!`
-          : `Cannot add bot: Station max capacity reached (${maxP} players)!`,
-        'danger'
-      );
-      return;
-    }
+    if (currentCount >= maxP) return;
 
     const name = generateUniqueBotName(playersObj, lang);
     const botId = `bot_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
     sound.playClick();
-    await db.ref(`spy_rooms/${currentRoomCode}/players/${botId}`).set({
+    await supabase.from('room_players').insert({
+      room_code: currentRoomCode,
       uid: botId,
-      name: name,
+      name,
       avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${botId}&backgroundColor=b6e3f4,c0aede,d1d4f9`,
-      joinedAt: Date.now(),
-      isSpectator: false,
-      isBot: true
+      is_spectator: false,
+      is_bot: true
     });
-    showToast(t.toastBotAdded.replace('{name}', name), 'success');
   };
 
   const handleRemoveBots = async () => {
     if (!currentRoomCode || !roomData) return;
-    const playersObj = roomData.players || {};
-    const updates: Record<string, null> = {};
-    Object.keys(playersObj).forEach(uid => {
-      if (playersObj[uid].isBot || uid.startsWith('bot_')) {
-        updates[`spy_rooms/${currentRoomCode}/players/${uid}`] = null;
-      }
-    });
     sound.playClick();
-    await db.ref().update(updates);
-    showToast(t.toastBotsRemoved, 'normal');
+    await supabase
+      .from('room_players')
+      .delete()
+      .eq('room_code', currentRoomCode)
+      .eq('is_bot', true);
   };
 
-  // Start game flow
+  // Start game flow (Server picks word, chameleon decoy & spies inside Postgres!)
   const handleStartGame = async () => {
     if (!currentRoomCode || !roomData) return;
     sound.playClick();
 
     try {
       const validation = validateGameStart(roomData);
-      if (!validation.ok) {
-        if (validation.reason === 'players_not_in_lobby') {
-          showToast(
-            lang === 'ar'
-              ? 'لا يمكن بدء الجيم حتى يعود جميع اللاعبين إلى اللوبي!'
-              : 'Cannot start game until all players return to lobby!',
-            'danger'
-          );
-          return;
-        }
-        const spyCount = roomData.spyCount || 1;
-        const isMole = roomData.gameMode === 'mole';
-        showToast(
-          lang === 'ar'
-            ? `لا يمكن بدء اللعبة: إعدادات الروم تتطلب ${validation.minRequired} لاعبين على الأقل (${spyCount} ${spyCount === 1 ? 'جاسوس' : 'جواسيس'}${isMole ? ' • شبكة العملاء' : ''})! الموجود حالياً: ${validation.activeCount}. يمكنك إضافة بوتات أو دعوة أصدقاء.`
-            : `Cannot start: Room settings require at least ${validation.minRequired} players (${spyCount} spies${isMole ? ' • Mole Network' : ''})! Currently: ${validation.activeCount}.`,
-          'danger'
-        );
-        return;
-      }
+      if (!validation.ok) return;
 
       const builtInCats = roomData.categories || [];
       const customIds = roomData.customCategoryIds || [];
@@ -2284,110 +2030,62 @@ export default function App() {
       }
 
       const pickedChoice = combinedPool[Math.floor(Math.random() * combinedPool.length)];
-
       let chosenCat: CategoryKey = 'players';
-      let selectedPair: [string, string];
-      let chameleonPair: [string, string];
-      let customPatch: {
-        activeCustomCategoryId: string | null;
-        customCategoryWords: CustomCategoryWord[] | null;
-        wordCustomCategoryName: string | null;
-        wordCustomCategoryImage: string | null;
-      };
+      let candidates: Array<{ en: string; ar: string; botCrewClues: Array<{ en: string; ar: string }> }> = [];
+      let customCatId: string | null = null;
+      let customCatName: string | null = null;
+      let customCatImage: string | null = null;
+      let customWords: CustomCategoryWord[] | null = null;
 
       if (pickedChoice.kind === 'custom') {
         const deck = pickedChoice.deck;
-        const deckPairs: [string, string][] = deck.words.map(w => [w.en, w.ar || w.en]);
-        selectedPair = deckPairs[Math.floor(Math.random() * deckPairs.length)] || ['Mission', 'مهمة'];
-        chameleonPair = getSmartTwinWord(selectedPair, 'players', deckPairs);
-        customPatch = {
-          activeCustomCategoryId: deck.id,
-          customCategoryWords: deck.words,
-          wordCustomCategoryName: deck.name,
-          wordCustomCategoryImage: deck.image || null
-        };
-        // Atomically increment community deck play count (+1)
-        db.ref(`customCategories/${deck.id}/playCount`)
-          .transaction(cur => (Number(cur) || 0) + 1)
-          .catch(() => {});
+        const shuffledDeck = shuffleArray(deck.words).slice(0, 24);
+        candidates = shuffledDeck.map(w => ({
+          en: w.en,
+          ar: w.ar || w.en,
+          botCrewClues: getBotClueBankForWord(w.en, w.ar || w.en, 'players')
+        }));
+        customCatId = deck.id;
+        customCatName = deck.name;
+        customCatImage = deck.image || null;
+        customWords = deck.words;
       } else {
         chosenCat = pickedChoice.cat;
-        const wordList = wordsDB[chosenCat] || wordsDB.players;
-        selectedPair = wordList[Math.floor(Math.random() * wordList.length)];
-        chameleonPair = getSmartTwinWord(selectedPair, chosenCat || 'players', wordList);
-        customPatch = {
-          activeCustomCategoryId: null,
-          customCategoryWords: null,
-          wordCustomCategoryName: null,
-          wordCustomCategoryImage: null
-        };
+        const rawList = wordsDB[chosenCat] || wordsDB.players;
+        const shuffledList = shuffleArray(rawList).slice(0, 24);
+        candidates = shuffledList.map(([en, ar]) => ({
+          en,
+          ar: ar || en,
+          botCrewClues: getBotClueBankForWord(en, ar || en, chosenCat)
+        }));
       }
-
-      const setup = computeInitialGameSetup({
-        room: roomData,
-        wordPair: selectedPair,
-        wordCategory: chosenCat,
-        chameleonPair
-      });
 
       lastAnnouncedRoundRef.current = 0;
       lastSeenEjectionTimestampRef.current = 0;
       completedEjectionsRef.current.clear();
-      const now = getServerNow();
-      const turnGraceUntil = now + ROUND_GRACE_MS;
-      const turnEndsAt = turnGraceUntil + setup.turnTimeLeft * 1000;
 
-      await db.ref(`spy_rooms/${currentRoomCode}`).update({
-        status: 'playing',
-        word: selectedPair[0] || 'Space Station',
-        wordAr: selectedPair[1] || 'محطة الفضاء',
-        wordCategory: chosenCat || 'players',
-        wordImage: null,
-        ...customPatch,
-        spyGuessCandidateUid: null,
-        spyGuessOptions: null,
-        spyGuessEndsAt: null,
-        spyGuessResult: null,
-        spies: setup.spies,
-        undercoverUid: setup.undercoverUid,
-        round: 1,
-        completedTurnsThisRound: null,
-        blackoutActive: false,
-        blackoutEndsAt: null,
-        lastBlackoutRound: 0,
-        ejectionEvent: null,
-        ejectionEndsAt: null,
-        turnOrder: setup.turnOrder,
-        turnIndex: 0,
-        turnTimeLeft: setup.turnTimeLeft,
-        turnGraceUntil,
-        turnEndsAt,
-        votes: null,
-        voteEndsAt: null,
-        voteChat: null,
-        winnerTeam: null,
-        gameChat: null,
-        spyChat: null,
-        speechBubbles: null,
-        scrambleActive: false,
-        currentDrawing: null,
-        lastDrawing: null,
-        players: setup.players
+      const { error } = await supabase.rpc('start_room_match', {
+        p_room_code: currentRoomCode,
+        p_word_category: chosenCat,
+        p_word_candidates: candidates,
+        p_custom_cat_id: customCatId,
+        p_custom_cat_name: customCatName,
+        p_custom_cat_image: customCatImage,
+        p_custom_words: customWords,
+        p_bot_spy_clues: getBotSpyClueBank(chosenCat),
+        p_ann_msg: t.annMissionStarted
       });
-
-      broadcastAnnouncement(t.annMissionStarted, 'normal');
+      if (error) throw error;
     } catch (err) {
       console.error('Failed to start mission:', err);
       showToast(t.toastGameStartError, 'danger');
     }
   };
 
-  // Loading state: render structured Skeleton UI instead of blank wait
   if (loading) {
     return <AppBootSkeleton lang={lang} />;
   }
 
-  // Not logged in -> Auth Screen
   if (!currentUser) {
     return (
       <>
@@ -2410,7 +2108,6 @@ export default function App() {
     );
   }
 
-  // Create or Edit Room Configuration Modal
   if (inCreateModal) {
     return (
       <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative">
@@ -2451,28 +2148,25 @@ export default function App() {
     );
   }
 
-  // Joining room transition skeleton (prevents flicker back to HomeTab before RTDB room snapshot arrives)
   if (currentRoomCode && !roomData) {
     return <RoomLobbySkeleton lang={lang} roomCode={currentRoomCode} />;
   }
 
-  // In Room Flow
   if (currentRoomCode && roomData) {
     const isPlaying = roomData.status === 'playing';
     const isVoting = roomData.status === 'voting';
     const isSpyGuess = roomData.status === 'spy_guess';
     const isGameOver = roomData.status === 'gameover';
-    const myPlayer = (roomData.players || {})[currentUser.uid];
+    const myPlayer = (roomData.players || {})[currentUser.id];
 
     return (
       <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative selection:bg-sky-500/30">
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
 
-        {/* Modals for In-Room */}
         <InviteFriendsModal
           lang={lang}
-          currentUserUid={currentUser.uid}
+          currentUserUid={currentUser.id}
           currentUserName={profileName}
           currentUserAvatar={profileAvatar}
           roomCode={currentRoomCode}
@@ -2484,15 +2178,12 @@ export default function App() {
           onToast={showToast}
         />
 
-        {announcedRound !== null && (
-          <RoundAnnounceModal lang={lang} round={announcedRound} />
-        )}
+        {announcedRound !== null && <RoundAnnounceModal lang={lang} round={announcedRound} />}
 
-        {/* Room Screens */}
         {isPlaying ? (
           <GameScreen
             lang={lang}
-            currentUserUid={currentUser.uid}
+            currentUserUid={currentUser.id}
             roomCode={currentRoomCode}
             room={roomData}
             serverTimeOffsetMs={serverTimeOffsetMs}
@@ -2507,68 +2198,34 @@ export default function App() {
             onToggleVoiceDeafen={voice.toggleDeafen}
             onAdvanceTurn={() => advanceTurn(roomData?.turnIndex, false, roomData?.round)}
             onTriggerEmergencyVote={() => {
-              const snapRoom = lastRoomSnapshotRef.current;
-              const now = getServerNow();
-              const activeSpeakerUid = snapRoom?.turnOrder?.[snapRoom?.turnIndex || 0];
-              if (
-                !snapRoom ||
-                snapRoom.status !== 'playing' ||
-                activeSpeakerUid !== currentUser.uid ||
-                (snapRoom.ejectionEndsAt && now < snapRoom.ejectionEndsAt) ||
-                (snapRoom.turnGraceUntil && now < snapRoom.turnGraceUntil)
-              ) {
-                showToast(t.emergencyVoteOnlyMyTurn, 'danger');
-                return;
-              }
-              db.ref(`spy_rooms/${currentRoomCode}`).update({
-                status: 'voting',
-                voteTimeLeft: DEFAULT_VOTE_SECONDS,
-                voteEndsAt: now + DEFAULT_VOTE_SECONDS * 1000,
-                turnGraceUntil: null,
-                turnEndsAt: null,
-                votes: null,
-                voteChat: null
-              });
-              broadcastAnnouncement(t.annEmergencyVote, 'danger');
+              supabase
+                .rpc('trigger_emergency_vote', {
+                  p_room_code: currentRoomCode,
+                  p_ann_msg: t.annEmergencyVote
+                })
+                .then(() => {}, () => {});
             }}
             onSendGameClue={(word, targetRound, targetTurnIndex) => {
-              const snapRoom = lastRoomSnapshotRef.current;
-              if (
-                snapRoom?.status !== 'playing' ||
-                snapRoom?.round !== targetRound ||
-                snapRoom?.turnIndex !== targetTurnIndex ||
-                snapRoom?.turnOrder?.[targetTurnIndex] !== currentUser.uid ||
-                snapRoom?.completedTurnsThisRound?.[currentUser.uid]
-              ) {
-                return;
-              }
-
-              const senderName = profileNameRef.current || currentUser.displayName || 'Agent';
-              const senderAvatar =
-                profileAvatarRef.current ||
-                currentUser.photoURL ||
-                `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`;
-
-              db.ref(`spy_rooms/${currentRoomCode}/gameChat`).push({
-                uid: currentUser.uid,
-                sender: senderName,
-                avatar: senderAvatar,
-                text: word,
-                isBot: false,
-                round: targetRound,
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-              });
-              db.ref(`spy_rooms/${currentRoomCode}/players/${currentUser.uid}/missedTurns`).set(0).catch(() => {});
-              advanceTurn(targetTurnIndex, false, targetRound);
+              supabase
+                .rpc('submit_room_clue', {
+                  p_room_code: currentRoomCode,
+                  p_word: word,
+                  p_target_round: targetRound,
+                  p_target_turn_index: targetTurnIndex
+                })
+                .then(() => {}, () => {});
             }}
-            onAwardCrewXP={(pObj, spies) => {
-              awardXP(pObj, spies, 'crew');
-            }}
+            onAwardCrewXP={() => {}}
             onSendSpyChat={msg => {
-              db.ref(`spy_rooms/${currentRoomCode}/spyChat`).push({
-                sender: profileNameRef.current || currentUser.displayName || 'Agent',
-                text: msg
-              });
+              supabase
+                .from('room_spy_messages')
+                .insert({
+                  room_code: currentRoomCode,
+                  sender_uid: currentUser.id,
+                  sender_name: profileNameRef.current || 'Agent',
+                  text: msg
+                })
+                .then(() => {}, () => {});
             }}
             onToast={showToast}
             onLeaveRoom={leaveRoom}
@@ -2576,28 +2233,36 @@ export default function App() {
         ) : isVoting ? (
           <VotingScreen
             lang={lang}
-            currentUserUid={currentUser.uid}
+            currentUserUid={currentUser.id}
             room={roomData}
             serverTimeOffsetMs={serverTimeOffsetMs}
             onCastVote={target => {
-              db.ref(`spy_rooms/${currentRoomCode}/votes/${currentUser.uid}`).set(target);
-              showToast(t.msgVoteRecorded, 'success');
+              supabase
+                .from('room_votes')
+                .upsert(
+                  { room_code: currentRoomCode, voter_uid: currentUser.id, target_uid: target },
+                  { onConflict: 'room_code,voter_uid' }
+                )
+                .then(() => {}, () => {});
             }}
             onSendVoteChat={txt => {
-              db.ref(`spy_rooms/${currentRoomCode}/voteChat`).push({
-                uid: currentUser.uid,
-                sender: profileNameRef.current || currentUser.displayName || 'Agent',
-                avatar: profileAvatarRef.current || currentUser.photoURL || '',
-                text: txt,
-                isBot: false,
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-              });
+              supabase
+                .from('vote_chat')
+                .insert({
+                  room_code: currentRoomCode,
+                  sender_uid: currentUser.id,
+                  sender_name: profileNameRef.current || 'Agent',
+                  sender_avatar: profileAvatarRef.current || '',
+                  text: txt,
+                  is_bot: false
+                })
+                .then(() => {}, () => {});
             }}
           />
         ) : isSpyGuess ? (
           <SpyLastChanceScreen
             lang={lang}
-            currentUserUid={currentUser.uid}
+            currentUserUid={currentUser.id}
             room={roomData}
             serverTimeOffsetMs={serverTimeOffsetMs}
             onSubmitGuess={opt => handleSubmitSpyGuess(opt.en)}
@@ -2607,58 +2272,14 @@ export default function App() {
             lang={lang}
             room={roomData}
             onReturnToLobby={async () => {
-              await db.ref(`spy_rooms/${currentRoomCode}/players/${currentUser.uid}`).update({
-                postGame: 'inLobby'
-              });
-              const snap = await db.ref(`spy_rooms/${currentRoomCode}/players`).once('value');
-              const pObj = (snap.val() || {}) as Record<string, PlayerData>;
-
-              if (shouldResetGameOverToLobby(pObj)) {
-                const reset: Record<string, PlayerData> = {};
-                Object.keys(pObj).forEach(uid => {
-                  reset[uid] = { ...pObj[uid], isSpectator: false, postGame: null };
-                });
-                await db.ref(`spy_rooms/${currentRoomCode}`).update({
-                  status: 'waiting',
-                  winnerTeam: null,
-                  votes: null,
-                  spies: null,
-                  undercoverUid: null,
-                  word: null,
-                  wordAr: null,
-                  round: null,
-                  turnOrder: null,
-                  turnIndex: null,
-                  turnTimeLeft: null,
-                  turnEndsAt: null,
-                  turnGraceUntil: null,
-                  voteEndsAt: null,
-                  voteChat: null,
-                  currentDrawing: null,
-                  lastDrawing: null,
-                  ejectionEvent: null,
-                  ejectionEndsAt: null,
-                  blackoutActive: false,
-                  blackoutEndsAt: null,
-                  spyGuessCandidateUid: null,
-                  spyGuessOptions: null,
-                  spyGuessEndsAt: null,
-                  spyGuessResult: null,
-                  activeCustomCategoryId: null,
-                  customCategoryWords: null,
-                  wordCustomCategoryName: null,
-                  wordCustomCategoryImage: null,
-                  completedTurnsThisRound: null,
-                  players: reset
-                });
-              }
+              await supabase.rpc('return_to_lobby_after_game', { p_room_code: currentRoomCode });
             }}
             onLeaveRoom={leaveRoom}
           />
         ) : (
           <LobbyScreen
             lang={lang}
-            currentUserUid={currentUser.uid}
+            currentUserUid={currentUser.id}
             roomCode={currentRoomCode}
             room={roomData}
             isHost={isHost}
@@ -2677,7 +2298,6 @@ export default function App() {
             onCopyRoomCode={() => {
               if (navigator.clipboard) {
                 navigator.clipboard.writeText(currentRoomCode);
-                showToast(t.msgCodeCopied, 'success');
               }
             }}
             onOpenEditRoom={() => {
@@ -2691,44 +2311,42 @@ export default function App() {
             onLeaveRoom={leaveRoom}
             onMakeHost={uid => {
               const targetPlayer = roomData?.players?.[uid];
-              if (isBotPlayer(targetPlayer, uid)) {
-                showToast(t.toastCannotAssignBotHost, 'danger');
-                return;
-              }
-              db.ref(`spy_rooms/${currentRoomCode}/hostUid`).set(uid);
+              if (isBotPlayer(targetPlayer, uid)) return;
+              supabase
+                .from('rooms')
+                .update({ host_uid: uid, host_name: targetPlayer?.name || 'Commander' })
+                .eq('code', currentRoomCode)
+                .then(() => {}, () => {});
             }}
-            onKickPlayer={uid => db.ref(`spy_rooms/${currentRoomCode}/players/${uid}`).remove()}
+            onKickPlayer={uid => {
+              supabase
+                .from('room_players')
+                .delete()
+                .eq('room_code', currentRoomCode)
+                .eq('uid', uid)
+                .then(() => {}, () => {});
+            }}
             onSendFriendRequest={async targetUid => {
-              await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set({
-                name: profileNameRef.current || currentUser.displayName || 'Agent',
-                avatar: profileAvatarRef.current || currentUser.photoURL || '',
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-              });
-              await db.ref(`users/${currentUser.uid}/sentRequests/${targetUid}`).set(true);
-              showToast(t.msgRequestSent, 'success');
+              await supabase.from('friend_requests').upsert(
+                { sender_uid: currentUser.id, recipient_uid: targetUid },
+                { onConflict: 'sender_uid,recipient_uid' }
+              );
+              reloadSocialData(currentUser);
             }}
             onAcceptFriendRequest={async uid => {
-              const req = friendRequests[uid];
-              const now = firebase.database.ServerValue.TIMESTAMP;
-              await db.ref(`users/${currentUser.uid}/friends/${uid}`).set({
-                name: req?.name || 'Friend',
-                avatar: req?.avatar || '',
-                since: now
-              });
-              await db.ref(`users/${uid}/friends/${currentUser.uid}`).set({
-                name: profileNameRef.current || currentUser.displayName || 'Agent',
-                avatar: profileAvatarRef.current || currentUser.photoURL || '',
-                since: now
-              });
-              await db.ref(`users/${currentUser.uid}/friendRequests/${uid}`).remove();
-              await db.ref(`users/${uid}/sentRequests/${currentUser.uid}`).remove();
-              showToast(t.msgFriendAdded, 'success');
+              await supabase.rpc('accept_friend_request', { p_sender_uid: uid });
+              reloadSocialData(currentUser);
             }}
             onSendChatMessage={txt => {
-              db.ref(`spy_rooms/${currentRoomCode}/lobbyChat`).push({
-                sender: profileNameRef.current || currentUser.displayName || 'Agent',
-                text: txt
-              });
+              supabase
+                .from('lobby_chat')
+                .insert({
+                  room_code: currentRoomCode,
+                  sender_uid: currentUser.id,
+                  sender_name: profileNameRef.current || 'Agent',
+                  text: txt
+                })
+                .then(() => {}, () => {});
             }}
             onAcceptJoinRequest={handleAcceptJoinRequest}
             onDeclineJoinRequest={handleDeclineJoinRequest}
@@ -2736,7 +2354,6 @@ export default function App() {
           />
         )}
 
-        {/* Host Approval Popup Modal - Sorted strictly FIFO by timestamp */}
         {isHost && roomData && (() => {
           const pendingList = Object.values(roomData.joinRequests || {})
             .filter((r: unknown): r is JoinRequest => !!r && (r as JoinRequest).status === 'pending')
@@ -2754,7 +2371,6 @@ export default function App() {
           ) : null;
         })()}
 
-        {/* Cinematic Ejection Overlay in room */}
         {activeEjection && (
           <CinematicEjectionOverlay
             key={activeEjection.timestamp}
@@ -2769,8 +2385,7 @@ export default function App() {
     );
   }
 
-  const badgeCount =
-    Object.keys(friendRequests || {}).length + Object.keys(roomInvites || {}).length;
+  const badgeCount = Object.keys(friendRequests || {}).length + Object.keys(roomInvites || {}).length;
 
   return (
     <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col overflow-hidden bg-[#030712] relative selection:bg-sky-500/30">
@@ -2784,12 +2399,11 @@ export default function App() {
         onClose={() => setRankModalOpen(false)}
       />
 
-      {/* Quick Matchmaking Modal */}
       <QuickMatchModal
         lang={lang}
-        currentUserUid={currentUser.uid}
+        currentUserUid={currentUser.id}
         currentUserName={profileName}
-        currentUserAvatar={profileAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`}
+        currentUserAvatar={profileAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.id}`}
         isOpen={quickMatchModalOpen}
         onClose={() => setQuickMatchModalOpen(false)}
         onMatchFound={code => {
@@ -2798,7 +2412,6 @@ export default function App() {
         onToast={showToast}
       />
 
-      {/* Cinematic Ejection Overlay */}
       {activeEjection && (
         <CinematicEjectionOverlay
           key={activeEjection.timestamp}
@@ -2810,195 +2423,198 @@ export default function App() {
         />
       )}
 
-      {/* Main Scrollable Viewport above Anchored BottomNav */}
       <main className="flex-1 w-full overflow-y-auto overflow-x-hidden overscroll-none px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-4 relative z-10">
         {activeTab === 'home' && (
           <HomeTab
-          lang={lang}
-          userName={profileName}
-          userAvatar={profileAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.uid}`}
-          userXp={userXp}
-          onOpenRank={() => setRankModalOpen(true)}
-          onOpenQuickMatch={() => setQuickMatchModalOpen(true)}
-          onOpenCreateRoom={cat => {
-            setCreateInitialCategory(cat);
-            setCreateInitialCustomCategoryId(null);
-            setIsEditingRoom(false);
-            setInCreateModal(true);
-          }}
-          onJoinRoom={handleRequestJoinRoom}
-        />
-      )}
+            lang={lang}
+            userName={profileName}
+            userAvatar={profileAvatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.id}`}
+            userXp={userXp}
+            onOpenRank={() => setRankModalOpen(true)}
+            onOpenQuickMatch={() => setQuickMatchModalOpen(true)}
+            onOpenCreateRoom={cat => {
+              setCreateInitialCategory(cat);
+              setCreateInitialCustomCategoryId(null);
+              setIsEditingRoom(false);
+              setInCreateModal(true);
+            }}
+            onJoinRoom={handleRequestJoinRoom}
+          />
+        )}
 
-      {activeTab === 'stations' && (
-        <StationsTab
-          lang={lang}
-          publicRooms={publicRooms}
-          isLoading={publicRoomsLoading}
-          hasMore={hasMoreStations}
-          onLoadMore={() => setStationsLimit(l => l + 12)}
-          onJoinRoom={handleRequestJoinRoom}
-        />
-      )}
+        {activeTab === 'stations' && (
+          <StationsTab
+            lang={lang}
+            publicRooms={publicRooms}
+            isLoading={publicRoomsLoading}
+            hasMore={hasMoreStations}
+            onLoadMore={() => setStationsLimit(l => l + 12)}
+            onJoinRoom={handleRequestJoinRoom}
+          />
+        )}
 
-      {activeTab === 'friends' && (
-        <FriendsTab
-          lang={lang}
-          myFriendCode={myFriendCode}
-          friends={friends}
-          friendStatuses={friendStatuses}
-          friendRequests={friendRequests}
-          roomInvites={roomInvites}
-          isLoading={friendsLoading}
-          onCopyCode={() => {
-            if (navigator.clipboard) {
-              navigator.clipboard.writeText(myFriendCode);
-              showToast(t.msgCodeCopied, 'success');
-            }
-          }}
-          onSendRequest={async code => {
-            let targetUid = friendCodeCache.get(code);
-            if (!targetUid) {
-              const codeSnap = await db.ref(`friendCodes/${code}`).once('value');
-              if (!codeSnap.exists()) return showToast(t.errFriendCodeNotFound, 'danger');
-              targetUid = codeSnap.val();
-              if (targetUid) friendCodeCache.set(code, targetUid);
-            }
-            if (!targetUid) return showToast(t.errFriendCodeNotFound, 'danger');
-            if (targetUid === currentUser.uid) return showToast(t.errCannotAddSelf, 'danger');
-            if (friends[targetUid]) return showToast(t.errAlreadyFriends, 'danger');
-            if (sentRequests[targetUid]) return showToast(t.errRequestAlreadySent, 'danger');
-
-            await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set({
-              name: profileName || currentUser.displayName || 'Agent',
-              avatar: profileAvatar || currentUser.photoURL || '',
-              timestamp: firebase.database.ServerValue.TIMESTAMP
-            });
-            await db.ref(`users/${currentUser.uid}/sentRequests/${targetUid}`).set(true);
-            showToast(t.msgRequestSent, 'success');
-          }}
-          onAcceptRequest={async fromUid => {
-            const req = friendRequests[fromUid];
-            const now = firebase.database.ServerValue.TIMESTAMP;
-            await db.ref(`users/${currentUser.uid}/friends/${fromUid}`).set({
-              name: req?.name || 'Friend',
-              avatar: req?.avatar || '',
-              since: now
-            });
-            await db.ref(`users/${fromUid}/friends/${currentUser.uid}`).set({
-              name: profileName || currentUser.displayName || 'Agent',
-              avatar: profileAvatar || currentUser.photoURL || '',
-              since: now
-            });
-            await db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).remove();
-            await db.ref(`users/${fromUid}/sentRequests/${currentUser.uid}`).remove();
-            showToast(t.msgFriendAdded, 'success');
-          }}
-          onDeclineRequest={async fromUid => {
-            await db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).remove();
-            await db.ref(`users/${fromUid}/sentRequests/${currentUser.uid}`).remove();
-          }}
-          onRemoveFriend={async uid => {
-            await db.ref(`users/${currentUser.uid}/friends/${uid}`).remove();
-            await db.ref(`users/${uid}/friends/${currentUser.uid}`).remove();
-            showToast(t.msgFriendRemoved);
-          }}
-          onJoinFromInvite={async (fromUid, rCode) => {
-            await db.ref(`users/${currentUser.uid}/roomInvites/${fromUid}`).remove();
-            joinRoom(rCode);
-          }}
-          onDismissInvite={async fromUid => {
-            await db.ref(`users/${currentUser.uid}/roomInvites/${fromUid}`).remove();
-          }}
-        />
-      )}
-
-      {activeTab === 'categories' && (
-        <CategoriesTab
-          lang={lang}
-          currentUserUid={currentUser.uid}
-          currentUserName={profileName}
-          myCategories={myCategories}
-          communityCategories={communityCategories}
-          isLoading={customCatsLoading}
-          hasMoreCommunity={hasMoreCommunityCats}
-          onLoadMoreCommunity={() => setCommunityCatLimit(l => l + 12)}
-          onSaveCategory={handleSaveCustomCategory}
-          onDeleteCategory={handleDeleteCustomCategory}
-          onPlayCategory={catId => {
-            setCreateInitialCustomCategoryId(catId);
-            setIsEditingRoom(false);
-            setInCreateModal(true);
-          }}
-          onToast={showToast}
-        />
-      )}
-
-      {activeTab === 'settings' && (
-        <SettingsTab
-          lang={lang}
-          userId={currentUser.uid}
-          userName={profileName}
-          userAvatar={profileAvatar}
-          onUpdateProfile={async (newName, newAvatar) => {
-            setProfileName(newName);
-            setProfileAvatar(newAvatar);
-            try {
-              const isWebUrl = typeof newAvatar === 'string' && (newAvatar.startsWith('http://') || newAvatar.startsWith('https://'));
-              await currentUser.updateProfile({
-                displayName: newName,
-                ...(isWebUrl ? { photoURL: newAvatar } : {})
+        {activeTab === 'friends' && (
+          <FriendsTab
+            lang={lang}
+            myFriendCode={myFriendCode}
+            friends={friends}
+            friendStatuses={friendStatuses}
+            friendRequests={friendRequests}
+            roomInvites={roomInvites}
+            isLoading={friendsLoading}
+            onCopyCode={() => {
+              if (navigator.clipboard) {
+                navigator.clipboard.writeText(myFriendCode);
+              }
+            }}
+            onSendRequest={async code => {
+              const { data: status } = await supabase.rpc('send_friend_request_by_code', {
+                p_code: code.trim().toUpperCase()
               });
-            } catch (authErr) {
-              console.warn('Firebase Auth profile update notice:', authErr);
-            }
-
-            // 1. Update user profile in RTDB & refresh local cache
-            await db.ref(`users/${currentUser.uid}`).update({
-              name: newName,
-              avatar: newAvatar
-            });
-            userProfileCache.set(currentUser.uid, { name: newName, avatar: newAvatar, friendCode: myFriendCode });
-
-            // 2. Synchronize new name/avatar to all friends' records in a SINGLE atomic multi-path write (no N+1 loop)
-            try {
-              const friendUids = Object.keys(friends || {});
-              const targetUids = friendUids.length > 0
-                ? friendUids
-                : Object.keys((await db.ref(`users/${currentUser.uid}/friends`).once('value')).val() || {});
-              if (targetUids.length > 0) {
-                const multiUpdates: Record<string, string> = {};
-                for (const fUid of targetUids) {
-                  multiUpdates[`users/${fUid}/friends/${currentUser.uid}/name`] = newName;
-                  multiUpdates[`users/${fUid}/friends/${currentUser.uid}/avatar`] = newAvatar;
-                }
-                await db.ref().update(multiUpdates);
+              if (status === 'sent') {
+                reloadSocialData(currentUser);
+                showToast(t.msgRequestSent, 'success');
+              } else if (status === 'cannot_add_self') {
+                showToast(t.errCannotAddSelf, 'danger');
+              } else if (status === 'already_friends') {
+                showToast(t.errAlreadyFriends, 'danger');
+              } else if (status === 'already_sent') {
+                showToast(t.errRequestAlreadySent, 'danger');
+              } else {
+                showToast(t.errFriendCodeNotFound, 'danger');
               }
-            } catch (syncErr) {
-              console.warn('Friends sync notice:', syncErr);
-            }
+            }}
+            onAcceptRequest={async fromUid => {
+              await supabase.rpc('accept_friend_request', { p_sender_uid: fromUid });
+              reloadSocialData(currentUser);
+              showToast(t.msgFriendAdded, 'success');
+            }}
+            onDeclineRequest={async fromUid => {
+              await supabase
+                .from('friend_requests')
+                .delete()
+                .eq('sender_uid', fromUid)
+                .eq('recipient_uid', currentUser.id);
+              reloadSocialData(currentUser);
+            }}
+            onRemoveFriend={async uid => {
+              await supabase.rpc('remove_friendship', { p_friend_uid: uid });
+              reloadSocialData(currentUser);
+              showToast(t.msgFriendRemoved);
+            }}
+            onJoinFromInvite={async (fromUid, rCode) => {
+              await supabase
+                .from('room_invites')
+                .delete()
+                .eq('recipient_uid', currentUser.id)
+                .eq('sender_uid', fromUid);
+              reloadSocialData(currentUser);
+              joinRoom(rCode);
+            }}
+            onDismissInvite={async fromUid => {
+              await supabase
+                .from('room_invites')
+                .delete()
+                .eq('recipient_uid', currentUser.id)
+                .eq('sender_uid', fromUid);
+              reloadSocialData(currentUser);
+            }}
+          />
+        )}
 
-            // 3. Update current active room player and host name
-            if (currentRoomCode) {
-              await db.ref(`spy_rooms/${currentRoomCode}/players/${currentUser.uid}`).update({
+        {activeTab === 'categories' && (
+          <CategoriesTab
+            lang={lang}
+            currentUserUid={currentUser.id}
+            currentUserName={profileName}
+            myCategories={myCategories}
+            communityCategories={communityCategories}
+            isLoading={customCatsLoading}
+            hasMoreCommunity={hasMoreCommunityCats}
+            onLoadMoreCommunity={() => setCommunityCatLimit(l => l + 12)}
+            onSaveCategory={handleSaveCustomCategory}
+            onDeleteCategory={handleDeleteCustomCategory}
+            onPlayCategory={catId => {
+              setCreateInitialCustomCategoryId(catId);
+              setIsEditingRoom(false);
+              setInCreateModal(true);
+            }}
+            onToast={showToast}
+          />
+        )}
+
+        {activeTab === 'settings' && (
+          <SettingsTab
+            lang={lang}
+            userId={currentUser.id}
+            userName={profileName}
+            userAvatar={profileAvatar}
+            onUpdateProfile={async (newName, newAvatar) => {
+              setProfileName(newName);
+              setProfileAvatar(newAvatar);
+
+              const isWebUrl =
+                typeof newAvatar === 'string' &&
+                (newAvatar.startsWith('http://') || newAvatar.startsWith('https://'));
+
+              await Promise.all([
+                supabase
+                  .from('profiles')
+                  .update({
+                    name: newName,
+                    avatar: newAvatar,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq('uid', currentUser.id),
+                supabase.auth.updateUser({
+                  data: {
+                    full_name: newName,
+                    name: newName,
+                    ...(isWebUrl ? { avatar_url: newAvatar } : {})
+                  }
+                })
+              ]).catch(() => {});
+
+              userProfileCache.set(currentUser.id, {
                 name: newName,
-                avatar: newAvatar
-              }).catch(() => {});
+                avatar: newAvatar,
+                friendCode: myFriendCode
+              });
 
-              if (roomData && roomData.hostUid === currentUser.uid) {
-                await db.ref(`spy_rooms/${currentRoomCode}/hostName`).set(newName).catch(() => {});
+              if (currentRoomCode) {
+                supabase
+                  .from('room_players')
+                  .update({ name: newName, avatar: newAvatar })
+                  .eq('room_code', currentRoomCode)
+                  .eq('uid', currentUser.id)
+                  .then(() => {}, () => {});
+
+                if (roomData && roomData.hostUid === currentUser.id) {
+                  supabase
+                    .from('rooms')
+                    .update({ host_name: newName })
+                    .eq('code', currentRoomCode)
+                    .then(() => {}, () => {});
+                }
               }
-            }
-          }}
-          onChangeLanguage={l => setLang(l)}
-          onLogout={() => auth.signOut()}
-          onToast={showToast}
-        />
-      )}
-
+            }}
+            onChangeLanguage={l => setLang(l)}
+            onLogout={async () => {
+              try {
+                await supabase
+                  .from('player_presence')
+                  .upsert({ uid: currentUser.id, state: 'offline', last_changed: new Date().toISOString() }, { onConflict: 'uid' });
+              } catch {
+                // Ignore presence write failure on sign-out
+              } finally {
+                await supabase.auth.signOut();
+              }
+            }}
+            onToast={showToast}
+          />
+        )}
       </main>
 
-      {/* Applicant Waiting Approval Modal */}
       {pendingJoinApproval && (
         <ApplicantWaitingApprovalModal
           lang={lang}
@@ -3009,7 +2625,6 @@ export default function App() {
         />
       )}
 
-      {/* Bottom Nav Bar */}
       <BottomNav
         lang={lang}
         currentTab={activeTab}
@@ -3017,7 +2632,6 @@ export default function App() {
         onSelectTab={setActiveTab}
       />
 
-      {/* 🚀 Mandatory Game Update Modal: Blocks app until user taps update & restarts */}
       {mandatoryUpdateAvailable && (
         <MandatoryUpdateModal
           lang={lang}

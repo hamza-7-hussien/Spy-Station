@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { dictionary, SUPPORTED_LANGUAGES } from '../translations';
 import { Language } from '../types';
-import { storage } from '../firebase';
+import { supabase } from '../supabase';
 import { sound } from '../audio';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
@@ -128,17 +128,23 @@ export const SettingsTab: React.FC<Props> = ({
       await onUpdateProfile(name.trim() || userName, compressedDataUrl);
       onToast(t.msgPhotoUploaded, 'success');
 
-      // 3. If Firebase Storage is available, upload in background to save permanent URL
-      if (storage) {
-        try {
-          const fileRef = storage.ref(`avatars/${userId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`);
-          await fileRef.put(file);
-          const downloadUrl = await fileRef.getDownloadURL();
-          setAvatarUrl(downloadUrl);
-          await onUpdateProfile(name.trim() || userName, downloadUrl);
-        } catch (storageErr) {
-          console.warn('Storage background upload skipped, kept data URL:', storageErr);
+      // 3. Upload avatar to Supabase Storage bucket ('avatars') in background for CDN URL
+      try {
+        const cleanFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const path = `${userId}/${Date.now()}_${cleanFileName}`;
+        const { error: uploadErr } = await supabase.storage
+          .from('avatars')
+          .upload(path, file, { upsert: true, contentType: file.type });
+
+        if (!uploadErr) {
+          const { data: pubData } = supabase.storage.from('avatars').getPublicUrl(path);
+          if (pubData?.publicUrl) {
+            setAvatarUrl(pubData.publicUrl);
+            await onUpdateProfile(name.trim() || userName, pubData.publicUrl);
+          }
         }
+      } catch (storageErr) {
+        console.warn('Supabase storage upload skipped, kept data URL:', storageErr);
       }
     } catch (err) {
       console.error('Photo upload process failed:', err);

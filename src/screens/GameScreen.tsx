@@ -4,8 +4,8 @@ import { Language, RoomData, PlayerData } from '../types';
 import { sound } from '../audio';
 import { RoleDossierCard } from '../components/RoleDossierCard';
 
-import { db } from '../firebase';
-import firebase from 'firebase/compat/app';
+import { supabase } from '../supabase';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getSecretWordDisplay } from '../words';
 import { getEffectiveTurnSeconds } from '../gameEngine';
 import { CluesHistoryModal } from '../components/CluesHistoryModal';
@@ -87,7 +87,10 @@ export const GameScreen: React.FC<Props> = ({
   >({});
   const [nowTs, setNowTs] = useState(() => Date.now() + serverTimeOffsetMs);
   const lastPulseSecondRef = useRef<number>(-1);
-  const bubbleCleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bubbleTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const bubbleChannelRef = useRef<RealtimeChannel | null>(null);
+  const seenClueIdsRef = useRef<Set<string>>(new Set());
+  const clueSeededRef = useRef(false);
 
   const t = dictionary[lang];
   const playersObj = room.players || {};
@@ -143,20 +146,90 @@ export const GameScreen: React.FC<Props> = ({
   const spectatorCount = Object.values(playersObj).filter(p => p.isSpectator).length;
   const cluesList = Object.values(room.gameChat || {});
 
+  const popSpeechBubble = (
+    uid: string,
+    bubble: { text: string; translations?: { ar?: string; en?: string }; isBot?: boolean; timestamp: number },
+    durationMs = 5800
+  ) => {
+    setSpeechBubbles(prev => ({ ...prev, [uid]: bubble }));
+    if (bubbleTimersRef.current[uid]) {
+      clearTimeout(bubbleTimersRef.current[uid]);
+    }
+    bubbleTimersRef.current[uid] = setTimeout(() => {
+      setSpeechBubbles(prev => {
+        if (!prev[uid] || prev[uid].timestamp !== bubble.timestamp) return prev;
+        const next = { ...prev };
+        delete next[uid];
+        return next;
+      });
+    }, durationMs);
+  };
+
   useEffect(() => {
-    const bubblesRef = db.ref(`spy_rooms/${roomCode}/speechBubbles`);
-    const onBubbles = (snap: firebase.database.DataSnapshot) => {
-      const val = snap.val() || {};
-      setSpeechBubbles(val);
-    };
-    bubblesRef.on('value', onBubbles);
+    seenClueIdsRef.current.clear();
+    clueSeededRef.current = false;
+    setSpeechBubbles({});
+
+    const channel = supabase.channel(`bubbles:${roomCode}`, {
+      config: { broadcast: { self: false } }
+    });
+    channel
+      .on('broadcast', { event: 'speech_bubble' }, ({ payload }) => {
+        const p = payload as {
+          uid?: string;
+          text?: string;
+          translations?: { ar?: string; en?: string };
+          isBot?: boolean;
+          timestamp?: number;
+        };
+        if (!p?.uid || !p.text) return;
+        sound.playBubblePop();
+        popSpeechBubble(p.uid, {
+          text: p.text,
+          translations: p.translations,
+          isBot: p.isBot,
+          timestamp: p.timestamp || Date.now()
+        });
+      })
+      .subscribe();
+
+    bubbleChannelRef.current = channel;
     return () => {
-      bubblesRef.off('value', onBubbles);
-      if (bubbleCleanupTimerRef.current) {
-        clearTimeout(bubbleCleanupTimerRef.current);
-      }
+      bubbleChannelRef.current = null;
+      supabase.removeChannel(channel);
+      Object.values(bubbleTimersRef.current).forEach(clearTimeout);
+      bubbleTimersRef.current = {};
     };
   }, [roomCode]);
+
+  // Also pop speech bubbles automatically when any clue (human or bot) lands via Postgres Realtime
+  useEffect(() => {
+    const entries = Object.entries(room.gameChat || {});
+    if (!clueSeededRef.current) {
+      clueSeededRef.current = true;
+      entries.forEach(([id]) => seenClueIdsRef.current.add(id));
+      return;
+    }
+
+    const serverNow = Date.now() + serverTimeOffsetMs;
+    for (const [id, entry] of entries) {
+      if (seenClueIdsRef.current.has(id)) continue;
+      seenClueIdsRef.current.add(id);
+      if (!entry?.uid || !entry?.text) continue;
+      const ageMs = entry.timestamp ? serverNow - entry.timestamp : 0;
+      if (ageMs < 7500) {
+        if (entry.uid !== currentUserUid) {
+          sound.playBubblePop();
+        }
+        popSpeechBubble(entry.uid, {
+          text: entry.text,
+          translations: entry.translations,
+          isBot: entry.isBot,
+          timestamp: entry.timestamp || serverNow
+        });
+      }
+    }
+  }, [room.gameChat, currentUserUid, serverTimeOffsetMs]);
 
   useEffect(() => {
     if (timeLeft !== lastPulseSecondRef.current) {
@@ -172,17 +245,16 @@ export const GameScreen: React.FC<Props> = ({
   const sendSpeechBubble = async (text: string) => {
     sound.playBubblePop();
     sound.triggerHaptic('light');
+    const ts = Date.now() + serverTimeOffsetMs;
+    popSpeechBubble(currentUserUid, { text, isBot: false, timestamp: ts });
     try {
-      await db.ref(`spy_rooms/${roomCode}/speechBubbles/${currentUserUid}`).set({
-        text,
-        timestamp: firebase.database.ServerValue.TIMESTAMP
+      await bubbleChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'speech_bubble',
+        payload: { uid: currentUserUid, text, isBot: false, timestamp: ts }
       });
-      if (bubbleCleanupTimerRef.current) clearTimeout(bubbleCleanupTimerRef.current);
-      bubbleCleanupTimerRef.current = setTimeout(() => {
-        db.ref(`spy_rooms/${roomCode}/speechBubbles/${currentUserUid}`).remove().catch(() => {});
-      }, 6000);
     } catch {
-      // ignore
+      // ignore broadcast errors; Postgres clue insert also drives bubble
     }
   };
 
@@ -246,9 +318,6 @@ export const GameScreen: React.FC<Props> = ({
     if (!isMyTurn) return;
     sendSpeechBubble(emoji);
     onSendGameClue(emoji, currentRound, turnIndex);
-    if (myPlayer.isSilenced) {
-      db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}/isSilenced`).set(false);
-    }
   };
 
   const handleSpySubmit = (e: React.FormEvent) => {

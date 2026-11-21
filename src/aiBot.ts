@@ -527,3 +527,45 @@ export function generateBotVoteDiscussionLine(params: {
     ? `Honestly "${targetClue}" from ${targetName} sounds too vague.`
     : `${targetName} looks suspicious, voting them out.`;
 }
+
+export function getBotClueBankForWord(
+  word: string,
+  wordAr: string,
+  category: CategoryKey
+): Array<{ en: string; ar: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ en: string; ar: string }> = [];
+  const used: string[] = [];
+
+  for (let i = 0; i < 6; i++) {
+    const pair = generateSmartBotCluePair({
+      isSpy: false,
+      word,
+      wordAr,
+      category,
+      language: i % 2 === 0 ? 'en' : 'ar',
+      previousClues: used
+    });
+    const key = `${pair.en.toLowerCase()}|${pair.ar}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ en: pair.en, ar: pair.ar });
+      used.push(pair.en, pair.ar);
+    }
+  }
+  return out;
+}
+
+export function getBotSpyClueBank(category: CategoryKey): Array<{ en: string; ar: string }> {
+  const bridges = SPY_CATEGORY_BRIDGES[category] || SPY_CATEGORY_BRIDGES.places;
+  const maxLen = Math.min(bridges.en.length, bridges.ar.length);
+  const out: Array<{ en: string; ar: string }> = [];
+  for (let i = 0; i < maxLen; i++) {
+    out.push({ en: bridges.en[i], ar: bridges.ar[i] });
+  }
+  const camoMax = Math.min(4, SPY_CAMOUFLAGE_CLUES.en.length, SPY_CAMOUFLAGE_CLUES.ar.length);
+  for (let i = 0; i < camoMax; i++) {
+    out.push({ en: SPY_CAMOUFLAGE_CLUES.en[i], ar: SPY_CAMOUFLAGE_CLUES.ar[i] });
+  }
+  return out;
+}

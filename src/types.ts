@@ -203,3 +203,11 @@ export interface JoinRequest {
   status: 'pending' | 'accepted' | 'rejected';
   timestamp: number;
 }
+
+export interface MissionDossier {
+  role: 'waiting' | 'spy' | 'crew' | 'undercover';
+  word?: string | null;
+  wordAr?: string | null;
+  fellowSpies?: string[];
+  protectedSpyUid?: string | null;
+}

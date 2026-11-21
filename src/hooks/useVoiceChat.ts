@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { db } from '../firebase';
-import firebase from 'firebase/compat/app';
+import { supabase } from '../supabase';
 import { VoiceUserState } from '../types';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface Props {
   roomCode: string;
@@ -24,12 +24,17 @@ const ICE_SERVERS: RTCConfiguration = {
   iceCandidatePoolSize: 10
 };
 
+type VoiceSignalPayload =
+  | { kind: 'offer'; fromUid: string; toUid: string; sdp: RTCSessionDescriptionInit }
+  | { kind: 'answer'; fromUid: string; toUid: string; sdp: RTCSessionDescriptionInit }
+  | { kind: 'candidate'; fromUid: string; toUid: string; candidate: RTCIceCandidateInit };
+
 export function useVoiceChat({
   roomCode,
   currentUserUid,
   currentUserName,
   onToast,
-  permissionErrorMsg = 'يرجى السماح بصلاحية الميكروفون لاستخدام المحادثة الصوتية 🎙️'
+  permissionErrorMsg = 'Please allow microphone access to use voice chat.'
 }: Props) {
   const [isJoined, setIsJoined] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
@@ -47,8 +52,8 @@ export function useVoiceChat({
   const audioElementsRef = useRef<Record<string, HTMLAudioElement>>({});
   const pendingCandidatesRef = useRef<Record<string, RTCIceCandidateInit[]>>({});
   const lastSpeakingUpdateRef = useRef<number>(0);
+  const signalChannelRef = useRef<RealtimeChannel | null>(null);
 
-  // Resume all audio elements upon user click/tap to bypass browser autoplay restrictions
   useEffect(() => {
     const unlockAudios = () => {
       Object.values(audioElementsRef.current).forEach(el => {
@@ -68,20 +73,60 @@ export function useVoiceChat({
     };
   }, []);
 
-  // Sync voiceStates from Firebase
-  useEffect(() => {
+  const fetchVoiceStates = useCallback(async () => {
     if (!roomCode) return;
-    const voiceRef = db.ref(`spy_rooms/${roomCode}/voiceStates`);
-    const onVoiceData = (snap: firebase.database.DataSnapshot) => {
-      const data = (snap.val() || {}) as Record<string, VoiceUserState>;
-      setVoiceUsers(data);
-    };
-    voiceRef.on('value', onVoiceData);
+    const { data } = await supabase
+      .from('room_voice_states')
+      .select('uid, name, muted, deafened, speaking, active, updated_at')
+      .eq('room_code', roomCode);
+
+    const map: Record<string, VoiceUserState> = {};
+    for (const row of data || []) {
+      map[row.uid] = {
+        uid: row.uid,
+        name: row.name,
+        muted: !!row.muted,
+        deafened: !!row.deafened,
+        speaking: !!row.speaking,
+        active: !!row.active,
+        updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now()
+      };
+    }
+    setVoiceUsers(map);
+  }, [roomCode]);
+
+  // Sync voiceStates via Postgres Changes
+  useEffect(() => {
+    if (!roomCode) {
+      setVoiceUsers({});
+      return;
+    }
+
+    fetchVoiceStates();
+
+    const stateChannel = supabase
+      .channel(`voice-states:${roomCode}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'room_voice_states', filter: `room_code=eq.${roomCode}` },
+        () => fetchVoiceStates()
+      )
+      .subscribe();
 
     return () => {
-      voiceRef.off('value', onVoiceData);
+      supabase.removeChannel(stateChannel);
     };
-  }, [roomCode]);
+  }, [roomCode, fetchVoiceStates]);
+
+  const sendVoiceSignal = useCallback((payload: VoiceSignalPayload) => {
+    const ch = signalChannelRef.current;
+    if (!ch) return;
+    ch.send({
+      type: 'broadcast',
+      event: 'webrtc-signal',
+      payload
+    }).catch(() => {});
+  }, []);
 
   const stopVolumeDetection = useCallback(() => {
     if (animationFrameRef.current) {
@@ -96,7 +141,6 @@ export function useVoiceChat({
     setIsSpeaking(false);
   }, []);
 
-  // Audio level monitoring for local microphone
   const startVolumeDetection = useCallback((stream: MediaStream) => {
     try {
       stopVolumeDetection();
@@ -132,7 +176,12 @@ export function useVoiceChat({
             const now = Date.now();
             if (now - lastSpeakingUpdateRef.current > 250) {
               lastSpeakingUpdateRef.current = now;
-              db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/speaking`).set(nowSpeaking).catch(() => {});
+              supabase
+                .from('room_voice_states')
+                .update({ speaking: nowSpeaking, updated_at: new Date().toISOString() })
+                .eq('room_code', roomCode)
+                .eq('uid', currentUserUid)
+                .then(() => {});
             }
             return nowSpeaking;
           }
@@ -148,7 +197,6 @@ export function useVoiceChat({
     }
   }, [roomCode, currentUserUid, stopVolumeDetection]);
 
-  // Helper to drain queued ICE candidates once remote description is set
   const drainCandidateQueue = async (peerUid: string, pc: RTCPeerConnection) => {
     const queue = pendingCandidatesRef.current[peerUid];
     if (queue && queue.length > 0) {
@@ -156,14 +204,13 @@ export function useVoiceChat({
         try {
           await pc.addIceCandidate(new RTCIceCandidate(cand));
         } catch {
-          // ignore late candidate
+          // ignore
         }
       }
       pendingCandidatesRef.current[peerUid] = [];
     }
   };
 
-  // Create WebRTC Peer Connection helper
   const createPeerConnection = useCallback((peerUid: string): RTCPeerConnection => {
     if (peerConnectionsRef.current[peerUid]) {
       return peerConnectionsRef.current[peerUid];
@@ -173,14 +220,12 @@ export function useVoiceChat({
     peerConnectionsRef.current[peerUid] = pc;
     pendingCandidatesRef.current[peerUid] = [];
 
-    // Always ensure a sendrecv audio transceiver exists so incoming audio works immediately in listen-only mode
     try {
       pc.addTransceiver('audio', { direction: 'sendrecv' });
     } catch (e) {
       console.warn('Failed to addTransceiver:', e);
     }
 
-    // Attach local audio track if microphone stream is active
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
@@ -194,16 +239,17 @@ export function useVoiceChat({
       }
     }
 
-    // ICE Candidate handler
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        db.ref(`spy_rooms/${roomCode}/voiceSignaling/${peerUid}/${currentUserUid}/candidates`).push(
-          event.candidate.toJSON()
-        );
+        sendVoiceSignal({
+          kind: 'candidate',
+          fromUid: currentUserUid,
+          toUid: peerUid,
+          candidate: event.candidate.toJSON()
+        });
       }
     };
 
-    // Remote Track handler (plays audio from other players)
     pc.ontrack = (event) => {
       const remoteStream = event.streams[0] || new MediaStream([event.track]);
       let audioEl = audioElementsRef.current[peerUid];
@@ -236,97 +282,83 @@ export function useVoiceChat({
     };
 
     return pc;
-  }, [roomCode, currentUserUid]);
+  }, [currentUserUid, sendVoiceSignal]);
 
-  // WebRTC Peer signaling listener with polite-peer rollback handling
+  // WebRTC signaling via Supabase Realtime Broadcast (ultra-fast, zero DB writes)
   useEffect(() => {
     if (!isJoined || !roomCode || !currentUserUid) return;
 
-    const signalingRef = db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}`);
+    const sigChannel = supabase.channel(`voice-signal:${roomCode}`, {
+      config: { broadcast: { self: false } }
+    });
 
-    const onIncomingSignal = async (snap: firebase.database.DataSnapshot) => {
-      const signals = snap.val() || {};
+    sigChannel.on('broadcast', { event: 'webrtc-signal' }, async ({ payload }) => {
+      const msg = payload as VoiceSignalPayload | undefined;
+      if (!msg || msg.toUid !== currentUserUid || !msg.fromUid) return;
 
-      for (const peerUid in signals) {
-        const signalData = signals[peerUid];
-        if (!signalData) continue;
+      const peerUid = msg.fromUid;
+      let pc = peerConnectionsRef.current[peerUid];
+      if (!pc) {
+        pc = createPeerConnection(peerUid);
+      }
 
-        let pc = peerConnectionsRef.current[peerUid];
-        if (!pc) {
-          pc = createPeerConnection(peerUid);
-        }
+      const isPolite = currentUserUid > peerUid;
 
-        const isPolite = currentUserUid > peerUid;
-
-        // Process Offer
-        if (signalData.offer) {
-          const offerCollision = pc.signalingState !== 'stable';
-          if (offerCollision && !isPolite) {
-            continue;
+      if (msg.kind === 'offer') {
+        const offerCollision = pc.signalingState !== 'stable';
+        if (offerCollision && !isPolite) return;
+        try {
+          if (offerCollision) {
+            await pc.setLocalDescription({ type: 'rollback' });
           }
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+          await drainCandidateQueue(peerUid, pc);
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          sendVoiceSignal({
+            kind: 'answer',
+            fromUid: currentUserUid,
+            toUid: peerUid,
+            sdp: { type: answer.type, sdp: answer.sdp }
+          });
+        } catch (err) {
+          console.error('Error handling voice offer:', err);
+        }
+      } else if (msg.kind === 'answer' && pc.signalingState === 'have-local-offer') {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+          await drainCandidateQueue(peerUid, pc);
+        } catch (err) {
+          console.error('Error handling voice answer:', err);
+        }
+      } else if (msg.kind === 'candidate') {
+        if (pc.remoteDescription && pc.remoteDescription.type) {
           try {
-            if (offerCollision) {
-              await pc.setLocalDescription({ type: 'rollback' });
-            }
-            await pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
-            await drainCandidateQueue(peerUid, pc);
-
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-
-            await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${peerUid}/${currentUserUid}/answer`).set({
-              type: answer.type,
-              sdp: answer.sdp
-            });
-            db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/offer`).remove();
-          } catch (err) {
-            console.error('Error handling offer:', err);
+            await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+          } catch {
+            // ignore
           }
-        }
-
-        // Process Answer
-        if (signalData.answer && pc.signalingState === 'have-local-offer') {
-          try {
-            await pc.setRemoteDescription(new RTCSessionDescription(signalData.answer));
-            await drainCandidateQueue(peerUid, pc);
-            db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/answer`).remove();
-          } catch (err) {
-            console.error('Error handling answer:', err);
+        } else {
+          if (!pendingCandidatesRef.current[peerUid]) {
+            pendingCandidatesRef.current[peerUid] = [];
           }
-        }
-
-        // Process Candidates
-        if (signalData.candidates) {
-          for (const candKey in signalData.candidates) {
-            const cand = signalData.candidates[candKey];
-            if (cand) {
-              if (pc.remoteDescription && pc.remoteDescription.type) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(cand));
-                } catch {
-                  // ignore
-                }
-              } else {
-                if (!pendingCandidatesRef.current[peerUid]) {
-                  pendingCandidatesRef.current[peerUid] = [];
-                }
-                pendingCandidatesRef.current[peerUid].push(cand);
-              }
-            }
-          }
-          db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}/${peerUid}/candidates`).remove();
+          pendingCandidatesRef.current[peerUid].push(msg.candidate);
         }
       }
-    };
+    });
 
-    signalingRef.on('value', onIncomingSignal);
+    sigChannel.subscribe();
+    signalChannelRef.current = sigChannel;
 
     return () => {
-      signalingRef.off('value', onIncomingSignal);
+      if (signalChannelRef.current === sigChannel) {
+        signalChannelRef.current = null;
+      }
+      supabase.removeChannel(sigChannel);
     };
-  }, [isJoined, roomCode, currentUserUid, createPeerConnection]);
+  }, [isJoined, roomCode, currentUserUid, createPeerConnection, sendVoiceSignal]);
 
-  // Connect to peers who are already active
   const connectToActivePeers = useCallback(async () => {
     const peers = Object.values(voiceUsers).filter(u => u.active && u.uid !== currentUserUid);
 
@@ -348,17 +380,18 @@ export function useVoiceChat({
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-
-          await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${peer.uid}/${currentUserUid}/offer`).set({
-            type: offer.type,
-            sdp: offer.sdp
+          sendVoiceSignal({
+            kind: 'offer',
+            fromUid: currentUserUid,
+            toUid: peer.uid,
+            sdp: { type: offer.type, sdp: offer.sdp }
           });
         } catch (err) {
           console.error('Failed to create offer for peer:', peer.uid, err);
         }
       }
     }
-  }, [voiceUsers, currentUserUid, roomCode, createPeerConnection]);
+  }, [voiceUsers, currentUserUid, createPeerConnection, sendVoiceSignal]);
 
   useEffect(() => {
     if (isJoined) {
@@ -366,7 +399,6 @@ export function useVoiceChat({
     }
   }, [isJoined, voiceUsers, connectToActivePeers]);
 
-  // Reliable media stream getter with mobile fallback
   const getSafeAudioStream = async (): Promise<MediaStream> => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error('getUserMedia not supported');
@@ -382,7 +414,6 @@ export function useVoiceChat({
         video: false
       });
     } catch {
-      // Fallback without constraints for strict webviews / devices
       return await navigator.mediaDevices.getUserMedia({
         audio: true,
         video: false
@@ -390,7 +421,6 @@ export function useVoiceChat({
     }
   };
 
-  // Attach microphone stream lazily & renegotiate with peers
   const attachMicrophoneStream = useCallback(async (startMuted: boolean) => {
     const stream = await getSafeAudioStream();
     stream.getAudioTracks().forEach(track => {
@@ -413,7 +443,6 @@ export function useVoiceChat({
             // ignore
           }
         }
-        // Ensure transceiver stays sendrecv and renegotiate if stable
         pc.getTransceivers().forEach(tr => {
           if (tr.receiver.track?.kind === 'audio') {
             tr.direction = 'sendrecv';
@@ -423,21 +452,22 @@ export function useVoiceChat({
           try {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-            await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${peerUid}/${currentUserUid}/offer`).set({
-              type: offer.type,
-              sdp: offer.sdp
+            sendVoiceSignal({
+              kind: 'offer',
+              fromUid: currentUserUid,
+              toUid: peerUid,
+              sdp: { type: offer.type, sdp: offer.sdp }
             });
           } catch {
-            // ignore non-fatal renegotiation errors
+            // ignore
           }
         }
       }
     }
 
     startVolumeDetection(stream);
-  }, [roomCode, currentUserUid, startVolumeDetection]);
+  }, [currentUserUid, sendVoiceSignal, startVolumeDetection]);
 
-  // Join Voice Chat: when startMuted=true, connects in listen-only mode WITHOUT prompting mic permission!
   const joinVoice = useCallback(async (startMuted: boolean = true) => {
     if (!roomCode || !currentUserUid) return;
 
@@ -452,26 +482,22 @@ export function useVoiceChat({
       setIsDeafened(false);
       isDeafenedRef.current = false;
 
-      // Publish presence in Firebase
-      const myVoiceRef = db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}`);
-      await myVoiceRef.set({
+      await supabase.from('room_voice_states').upsert({
+        room_code: roomCode,
         uid: currentUserUid,
         name: currentUserName,
         muted: startMuted,
         deafened: false,
         speaking: false,
         active: true,
-        updatedAt: firebase.database.ServerValue.TIMESTAMP
+        updated_at: new Date().toISOString()
       });
-
-      myVoiceRef.onDisconnect().remove();
     } catch (err) {
       console.warn('Voice join error:', err);
       onToast?.(permissionErrorMsg, 'danger');
     }
   }, [roomCode, currentUserUid, currentUserName, attachMicrophoneStream, onToast, permissionErrorMsg]);
 
-  // Leave Voice Chat
   const leaveVoice = useCallback(async () => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
@@ -498,15 +524,17 @@ export function useVoiceChat({
 
     if (roomCode && currentUserUid) {
       try {
-        await db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}`).remove();
-        await db.ref(`spy_rooms/${roomCode}/voiceSignaling/${currentUserUid}`).remove();
+        await supabase
+          .from('room_voice_states')
+          .delete()
+          .eq('room_code', roomCode)
+          .eq('uid', currentUserUid);
       } catch {
         // ignore
       }
     }
   }, [roomCode, currentUserUid, stopVolumeDetection]);
 
-  // Toggle Mute (Microphone) — acquires mic lazily on first unmute
   const toggleMute = useCallback(async () => {
     if (!isJoinedRef.current) {
       await joinVoice(false);
@@ -517,7 +545,11 @@ export function useVoiceChat({
       try {
         await attachMicrophoneStream(false);
         setIsMuted(false);
-        db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/muted`).set(false).catch(() => {});
+        await supabase
+          .from('room_voice_states')
+          .update({ muted: false, updated_at: new Date().toISOString() })
+          .eq('room_code', roomCode)
+          .eq('uid', currentUserUid);
       } catch (err) {
         console.warn('Mic permission error on unmute:', err);
         onToast?.(permissionErrorMsg, 'danger');
@@ -531,15 +563,21 @@ export function useVoiceChat({
       audioTrack.enabled = nextEnabled;
       const muted = !nextEnabled;
       setIsMuted(muted);
-      db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/muted`).set(muted).catch(() => {});
+      await supabase
+        .from('room_voice_states')
+        .update({
+          muted,
+          ...(muted ? { speaking: false } : {}),
+          updated_at: new Date().toISOString()
+        })
+        .eq('room_code', roomCode)
+        .eq('uid', currentUserUid);
       if (muted) {
         setIsSpeaking(false);
-        db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/speaking`).set(false).catch(() => {});
       }
     }
   }, [joinVoice, attachMicrophoneStream, roomCode, currentUserUid, onToast, permissionErrorMsg]);
 
-  // Toggle Deafen (Headphones / Audio Output)
   const toggleDeafen = useCallback(() => {
     if (!isJoinedRef.current) {
       joinVoice(true);
@@ -554,11 +592,15 @@ export function useVoiceChat({
     });
 
     if (roomCode && currentUserUid) {
-      db.ref(`spy_rooms/${roomCode}/voiceStates/${currentUserUid}/deafened`).set(nextDeafened).catch(() => {});
+      supabase
+        .from('room_voice_states')
+        .update({ deafened: nextDeafened, updated_at: new Date().toISOString() })
+        .eq('room_code', roomCode)
+        .eq('uid', currentUserUid)
+        .then(() => {});
     }
   }, [roomCode, currentUserUid, joinVoice]);
 
-  // Clean up on unmount or room leave
   useEffect(() => {
     return () => {
       leaveVoice();

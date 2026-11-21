@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { dictionary } from '../translations';
 import { Language } from '../types';
-import { auth, db, firebase } from '../firebase';
-import firebaseAppletConfig from '../../firebase-applet-config.json';
+import { supabase, GOOGLE_OAUTH_CLIENT_ID } from '../supabase';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { sound } from '../audio';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { LanguageSelectorBar } from '../components/LanguageSelectorModal';
@@ -233,40 +233,42 @@ export const AuthScreen: React.FC<Props> = ({
   const isRtl = lang === 'ar';
 
   const syncUserProfileToDb = async (
-    user: firebase.User,
+    user: SupabaseUser,
     explicitName?: string,
-    providerType: 'google' | 'password' = 'password'
+    providerType: 'google' | 'password' = 'password',
+    claimUsername = false
   ) => {
+    const meta = (user.user_metadata || {}) as Record<string, string | undefined>;
     const cleanName =
       (explicitName || '').trim() ||
-      user.displayName ||
+      meta.full_name ||
+      meta.name ||
       (user.email ? user.email.split('@')[0] : 'Agent');
     const avatar =
-      user.photoURL ||
-      `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName || user.uid)}`;
+      meta.avatar_url ||
+      meta.picture ||
+      `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanName || user.id)}`;
 
     let finalName = cleanName;
     let finalAvatar = avatar;
 
     try {
-      const snap = await db.ref(`users/${user.uid}`).once('value');
-      const existing = snap.val() || {};
-      const patch: Record<string, unknown> = {};
-      if (!existing.name || explicitName) patch.name = cleanName;
-      if (!existing.avatar) patch.avatar = avatar;
-      if (!existing.createdAt) patch.createdAt = firebase.database.ServerValue.TIMESTAMP;
-      if (Object.keys(patch).length > 0) {
-        await db.ref(`users/${user.uid}`).update(patch);
+      const { data: prof } = await supabase.rpc('ensure_user_profile', {
+        p_name: explicitName ? cleanName : null,
+        p_avatar: avatar,
+        p_claim_username: claimUsername
+      });
+      if (prof) {
+        finalName = (prof as { name?: string }).name || cleanName;
+        finalAvatar = (prof as { avatar?: string }).avatar || avatar;
       }
-      finalName = existing.name || cleanName;
-      finalAvatar = existing.avatar || avatar;
     } catch {
-      // Non-fatal RTDB sync notice
+      // Non-fatal profile sync notice; App.tsx also ensures profile on session change
     }
 
     if (user.email) {
       saveAccountProfile({
-        uid: user.uid,
+        uid: user.id,
         email: user.email,
         name: finalName,
         avatar: finalAvatar,
@@ -275,46 +277,47 @@ export const AuthScreen: React.FC<Props> = ({
     }
   };
 
-  const mapAuthError = (err: { code?: string; message?: string }): { msg: string; showGoogleRetry?: boolean } => {
-    const code = err.code || '';
-    if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+  const mapAuthError = (err: { code?: string; message?: string; status?: number }): { msg: string; showGoogleRetry?: boolean } => {
+    const code = (err.code || '').toLowerCase();
+    const message = (err.message || '').toLowerCase();
+
+    if (
+      code.includes('invalid_credentials') ||
+      message.includes('invalid login credentials') ||
+      message.includes('invalid password')
+    ) {
       return { msg: t.errWrongCredentials };
     }
-    if (code === 'auth/user-not-found') {
+    if (code.includes('user_not_found') || message.includes('user not found')) {
       return { msg: t.errEmailNotFound };
     }
-    if (code === 'auth/email-already-in-use') {
+    if (
+      code.includes('email_exists') ||
+      code.includes('user_already_exists') ||
+      message.includes('already registered') ||
+      message.includes('already exists')
+    ) {
       return { msg: t.errEmailInUse };
     }
-    if (code === 'auth/weak-password') {
+    if (code.includes('weak_password') || message.includes('password should be')) {
       return { msg: t.errWeakPassword };
     }
-    if (code === 'auth/invalid-email') {
+    if (code.includes('invalid_email') || message.includes('unable to validate email') || message.includes('invalid email')) {
       return { msg: t.errInvalidEmail };
     }
-    if (code === 'auth/network-request-failed') {
+    if (message.includes('username already taken')) {
+      return { msg: t.errUsernameTaken };
+    }
+    if (message.includes('failed to fetch') || message.includes('network')) {
       return { msg: t.errNoInternet };
     }
-    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    if (message.includes('popup') || message.includes('cancel')) {
       return {
         msg: t.googleCancelNotice || copy.popupBlockedNotice,
         showGoogleRetry: true
       };
     }
-    if (code === 'auth/popup-blocked') {
-      return {
-        msg: copy.popupBlockedNotice,
-        showGoogleRetry: true
-      };
-    }
-    if (code === 'auth/unauthorized-domain') {
-      return {
-        msg: isRtl
-          ? 'هذا النطاق غير مصرح به في إعدادات Firebase Auth.'
-          : 'Domain not authorized in Firebase Auth.'
-      };
-    }
-    if (code === 'auth/too-many-requests') {
+    if (err.status === 429 || code.includes('over_request_rate_limit') || message.includes('rate limit') || message.includes('too many')) {
       return {
         msg:
           t.tooManyAttemptsNotice ||
@@ -378,11 +381,11 @@ export const AuthScreen: React.FC<Props> = ({
       }, 120000);
 
       window.addEventListener('spy-native-google-result', onResult as EventListener);
-      nativeAuth.signInWithGoogle(firebaseAppletConfig.oAuthClientId);
+      nativeAuth.signInWithGoogle(GOOGLE_OAUTH_CLIENT_ID);
     });
   };
 
-  // Single-step Google Auth: uses Native Android Account Picker inside APK (choose account -> Continue, zero password/2FA) and Popup/Redirect on Web
+  // Single-step Google Auth: uses Native Android Account Picker inside APK (choose account -> Continue, zero password/2FA) and OAuth redirect on Web
   const signInWithGoogleAccount = async (
     loginHint?: string,
     trackingKey = '__new_google__',
@@ -397,21 +400,22 @@ export const AuthScreen: React.FC<Props> = ({
       setLoading(true);
       setLoadingAccountKey(trackingKey);
 
-      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-
       const nativeAuth = (
         window as unknown as {
           SpyStationNativeAuth?: { isSupported?: () => boolean };
         }
       ).SpyStationNativeAuth;
 
-      if (!forceWebFallback && nativeAuth?.isSupported?.() && firebaseAppletConfig.oAuthClientId) {
+      if (!forceWebFallback && nativeAuth?.isSupported?.() && GOOGLE_OAUTH_CLIENT_ID) {
         const nativeRes = await triggerNativeAndroidGoogleSignIn();
         if (nativeRes.status === 'success') {
-          const cred = firebase.auth.GoogleAuthProvider.credential(nativeRes.idToken);
-          const credentialResult = await auth.signInWithCredential(cred);
-          if (credentialResult?.user) {
-            await syncUserProfileToDb(credentialResult.user, undefined, 'google');
+          const { data, error } = await supabase.auth.signInWithIdToken({
+            provider: 'google',
+            token: nativeRes.idToken
+          });
+          if (error) throw error;
+          if (data?.user) {
+            await syncUserProfileToDb(data.user, undefined, 'google');
             setAccountSheetOpen(false);
           }
           return;
@@ -419,44 +423,23 @@ export const AuthScreen: React.FC<Props> = ({
         if (nativeRes.status === 'cancel') {
           return;
         }
-        // If Play Services throws DEVELOPER_ERROR (10) because SHA-1 isn't registered in Firebase yet, fall back to browser/WebView OAuth cleanly
+        // Fallback to web OAuth flow if Play Services native fails
       }
 
-      const provider = new firebase.auth.GoogleAuthProvider();
-      provider.addScope('profile');
-      provider.addScope('email');
-      if (loginHint) {
-        provider.setCustomParameters({ login_hint: loginHint });
-      } else {
-        provider.setCustomParameters({ prompt: 'select_account' });
-      }
-
-      let credentialResult: firebase.auth.UserCredential | null = null;
-      try {
-        credentialResult = await auth.signInWithPopup(provider);
-      } catch (popupErr: unknown) {
-        const pErr = popupErr as { code?: string };
-        const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
-        if (
-          !isInIframe &&
-          (pErr.code === 'auth/popup-blocked' || pErr.code === 'auth/operation-not-supported-in-this-environment')
-        ) {
-          await auth.signInWithRedirect(provider);
-          return;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+          queryParams: loginHint ? { login_hint: loginHint } : { prompt: 'select_account' }
         }
-        throw popupErr;
-      }
-
-      if (credentialResult?.user) {
-        await syncUserProfileToDb(credentialResult.user, undefined, 'google');
-        setAccountSheetOpen(false);
-      }
+      });
+      if (error) throw error;
     } catch (err: unknown) {
-      const error = err as { code?: string; message?: string };
+      const error = err as { code?: string; message?: string; status?: number };
       const mapped = mapAuthError(error);
       setAuthFeedback({
         msg: mapped.msg,
-        kind: error.code === 'auth/popup-closed-by-user' ? 'info' : 'error',
+        kind: (error.message || '').toLowerCase().includes('cancel') ? 'info' : 'error',
         showGoogleRetry: mapped.showGoogleRetry
       });
     } finally {
@@ -502,13 +485,16 @@ export const AuthScreen: React.FC<Props> = ({
     sound.triggerHaptic('medium');
 
     try {
-      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-      const res = await auth.signInWithEmailAndPassword(inlinePasswordAccount.email, cleanPassword);
-      if (res.user) {
-        await syncUserProfileToDb(res.user, undefined, 'password');
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: inlinePasswordAccount.email,
+        password: cleanPassword
+      });
+      if (error) throw error;
+      if (data.user) {
+        await syncUserProfileToDb(data.user, undefined, 'password');
       }
     } catch (err: unknown) {
-      const mapped = mapAuthError(err as { code?: string; message?: string });
+      const mapped = mapAuthError(err as { code?: string; message?: string; status?: number });
       setAuthFeedback({ msg: mapped.msg, kind: 'error' });
       onToast(mapped.msg, 'danger');
     } finally {
@@ -550,8 +536,6 @@ export const AuthScreen: React.FC<Props> = ({
     setLoading(true);
 
     try {
-      await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-
       if (isSignUp) {
         if (!cleanUsername) {
           setLoading(false);
@@ -559,28 +543,44 @@ export const AuthScreen: React.FC<Props> = ({
           return onToast(t.errUsernameRequired, 'danger');
         }
 
-        const snap = await db.ref('usernames/' + cleanUsername.toLowerCase()).once('value');
-        if (snap.exists()) {
+        const { data: available } = await supabase.rpc('is_username_available', {
+          p_username: cleanUsername
+        });
+        if (available === false) {
           setLoading(false);
           setAuthFeedback({ msg: t.errUsernameTaken, kind: 'error' });
           return onToast(t.errUsernameTaken, 'danger');
         }
 
-        const res = await auth.createUserWithEmailAndPassword(cleanEmail, cleanPassword);
         const avatar = `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(cleanUsername)}`;
-        await db.ref('usernames/' + cleanUsername.toLowerCase()).set(true);
-        if (res.user) {
-          await res.user.updateProfile({ displayName: cleanUsername, photoURL: avatar });
-          await syncUserProfileToDb(res.user, cleanUsername, 'password');
+        const { data, error } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password: cleanPassword,
+          options: {
+            data: {
+              full_name: cleanUsername,
+              name: cleanUsername,
+              avatar_url: avatar
+            }
+          }
+        });
+        if (error) throw error;
+
+        if (data.user) {
+          await syncUserProfileToDb(data.user, cleanUsername, 'password', true);
         }
       } else {
-        const res = await auth.signInWithEmailAndPassword(cleanEmail, cleanPassword);
-        if (res.user) {
-          await syncUserProfileToDb(res.user, undefined, 'password');
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: cleanPassword
+        });
+        if (error) throw error;
+        if (data.user) {
+          await syncUserProfileToDb(data.user, undefined, 'password');
         }
       }
     } catch (err: unknown) {
-      const mapped = mapAuthError(err as { code?: string; message?: string });
+      const mapped = mapAuthError(err as { code?: string; message?: string; status?: number });
       setAuthFeedback({ msg: mapped.msg, kind: 'error' });
       onToast(mapped.msg, 'danger');
     } finally {
@@ -599,7 +599,10 @@ export const AuthScreen: React.FC<Props> = ({
     sound.triggerHaptic('light');
 
     try {
-      await auth.sendPasswordResetEmail(mail);
+      const { error } = await supabase.auth.resetPasswordForEmail(mail, {
+        redirectTo: window.location.origin
+      });
+      if (error) throw error;
       setResetSent(true);
       onToast(t.msgResetSent, 'success');
       setTimeout(() => {
@@ -607,7 +610,7 @@ export const AuthScreen: React.FC<Props> = ({
         setResetSent(false);
       }, 3000);
     } catch (err: unknown) {
-      const mapped = mapAuthError(err as { code?: string; message?: string });
+      const mapped = mapAuthError(err as { code?: string; message?: string; status?: number });
       onToast(mapped.msg, 'danger');
     } finally {
       setResetLoading(false);

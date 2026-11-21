@@ -41,7 +41,7 @@ const SHEET_COPY: Record<
     passwordBadge: 'البريد',
     removeTitle: 'إزالة الحساب',
     connecting: 'جاري الاتصال بـ Google...',
-    securityNote: 'مصادقة آمنة ومشفرة عبر Google و Firebase'
+    securityNote: 'مصادقة آمنة ومشفرة عبر Google و Supabase'
   },
   en: {
     title: 'Choose an account',
@@ -53,7 +53,7 @@ const SHEET_COPY: Record<
     passwordBadge: 'Email',
     removeTitle: 'Remove account',
     connecting: 'Connecting to Google...',
-    securityNote: 'Secured by Google Identity & Firebase Auth'
+    securityNote: 'Secured by Google Identity & Supabase Auth'
   },
   es: {
     title: 'Elegir una cuenta',
@@ -65,7 +65,7 @@ const SHEET_COPY: Record<
     passwordBadge: 'Correo',
     removeTitle: 'Eliminar cuenta',
     connecting: 'Conectando con Google...',
-    securityNote: 'Protegido por Google y Firebase Auth'
+    securityNote: 'Protegido por Google y Supabase Auth'
   },
   fr: {
     title: 'Choisir un compte',
@@ -77,7 +77,7 @@ const SHEET_COPY: Record<
     passwordBadge: 'E-mail',
     removeTitle: 'Supprimer le compte',
     connecting: 'Connexion à Google...',
-    securityNote: 'Sécurisé par Google et Firebase Auth'
+    securityNote: 'Sécurisé par Google et Supabase Auth'
   },
   de: {
     title: 'Konto auswählen',
@@ -89,7 +89,7 @@ const SHEET_COPY: Record<
     passwordBadge: 'E-Mail',
     removeTitle: 'Konto entfernen',
     connecting: 'Verbindung mit Google...',
-    securityNote: 'Gesichert durch Google & Firebase Auth'
+    securityNote: 'Gesichert durch Google & Supabase Auth'
   }
 };
 

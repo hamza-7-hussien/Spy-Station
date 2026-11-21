@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { db, firebase } from '../firebase';
+import { supabase } from '../supabase';
 import { sound } from '../audio';
 import { Language, PlayerData } from '../types';
-import { dictionary } from '../translations';
-import { Zap, X, Users, Radio, CheckCircle2, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Users, X, Radio, Loader2, Zap } from 'lucide-react';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 interface Props {
   lang: Language;
@@ -27,50 +27,35 @@ export const QuickMatchModal: React.FC<Props> = ({
   onMatchFound,
   onToast
 }) => {
-  const t = dictionary[lang];
   const [searchingSeconds, setSearchingSeconds] = useState(0);
   const [statusText, setStatusText] = useState<'scanning' | 'room_found' | 'launching'>('scanning');
-  const [matchedRoomCode, setMatchedRoomCode] = useState<string | null>(null);
   const [joinedPlayers, setJoinedPlayers] = useState<PlayerData[]>([]);
   const [targetPlayersCount] = useState<number>(4);
   const [countdown, setCountdown] = useState<number | null>(null);
 
   const activeRoomRef = useRef<string | null>(null);
-  const isHostRef = useRef<boolean>(false);
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const searchPollIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const roomListenerRef = useRef<(() => void) | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
   const hasLaunchedRef = useRef<boolean>(false);
   const countdownStartedRef = useRef<boolean>(false);
 
-  // Clean exit helper
   const cleanUpMatchmaking = async () => {
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-    if (searchPollIntervalRef.current) clearInterval(searchPollIntervalRef.current);
-    if (roomListenerRef.current) {
-      roomListenerRef.current();
-      roomListenerRef.current = null;
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
     }
 
     const roomCode = activeRoomRef.current;
     if (roomCode && !hasLaunchedRef.current) {
       try {
-        const playerRef = db.ref(`spy_rooms/${roomCode}/players/${currentUserUid}`);
-        await playerRef.remove();
-
-        // Check if room became empty
-        const snap = await db.ref(`spy_rooms/${roomCode}/players`).once('value');
-        if (!snap.exists() || Object.keys(snap.val() || {}).length === 0) {
-          await db.ref(`spy_rooms/${roomCode}`).remove();
-          await db.ref(`spy_quick_match_queue/${roomCode}`).remove();
-        }
+        await supabase.rpc('leave_room_clean', { p_room_code: roomCode });
       } catch {
         // ignore
       }
     }
 
     activeRoomRef.current = null;
-    isHostRef.current = false;
   };
 
   useEffect(() => {
@@ -78,7 +63,6 @@ export const QuickMatchModal: React.FC<Props> = ({
       cleanUpMatchmaking();
       setSearchingSeconds(0);
       setStatusText('scanning');
-      setMatchedRoomCode(null);
       setJoinedPlayers([]);
       setCountdown(null);
       hasLaunchedRef.current = false;
@@ -89,13 +73,11 @@ export const QuickMatchModal: React.FC<Props> = ({
     sound.playTone(600, 'triangle', 0.15);
     sound.triggerHaptic('medium');
 
-    // 1. Timer ticker
     setSearchingSeconds(0);
     timerIntervalRef.current = setInterval(() => {
       setSearchingSeconds(prev => prev + 1);
     }, 1000);
 
-    // 2. Start Matchmaking algorithm
     startMatchmaking();
 
     return () => {
@@ -107,67 +89,34 @@ export const QuickMatchModal: React.FC<Props> = ({
     try {
       setStatusText('scanning');
 
-      // Step A: Indexed & bounded query for active quick match queue rooms (prevents full-table scan)
-      const queueSnap = await db
-        .ref('spy_quick_match_queue')
-        .orderByChild('createdAt')
-        .limitToLast(12)
-        .once('value');
-      const queueRooms = (queueSnap.val() || {}) as Record<string, { createdAt?: number }>;
-      const now = Date.now();
+      const cutoffIso = new Date(Date.now() - 120000).toISOString();
+      const { data: openRooms, error } = await supabase
+        .from('rooms')
+        .select('code, max_players, is_quick_match, room_players(uid)')
+        .eq('visibility', 'public')
+        .eq('status', 'waiting')
+        .gte('created_at', cutoffIso)
+        .order('is_quick_match', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(12);
 
-      const freshQueueCodes = Object.keys(queueRooms).filter(
-        code => now - (queueRooms[code]?.createdAt || 0) < 120000
-      );
+      if (error) throw error;
 
       let targetCode: string | null = null;
-
-      // Batch room lookups in parallel instead of sequential N+1 awaiting inside a loop
-      if (freshQueueCodes.length > 0) {
-        const roomSnaps = await Promise.all(
-          freshQueueCodes.map(code =>
-            db.ref(`spy_rooms/${code}`).once('value').then(s => ({ code, data: s.val() })).catch(() => null)
-          )
-        );
-        for (const item of roomSnaps) {
-          const rData = item?.data;
-          if (rData && rData.status === 'waiting') {
-            const pCount = Object.keys(rData.players || {}).length;
-            if (pCount < (rData.maxPlayers || 4)) {
-              targetCode = item.code;
-              break;
-            }
-          }
-        }
-      }
-
-      // If no queue room, check indexed public rooms waiting for players (bounded limit)
-      if (!targetCode) {
-        const publicSnap = await db
-          .ref('spy_rooms')
-          .orderByChild('visibility')
-          .equalTo('public')
-          .limitToLast(12)
-          .once('value');
-        const pubRooms = publicSnap.val() || {};
-        for (const code in pubRooms) {
-          const rData = pubRooms[code];
-          if (rData && rData.status === 'waiting') {
-            const pCount = Object.keys(rData.players || {}).length;
-            if (pCount < (rData.maxPlayers || 20) && pCount < targetPlayersCount) {
-              targetCode = code;
-              break;
-            }
-          }
+      for (const r of openRooms || []) {
+        const playersArr = Array.isArray(r.room_players) ? r.room_players : [];
+        const pCount = playersArr.length;
+        const cap = Math.min(r.max_players || 4, targetPlayersCount);
+        if (pCount > 0 && pCount < cap) {
+          targetCode = r.code;
+          break;
         }
       }
 
       if (targetCode) {
-        // Found an open room! Join as player
-        joinExistingRoom(targetCode);
+        await joinExistingRoom(targetCode);
       } else {
-        // No room available: create a new Quick Match queue room and wait for others
-        createNewQueueRoom();
+        await createNewQueueRoom();
       }
     } catch (err) {
       console.warn('Matchmaking error:', err);
@@ -177,112 +126,127 @@ export const QuickMatchModal: React.FC<Props> = ({
   };
 
   const joinExistingRoom = async (code: string) => {
+    const { data, error } = await supabase.rpc('join_room_safe', {
+      p_room_code: code,
+      p_name: currentUserName,
+      p_avatar: currentUserAvatar
+    });
+
+    if (error || !data?.ok) {
+      await createNewQueueRoom();
+      return;
+    }
+
     activeRoomRef.current = code;
-    isHostRef.current = false;
-    setMatchedRoomCode(code);
     setStatusText('room_found');
-
-    const playerData: PlayerData = {
-      uid: currentUserUid,
-      name: currentUserName,
-      avatar: currentUserAvatar,
-      joinedAt: Date.now(),
-      isSpectator: false,
-      postGame: 'inLobby'
-    };
-
-    const pRef = db.ref(`spy_rooms/${code}/players/${currentUserUid}`);
-    await pRef.set(playerData);
-    pRef.onDisconnect().remove();
     listenToRoom(code);
   };
 
   const createNewQueueRoom = async () => {
-    // Generate clean alphanumeric code
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     let code = '';
     for (let i = 0; i < 6; i++) {
       code += chars[Math.floor(Math.random() * chars.length)];
     }
 
-    activeRoomRef.current = code;
-    isHostRef.current = true;
-    setMatchedRoomCode(code);
-    setStatusText('room_found');
+    const { error: roomErr } = await supabase.from('rooms').insert({
+      code,
+      name: lang === 'ar' ? `مباراة سريعة #${code}` : `Quick Match #${code}`,
+      original_host_uid: currentUserUid,
+      host_uid: currentUserUid,
+      host_name: currentUserName,
+      status: 'waiting',
+      visibility: 'public',
+      is_quick_match: true,
+      max_players: targetPlayersCount,
+      spy_count: 1,
+      turn_seconds: 20,
+      game_mode: 'normal',
+      categories: ['players', 'food', 'places', 'movies', 'games', 'animals', 'jobs', 'singers']
+    });
 
-    const playerData: PlayerData = {
+    if (roomErr) throw roomErr;
+
+    const { error: playerErr } = await supabase.from('room_players').insert({
+      room_code: code,
       uid: currentUserUid,
       name: currentUserName,
       avatar: currentUserAvatar,
-      joinedAt: Date.now(),
-      isSpectator: false,
-      postGame: 'inLobby'
-    };
-
-    const newRoom = {
-      roomCode: code,
-      name: lang === 'ar' ? `مباراة سريعة #${code}` : `Quick Match #${code}`,
-      originalHostUid: currentUserUid,
-      hostUid: currentUserUid,
-      status: 'waiting',
-      visibility: 'public',
-      isQuickMatch: true,
-      maxPlayers: targetPlayersCount,
-      spyCount: 1,
-      turnSeconds: 20,
-      gameMode: 'normal',
-      categories: ['players', 'food', 'places', 'movies', 'games', 'animals', 'jobs', 'singers'],
-      createdAt: firebase.database.ServerValue.TIMESTAMP,
-      players: {
-        [currentUserUid]: playerData
-      }
-    };
-
-    await db.ref(`spy_rooms/${code}`).set(newRoom);
-    await db.ref(`spy_quick_match_queue/${code}`).set({
-      createdAt: Date.now(),
-      hostUid: currentUserUid
+      is_spectator: false,
+      is_bot: false,
+      post_game: 'inLobby'
     });
 
+    if (playerErr) throw playerErr;
+
+    activeRoomRef.current = code;
+    setStatusText('room_found');
     listenToRoom(code);
   };
 
-  const listenToRoom = (code: string) => {
-    const roomRef = db.ref(`spy_rooms/${code}`);
+  const refreshRoomSnapshot = async (code: string) => {
+    const [{ data: roomRow }, { data: playerRows }] = await Promise.all([
+      supabase.from('rooms').select('status').eq('code', code).maybeSingle(),
+      supabase
+        .from('room_players')
+        .select('uid, name, avatar, joined_at, is_spectator, is_bot')
+        .eq('room_code', code)
+        .order('joined_at', { ascending: true })
+    ]);
 
-    const onRoomChange = (snap: firebase.database.DataSnapshot) => {
-      const room = snap.val();
-      if (!room) return;
+    const playersList: PlayerData[] = (playerRows || []).map(p => ({
+      uid: p.uid,
+      name: p.name,
+      avatar: p.avatar,
+      joinedAt: p.joined_at ? new Date(p.joined_at).getTime() : Date.now(),
+      isSpectator: p.is_spectator,
+      isBot: p.is_bot
+    }));
 
-      const playersObj = room.players || {};
-      const playersList = Object.values(playersObj) as PlayerData[];
-      setJoinedPlayers(playersList);
+    setJoinedPlayers(playersList);
 
-      // Check if room has been launched or reached required players
-      if (room.status === 'playing') {
-        hasLaunchedRef.current = true;
+    if (roomRow?.status === 'playing') {
+      hasLaunchedRef.current = true;
+      sound.playMatchFound();
+      onMatchFound(code);
+      onClose();
+      return;
+    }
+
+    if (playersList.length >= targetPlayersCount) {
+      setStatusText('launching');
+      if (!countdownStartedRef.current) {
+        countdownStartedRef.current = true;
         sound.playMatchFound();
-        onMatchFound(code);
-        onClose();
-        return;
+        setCountdown(3);
       }
-
-      // If we have enough players (4 or targetPlayersCount), start countdown once
-      if (playersList.length >= targetPlayersCount) {
-        setStatusText('launching');
-        if (!countdownStartedRef.current) {
-          countdownStartedRef.current = true;
-          sound.playMatchFound();
-          setCountdown(3);
-        }
-      }
-    };
-
-    roomRef.on('value', onRoomChange);
-    roomListenerRef.current = () => roomRef.off('value', onRoomChange);
+    }
   };
 
-  // Launch countdown effect
+  const listenToRoom = (code: string) => {
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
+
+    refreshRoomSnapshot(code);
+
+    const channel = supabase
+      .channel(`quick-match:${code}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rooms', filter: `code=eq.${code}` },
+        () => refreshRoomSnapshot(code)
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'room_players', filter: `room_code=eq.${code}` },
+        () => refreshRoomSnapshot(code)
+      )
+      .subscribe();
+
+    channelRef.current = channel;
+  };
+
   useEffect(() => {
     if (countdown === null) return;
 
@@ -295,7 +259,6 @@ export const QuickMatchModal: React.FC<Props> = ({
     }
 
     if (countdown === 0) {
-      // Launch game!
       hasLaunchedRef.current = true;
       if (activeRoomRef.current) {
         onMatchFound(activeRoomRef.current);
@@ -304,7 +267,6 @@ export const QuickMatchModal: React.FC<Props> = ({
     }
   }, [countdown, onMatchFound, onClose]);
 
-  // Lock background scroll when matchmaking modal is open
   useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
@@ -327,7 +289,6 @@ export const QuickMatchModal: React.FC<Props> = ({
         className="relative w-full max-w-md p-6 rounded-3xl bg-slate-900 border-2 border-amber-500/40 shadow-[0_0_50px_rgba(245,158,11,0.25)] space-y-6 text-center overflow-hidden overscroll-contain"
         onWheel={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]">
@@ -354,19 +315,13 @@ export const QuickMatchModal: React.FC<Props> = ({
           </button>
         </div>
 
-        {/* Central Animated Sci-Fi Radar */}
         <div className="relative w-40 h-40 mx-auto flex items-center justify-center">
-          {/* Outer Rotating Radar Ring */}
           <div className="absolute inset-0 rounded-full border border-amber-500/30 animate-ping opacity-25" />
           <div className="absolute inset-2 rounded-full border border-sky-400/20" />
           <div className="absolute inset-6 rounded-full border border-amber-400/40 animate-spin duration-[4000ms]" />
-
-          {/* Radar Sweep Line */}
           <div className="absolute inset-0 flex items-center justify-center animate-spin duration-[2500ms]">
             <div className="w-1/2 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-amber-300 origin-right ml-auto shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
           </div>
-
-          {/* Center Avatar or Pulse */}
           <div className="relative z-10 flex flex-col items-center justify-center">
             <div className="w-16 h-16 rounded-full p-1 bg-gradient-to-tr from-amber-500 to-sky-400 shadow-[0_0_20px_rgba(245,158,11,0.5)]">
               <img
@@ -378,7 +333,6 @@ export const QuickMatchModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Searching Status & Timer */}
         <div className="space-y-1">
           <div className="font-mono text-2xl font-black text-amber-400 tracking-wider">
             {formatTimer(searchingSeconds)}
@@ -401,7 +355,6 @@ export const QuickMatchModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Real-Time Astronauts Found Slots */}
         <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
           <div className="flex items-center justify-between text-xs font-bold text-slate-400">
             <span className="flex items-center gap-1.5">
@@ -454,7 +407,6 @@ export const QuickMatchModal: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Cancel Button */}
         <button
           type="button"
           onClick={() => {

@@ -1,5 +1,5 @@
 // Spy Station Progressive Web App Service Worker (PWA Offline Standalone)
-const CACHE_NAME = 'spy-station-pwa-v3.0.0';
+const CACHE_NAME = 'spy-station-pwa-v3.1.0';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
@@ -52,12 +52,11 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Ignore Firebase realtime websockets/polling, chrome extensions
+  // Ignore Supabase realtime websockets/API requests and chrome extensions
   if (
     url.protocol.startsWith('chrome-extension') ||
-    url.hostname.includes('firebaseio.com') ||
-    url.hostname.includes('googleapis.com') ||
-    url.hostname.includes('identitytoolkit')
+    url.hostname.includes('supabase.co') ||
+    url.hostname.includes('supabase.in')
   ) {
     return;
   }

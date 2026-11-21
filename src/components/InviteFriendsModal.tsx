@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { dictionary } from '../translations';
 import { Language, FriendEntry } from '../types';
 import { X, UserPlus, Check } from 'lucide-react';
-import { db, firebase } from '../firebase';
+import { supabase } from '../supabase';
 import { sound } from '../audio';
 import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
@@ -46,15 +46,13 @@ export const InviteFriendsModal: React.FC<Props> = ({
     try {
       sound.playTone(600, 'sine', 0.1);
       sound.triggerHaptic('light');
-      await Promise.all([
-        db.ref(`users/${friendUid}/roomInvites/${currentUserUid}`).set({
-          roomCode: roomCode,
-          fromName: currentUserName,
-          fromAvatar: currentUserAvatar,
-          timestamp: firebase.database.ServerValue.TIMESTAMP
-        }),
-        db.ref(`spy_rooms/${roomCode}/invitedPlayers/${friendUid}`).set(true)
-      ]);
+      const { error } = await supabase.rpc('invite_friend_to_room', {
+        p_room_code: roomCode,
+        p_friend_uid: friendUid,
+        p_from_name: currentUserName,
+        p_from_avatar: currentUserAvatar
+      });
+      if (error) throw error;
       setInvited(prev => ({ ...prev, [friendUid]: true }));
       onToast(t.msgInviteSent.replace('{name}', friendName), 'success');
     } catch {

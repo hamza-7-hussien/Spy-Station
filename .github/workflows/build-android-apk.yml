@@ -44,6 +44,10 @@ jobs:
           npm install --no-save @capacitor/core@7 @capacitor/cli@7 @capacitor/android@7
 
       - name: Build web bundle
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          VITE_GOOGLE_OAUTH_CLIENT_ID: ${{ vars.VITE_GOOGLE_OAUTH_CLIENT_ID }}
         run: npm run build
 
       - name: Generate Android project via Capacitor
