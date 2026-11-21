@@ -1,5 +1,5 @@
 // Spy Station Progressive Web App Service Worker (PWA Offline Standalone)
-const CACHE_NAME = 'spy-station-pwa-v3.1.2';
+const CACHE_NAME = 'spy-station-pwa-v3.1.3';
 const PRECACHE_ASSETS = [
   './',
   './index.html',

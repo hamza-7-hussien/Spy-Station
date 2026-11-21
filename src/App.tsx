@@ -69,7 +69,7 @@ import {
   validateGameStart
 } from './gameEngine';
 
-const CURRENT_APP_VERSION = '3.1.2';
+const CURRENT_APP_VERSION = '3.1.3';
 const ROUND_ANNOUNCE_MS = 2400;
 
 function toMs(val?: string | number | null): number | undefined {
