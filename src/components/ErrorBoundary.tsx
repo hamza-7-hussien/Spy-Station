@@ -42,7 +42,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <div
           dir="rtl"
-          className="h-[100dvh] w-full bg-[#030712] text-slate-100 flex items-center justify-center p-6 select-none"
+          className="h-full w-full bg-[#030712] text-slate-100 flex items-center justify-center p-6 select-none"
         >
           <div className="w-full max-w-sm rounded-3xl bg-slate-900 border border-sky-500/30 p-6 text-center shadow-2xl space-y-4">
             <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/15 border border-rose-500/40 flex items-center justify-center text-2xl">

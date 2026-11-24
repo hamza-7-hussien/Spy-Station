@@ -21,7 +21,7 @@ export const AppBootSkeleton: React.FC<{ lang?: Language }> = ({ lang = 'ar' }) 
     dir={lang === 'ar' ? 'rtl' : 'ltr'}
     aria-busy="true"
     aria-label={lang === 'ar' ? 'جاري تحميل المحطة...' : 'Loading Spy Station...'}
-    className="h-[100dvh] w-full flex flex-col overflow-hidden bg-[#030712] text-slate-100 relative"
+    className="h-full w-full flex flex-col overflow-hidden bg-[#030712] text-slate-100 relative"
   >
     <div className="stars-overlay" />
     <main className="flex-1 w-full overflow-hidden px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-4 relative z-10">
@@ -154,7 +154,7 @@ export const RoomLobbySkeleton: React.FC<{ lang?: Language; roomCode?: string | 
   <div
     dir={lang === 'ar' ? 'rtl' : 'ltr'}
     aria-busy="true"
-    className="h-[100dvh] w-full overflow-hidden flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative"
+    className="h-full w-full overflow-hidden flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative"
   >
     <div className="stars-overlay" />
     <div className="w-full max-w-xl mx-auto space-y-4 pt-2 relative z-10">

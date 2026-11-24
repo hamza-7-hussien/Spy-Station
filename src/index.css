@@ -10,17 +10,27 @@
     --danger-red: #ef4444;
   }
 
-  html, body, #root {
+  html, body {
     height: 100%;
     width: 100%;
     margin: 0;
     padding: 0;
     overflow: hidden;
-    background-color: #030712;
+    background-color: #030712 !important;
     color-scheme: dark;
     overscroll-behavior-y: none;
     overscroll-behavior-x: none;
     overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  #root {
+    height: var(--app-height, 100%);
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #030712;
   }
 
   body {

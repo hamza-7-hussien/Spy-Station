@@ -640,7 +640,7 @@ export const AuthScreen: React.FC<Props> = ({
   const primarySaved = savedAccounts[0] || null;
 
   return (
-    <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col justify-between bg-[#030712] text-slate-100 overflow-hidden overscroll-none relative z-10">
+    <div className="h-full max-h-full w-full flex flex-col justify-between bg-[#030712] text-slate-100 overflow-hidden overscroll-none relative z-10">
       {/* Subtle radial atmosphere */}
       <div
         aria-hidden="true"
@@ -687,7 +687,8 @@ export const AuthScreen: React.FC<Props> = ({
       </header>
 
       {/* Main Responsive Stage */}
-      <main className="w-full max-w-5xl mx-auto px-4 sm:px-8 my-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center relative z-10">
+      <main className="flex-1 w-full overflow-y-auto overflow-x-hidden overscroll-none flex items-center relative z-10">
+        <div className="w-full max-w-5xl mx-auto px-4 sm:px-8 py-4 my-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
         {/* Desktop Showcase Panel */}
         <section className="hidden lg:flex lg:col-span-6 flex-col justify-between rounded-3xl overflow-hidden bg-slate-900 border border-slate-800 aspect-[4/3] relative">
           {!bannerError ? (
@@ -1078,6 +1079,7 @@ export const AuthScreen: React.FC<Props> = ({
             )}
           </div>
         </section>
+        </div>
       </main>
 
       {/* Bottom Safe-Area Spacer */}

@@ -69,7 +69,7 @@ import {
   validateGameStart
 } from './gameEngine';
 
-const CURRENT_APP_VERSION = '3.1.3';
+const CURRENT_APP_VERSION = '3.1.4';
 const ROUND_ANNOUNCE_MS = 2400;
 
 function toMs(val?: string | number | null): number | undefined {
@@ -2110,7 +2110,7 @@ export default function App() {
 
   if (inCreateModal) {
     return (
-      <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative">
+      <div className="h-full w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative">
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
         <CreateRoomScreen
@@ -2160,7 +2160,7 @@ export default function App() {
     const myPlayer = (roomData.players || {})[currentUser.id];
 
     return (
-      <div className="h-[100dvh] w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative selection:bg-sky-500/30">
+      <div className="h-full w-full overflow-y-auto overflow-x-hidden overscroll-none flex flex-col items-center justify-start p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] bg-[#030712] relative selection:bg-sky-500/30">
         <div className="stars-overlay" />
         <OfflineIndicator lang={lang} />
 
@@ -2388,7 +2388,7 @@ export default function App() {
   const badgeCount = Object.keys(friendRequests || {}).length + Object.keys(roomInvites || {}).length;
 
   return (
-    <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col overflow-hidden bg-[#030712] relative selection:bg-sky-500/30">
+    <div className="h-full max-h-full w-full flex flex-col overflow-hidden bg-[#030712] relative selection:bg-sky-500/30">
       <div className="stars-overlay" />
       <OfflineIndicator lang={lang} />
 
